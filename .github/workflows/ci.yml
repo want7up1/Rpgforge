@@ -37,7 +37,6 @@ jobs:
       TEST_DATABASE_URL: postgresql+psycopg://rpg:rpg@localhost:5432/rpgforge_test
       DATABASE_URL: postgresql+psycopg://rpg:rpg@localhost:5432/rpgforge_test
       REDIS_URL: redis://localhost:6379/0
-      SETTINGS_ADMIN_TOKEN: ci-token
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
