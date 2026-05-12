@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +15,7 @@ from app.schemas.turn import GMRuntimeOutput, TurnCreate
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
 from app.services.drift_validator import DriftValidator
+from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.lore_retriever import LoreRetriever
 from app.services.mode_matcher import select_mode
@@ -31,6 +33,16 @@ GameplayProgressCallback = Callable[[str], Awaitable[None]]
 
 class GameplayValidationError(RuntimeError):
     pass
+
+
+@dataclass
+class TurnRuntimeContext:
+    game: Game
+    player_input: str
+    selected_mode: Mode | None
+    recent_turns: list[Turn]
+    related_lore: list[Any]
+    summaries: dict[str, Any]
 
 
 class GameplayService:
@@ -53,64 +65,15 @@ class GameplayService:
         self.drift_validator = drift_validator or DriftValidator(router=self.router)
 
     async def run_turn(self, db: Session, game: Game, payload: TurnCreate) -> Turn:
-        apply_pending_state_deltas(db, game)
-        player_input = payload.resolved_player_input
-        selected_mode = select_mode(player_input, game.modes)
-        recent_turns = self._recent_turns(db, game.id)
-        related_lore, summaries = self._load_runtime_inputs(
-            db=db,
-            game=game,
-            player_input=player_input,
-            selected_mode=selected_mode,
-            recent_turns=recent_turns,
-        )
-        director_decision = await self.story_director.plan(
-            game=game,
-            player_input=player_input,
-            selected_mode=selected_mode,
-            recent_turns=recent_turns,
-            related_lore=related_lore,
-            summaries=summaries,
-        )
-        messages = self._build_contextual_runtime_messages(
-            game=game,
-            player_input=player_input,
-            selected_mode=selected_mode,
-            recent_turns=recent_turns,
-            related_lore=related_lore,
-            summaries=summaries,
-            director_decision=director_decision,
-        )
-
-        result = await self.router.use_pro("gm_runtime", messages, json_mode=True)
-        runtime_output = self._parse_runtime_output(result.content)
-        runtime_output, model_used = await self._validate_and_maybe_rewrite(
-            game=game,
-            player_input=player_input,
-            selected_mode=selected_mode,
-            recent_turns=recent_turns,
-            related_lore=related_lore,
-            summaries=summaries,
-            director_decision=director_decision,
-            runtime_output=runtime_output,
-            model_used=result.model,
-        )
-        next_turn_number = self._next_turn_number(db, game.id)
-
-        turn = Turn(
+        context = await self.load_turn_runtime_context(db, game, payload)
+        runtime_output, model_used = await self.generate_turn_runtime_output(context)
+        turn = self.persist_runtime_turn(
+            db,
             game_id=game.id,
-            turn_number=next_turn_number,
-            player_input=player_input,
-            gm_output=runtime_output.narrative,
-            visible_summary="\n".join(runtime_output.visible_clues),
-            hidden_summary=None,
-            state_delta_json={},
-            action_options_json=[option.model_dump() for option in runtime_output.action_options],
+            player_input=context.player_input,
+            runtime_output=runtime_output,
             model_used=model_used,
         )
-        db.add(turn)
-        db.commit()
-        db.refresh(turn)
         await self._create_state_delta(db, game, turn)
         return turn
 
@@ -123,6 +86,36 @@ class GameplayService:
         on_progress: GameplayProgressCallback | None = None,
         extract_state: bool = True,
     ) -> Turn:
+        context = await self.load_turn_runtime_context(db, game, payload, on_progress=on_progress)
+        runtime_output, model_used = await self.generate_turn_runtime_output(
+            context,
+            on_update=on_update,
+            on_progress=on_progress,
+        )
+        if on_progress:
+            await on_progress("GM 回复已完成，正在写入回合。")
+
+        turn = self.persist_runtime_turn(
+            db,
+            game_id=game.id,
+            player_input=context.player_input,
+            runtime_output=runtime_output,
+            model_used=model_used,
+        )
+
+        if extract_state:
+            if on_progress:
+                await on_progress("正在调用 DeepSeek Flash 提取状态变更。")
+            await self._create_state_delta(db, game, turn)
+        return turn
+
+    async def load_turn_runtime_context(
+        self,
+        db: Session,
+        game: Game,
+        payload: TurnCreate,
+        on_progress: GameplayProgressCallback | None = None,
+    ) -> TurnRuntimeContext:
         apply_pending_state_deltas(db, game)
         player_input = payload.resolved_player_input
         selected_mode = select_mode(player_input, game.modes)
@@ -136,53 +129,81 @@ class GameplayService:
             selected_mode=selected_mode,
             recent_turns=recent_turns,
         )
-        if on_progress:
-            await on_progress("正在规划本回合剧情导演决策。")
-        director_decision = await self.story_director.plan(
+        return TurnRuntimeContext(
             game=game,
             player_input=player_input,
             selected_mode=selected_mode,
             recent_turns=recent_turns,
             related_lore=related_lore,
             summaries=summaries,
+        )
+
+    async def generate_turn_runtime_output(
+        self,
+        context: TurnRuntimeContext,
+        on_update: GameplayStreamUpdateCallback | None = None,
+        on_progress: GameplayProgressCallback | None = None,
+    ) -> tuple[GMRuntimeOutput, str]:
+        if on_progress:
+            await on_progress("正在规划本回合剧情导演决策。")
+        director_decision = await self.story_director.plan(
+            game=context.game,
+            player_input=context.player_input,
+            selected_mode=context.selected_mode,
+            recent_turns=context.recent_turns,
+            related_lore=context.related_lore,
+            summaries=context.summaries,
         )
         if on_progress:
             await on_progress("剧情导演决策已完成，正在调用 GM 书写剧情。")
         messages = self._build_contextual_runtime_messages(
-            game=game,
-            player_input=player_input,
-            selected_mode=selected_mode,
-            recent_turns=recent_turns,
-            related_lore=related_lore,
-            summaries=summaries,
+            game=context.game,
+            player_input=context.player_input,
+            selected_mode=context.selected_mode,
+            recent_turns=context.recent_turns,
+            related_lore=context.related_lore,
+            summaries=context.summaries,
             director_decision=director_decision,
         )
 
-        runtime_output, model_used = await self._collect_runtime_output_stream(
-            messages,
-            on_update=on_update,
-        )
+        if on_update is None:
+            result = await self.router.use_pro("gm_runtime", messages, json_mode=True)
+            runtime_output = self._parse_runtime_output(result.content)
+            model_used = result.model
+        else:
+            runtime_output, model_used = await self._collect_runtime_output_stream(
+                messages,
+                on_update=on_update,
+            )
         if on_progress:
             await on_progress("正在校验剧情是否偏离剧本锚点。")
         runtime_output, model_used = await self._validate_and_maybe_rewrite(
-            game=game,
-            player_input=player_input,
-            selected_mode=selected_mode,
-            recent_turns=recent_turns,
-            related_lore=related_lore,
-            summaries=summaries,
+            game=context.game,
+            player_input=context.player_input,
+            selected_mode=context.selected_mode,
+            recent_turns=context.recent_turns,
+            related_lore=context.related_lore,
+            summaries=context.summaries,
             director_decision=director_decision,
             runtime_output=runtime_output,
             model_used=model_used,
             on_update=on_update,
             on_progress=on_progress,
         )
-        if on_progress:
-            await on_progress("GM 回复已完成，正在写入回合。")
+        return runtime_output, model_used
 
-        next_turn_number = self._next_turn_number(db, game.id)
+    def persist_runtime_turn(
+        self,
+        db: Session,
+        *,
+        game_id,
+        player_input: str,
+        runtime_output: GMRuntimeOutput,
+        model_used: str,
+    ) -> Turn:
+        next_turn_number = self._next_turn_number(db, game_id)
         turn = Turn(
-            game_id=game.id,
+            game_id=game_id,
             turn_number=next_turn_number,
             player_input=player_input,
             gm_output=runtime_output.narrative,
@@ -193,22 +214,18 @@ class GameplayService:
             model_used=model_used,
         )
         db.add(turn)
+        touch_game(db, game_id)
         db.commit()
         db.refresh(turn)
-
-        if extract_state:
-            if on_progress:
-                await on_progress("正在调用 DeepSeek Flash 提取状态变更。")
-            await self._create_state_delta(db, game, turn)
         return turn
 
-    async def _create_state_delta(self, db: Session, game: Game, turn: Turn) -> None:
+    async def _create_state_delta(self, db: Session, game: Game, turn: Turn) -> bool:
         try:
             delta_json = await self.state_extractor.extract(game, turn)
         except (DeepSeekError, StateExtractorValidationError) as exc:
             logger.warning("State delta extraction failed for turn %s: %s", turn.id, exc)
             await self._update_context_after_turn(db, game, turn, {})
-            return
+            return False
 
         turn.state_delta_json = delta_json
         approved_at = datetime.now(UTC)
@@ -216,6 +233,7 @@ class GameplayService:
             game.state.state_json = apply_state_delta(game.state, turn, delta_json)
             game.state.current_turn = max(game.state.current_turn, turn.turn_number)
             db.add(game.state)
+        touch_game(db, game.id)
         db.add(turn)
         db.add(
             StateDelta(
@@ -229,6 +247,7 @@ class GameplayService:
         db.commit()
         db.refresh(turn)
         await self._update_context_after_turn(db, game, turn, delta_json)
+        return True
 
     def _load_runtime_inputs(
         self,

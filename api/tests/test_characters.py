@@ -74,7 +74,8 @@ def test_generated_game_creates_character_profiles(db_session) -> None:
     body = response.json()
     assert [character["name"] for character in body] == ["沈砚", "陆沉舟"]
     assert body[0]["role"] == "protagonist"
-    assert body[0]["portrait_prompt"]
+    assert body[0]["aliases"] == []
+    assert body[0]["portrait_prompt"] is None
     assert body[1]["appearance"] == "黑伞、灰白长衫、眼神冷淡。"
 
 

@@ -13,6 +13,7 @@ from app.models.game import Game
 from app.models.summary import Summary
 from app.models.turn import Turn
 from app.services.deepseek_client import DeepSeekError
+from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
 from app.services.prompt_loader import load_prompt_template
@@ -255,6 +256,7 @@ class ContextCompressor:
                 db.add(game.state)
 
         db.add(turn)
+        touch_game(db, game.id)
         db.commit()
         db.refresh(turn)
 

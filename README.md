@@ -14,7 +14,7 @@ It combines a rule/world generator, a focused play interface, persistent game st
 - Worldbook retrieval with deterministic local vectors and pgvector.
 - Context summaries for turn, chapter, and long-term memory.
 - Character archives with user-uploaded portrait images.
-- Mobile-friendly play UI, desktop dashboard pages, light/dark/auto theme switching, and Markdown story rendering.
+- Mobile-friendly play UI, desktop dashboard pages, uploaded character portraits, and Markdown story rendering.
 - Single public web port in Docker; the browser talks to Next.js, and Next.js proxies API traffic internally.
 
 ## Architecture
@@ -28,17 +28,17 @@ Next.js web
   |
   | Docker internal network
   v
-FastAPI api ---- Redis worker jobs
-  |
-  v
-PostgreSQL + pgvector
+FastAPI api ---- Redis/RQ queue ---- worker
+  |                                |
+  v                                v
+PostgreSQL + pgvector <------------
 ```
 
 Services are defined in `docker-compose.yml`:
 
 - `web`: Next.js frontend, exposed on host port `3000`.
 - `api`: FastAPI backend, only reachable inside the Docker network by default.
-- `worker`: background worker for long-running generation and turn jobs.
+- `worker`: RQ worker that consumes `rpgforge` queue jobs for generation and turns.
 - `postgres`: PostgreSQL with pgvector.
 - `redis`: job queue and progress cache.
 
@@ -80,7 +80,7 @@ Important variables:
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | SQLAlchemy database URL used by the API. |
-| `REDIS_URL` | Redis URL used by worker jobs and progress snapshots. |
+| `REDIS_URL` | Redis URL used by the RQ worker queue. |
 | `DEEPSEEK_API_KEY` | Optional default DeepSeek API key. Can also be saved in `/settings`. |
 | `DEEPSEEK_BASE_URL` | Optional DeepSeek-compatible base URL. |
 | `DEEPSEEK_FLASH_MODEL` | Default Flash model slot name. |
@@ -137,7 +137,7 @@ npm run build
 Docker:
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build api worker web
 docker compose ps
 ```
 
@@ -154,8 +154,9 @@ docker compose ps
 RPGForge is built for self-hosting. Before exposing it publicly:
 
 - Set a strong `SETTINGS_ADMIN_TOKEN`.
+- Put public deployments behind an authenticated reverse proxy.
 - Keep `.env` private.
-- Put the app behind HTTPS and an authenticated reverse proxy if needed.
+- Treat the database as secret storage: runtime DeepSeek API keys are stored there in plaintext in this version.
 - Do not publish local Docker volumes, database dumps, generated private games, or uploaded character portraits.
 
 See [SECURITY.md](SECURITY.md).

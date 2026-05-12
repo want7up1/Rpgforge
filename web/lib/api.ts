@@ -254,6 +254,10 @@ export async function getGeneratorChatJob(jobId: string): Promise<GeneratorChatJ
   return requestJson<GeneratorChatJobRead>(`/api/generator/chat-jobs/${jobId}`);
 }
 
+export async function getActiveGeneratorChatJob(): Promise<GeneratorChatJobRead | null> {
+  return requestJson<GeneratorChatJobRead | null>("/api/generator/chat-jobs/active");
+}
+
 export function createGeneratorChatJobEventSource(jobId: string): EventSource {
   return new EventSource(
     `${getApiBaseUrl()}/api/generator/chat-jobs/${encodeURIComponent(jobId)}/events`
@@ -289,6 +293,10 @@ export async function getGeneratorFinalizeJob(
   jobId: string
 ): Promise<GeneratorFinalizeJobRead> {
   return requestJson<GeneratorFinalizeJobRead>(`/api/generator/finalize-jobs/${jobId}`);
+}
+
+export async function getActiveGeneratorFinalizeJob(): Promise<GeneratorFinalizeJobRead | null> {
+  return requestJson<GeneratorFinalizeJobRead | null>("/api/generator/finalize-jobs/active");
 }
 
 export function createGeneratorFinalizeJobEventSource(jobId: string): EventSource {
@@ -340,6 +348,10 @@ export async function createTurnJob(
 
 export async function getTurnJob(gameId: string, jobId: string): Promise<TurnJobRead> {
   return requestJson<TurnJobRead>(`/api/games/${gameId}/turns/jobs/${jobId}`);
+}
+
+export async function getActiveTurnJob(gameId: string): Promise<TurnJobRead | null> {
+  return requestJson<TurnJobRead | null>(`/api/games/${gameId}/turns/jobs/active`);
 }
 
 export function createTurnJobEventSource(gameId: string, jobId: string): EventSource {

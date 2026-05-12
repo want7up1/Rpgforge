@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RPGForge Game UI Preview</title>
+    <style>
+      :root {
+        --bg: #0f1512;
+        --bg-2: #17231e;
+        --paper: #f4efe4;
+        --paper-2: #e7dfcf;
+        --ink: #211d18;
+        --muted: #6d6254;
+        --line: rgba(64, 52, 39, 0.2);
+        --green: #315f4d;
+        --green-2: #18392f;
+        --gold: #ba8a3a;
+        --gold-2: #f3d796;
+        --red: #8f3f35;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: var(--bg);
+        color: var(--paper);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "PingFang SC", "Microsoft YaHei", sans-serif;
+        line-height: 1.5;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 14% 8%, rgba(195, 145, 65, 0.16), transparent 30rem),
+          radial-gradient(circle at 82% 12%, rgba(49, 95, 77, 0.42), transparent 34rem),
+          linear-gradient(145deg, #0d1210 0%, #15231e 48%, #101412 100%);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+        background-size: 36px 36px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 80%);
+      }
+
+      a,
+      button {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .page {
+        width: min(1180px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 28px 0 64px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-bottom: 22px;
+        border-bottom: 1px solid rgba(244, 239, 228, 0.16);
+        padding-bottom: 16px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border: 1px solid rgba(243, 215, 150, 0.34);
+        border-radius: 6px;
+        background: linear-gradient(145deg, rgba(243, 215, 150, 0.18), rgba(49, 95, 77, 0.28));
+        color: var(--gold-2);
+        font-size: 14px;
+      }
+
+      .top-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .btn {
+        display: inline-flex;
+        min-width: 0;
+        min-height: 40px;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(244, 239, 228, 0.22);
+        border-radius: 6px;
+        background: rgba(244, 239, 228, 0.08);
+        color: var(--paper);
+        padding: 8px 13px;
+        text-decoration: none;
+        transition:
+          transform 150ms ease,
+          border-color 150ms ease,
+          background 150ms ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
+        border-color: rgba(243, 215, 150, 0.5);
+        background: rgba(244, 239, 228, 0.12);
+      }
+
+      .btn.primary {
+        border-color: rgba(243, 215, 150, 0.32);
+        background: linear-gradient(180deg, #376a58, #244d40);
+        color: #fff;
+        font-weight: 700;
+      }
+
+      .btn.paper {
+        border-color: rgba(49, 95, 77, 0.24);
+        background: #fffaf0;
+        color: var(--ink);
+      }
+
+      .preview-title {
+        display: grid;
+        gap: 8px;
+        margin: 24px 0 22px;
+      }
+
+      .preview-title h1 {
+        margin: 0;
+        font-size: clamp(32px, 4.4vw, 58px);
+        line-height: 1.08;
+      }
+
+      .preview-title p {
+        max-width: 760px;
+        margin: 0;
+        color: rgba(244, 239, 228, 0.72);
+        font-size: 16px;
+      }
+
+      .section-label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 34px 0 14px;
+        color: rgba(244, 239, 228, 0.7);
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .section-label::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: rgba(244, 239, 228, 0.15);
+      }
+
+      .launcher {
+        display: grid;
+        grid-template-columns: minmax(0, 1.28fr) minmax(300px, 0.72fr);
+        gap: 18px;
+      }
+
+      .save-hero,
+      .side-panel,
+      .paper-panel,
+      .reader-shell,
+      .character-shell,
+      .status-shell {
+        border: 1px solid rgba(244, 239, 228, 0.13);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+
+      .save-hero {
+        min-height: 390px;
+        overflow: hidden;
+        background:
+          linear-gradient(90deg, rgba(10, 16, 13, 0.88) 0%, rgba(10, 16, 13, 0.56) 50%, rgba(10, 16, 13, 0.1) 100%),
+          linear-gradient(135deg, #1b2b24 0%, #293f34 42%, #775b33 100%);
+        position: relative;
+      }
+
+      .save-hero::after {
+        content: "";
+        position: absolute;
+        inset: auto 22px 22px auto;
+        width: 290px;
+        height: 260px;
+        border: 1px solid rgba(243, 215, 150, 0.22);
+        border-radius: 8px;
+        background:
+          linear-gradient(rgba(243, 215, 150, 0.12) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(243, 215, 150, 0.12) 1px, transparent 1px),
+          radial-gradient(circle at 58% 38%, rgba(243, 215, 150, 0.28), transparent 4px),
+          radial-gradient(circle at 46% 56%, rgba(143, 63, 53, 0.55), transparent 5px);
+        background-size: 32px 32px, 32px 32px, 100% 100%, 100% 100%;
+        opacity: 0.72;
+      }
+
+      .save-hero-content {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        min-height: 390px;
+        align-content: space-between;
+        max-width: 650px;
+        padding: clamp(22px, 4vw, 42px);
+      }
+
+      .kicker {
+        color: var(--gold-2);
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .save-hero h2 {
+        margin: 8px 0 8px;
+        font-size: clamp(34px, 5vw, 68px);
+        line-height: 1.02;
+      }
+
+      .save-hero p {
+        max-width: 540px;
+        margin: 0;
+        color: rgba(244, 239, 228, 0.78);
+      }
+
+      .hero-meta,
+      .stat-row,
+      .quick-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .chip {
+        border: 1px solid rgba(244, 239, 228, 0.16);
+        border-radius: 6px;
+        background: rgba(244, 239, 228, 0.08);
+        color: rgba(244, 239, 228, 0.82);
+        padding: 6px 9px;
+        font-size: 13px;
+      }
+
+      .side-panel {
+        display: grid;
+        align-content: start;
+        gap: 14px;
+        background: rgba(244, 239, 228, 0.08);
+        padding: 20px;
+      }
+
+      .side-panel h3,
+      .paper-panel h3 {
+        margin: 0;
+      }
+
+      .save-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .save-row {
+        display: grid;
+        gap: 8px;
+        border: 1px solid rgba(244, 239, 228, 0.14);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.14);
+        padding: 12px;
+      }
+
+      .save-row strong {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .save-row small {
+        color: rgba(244, 239, 228, 0.64);
+      }
+
+      .reader-shell {
+        overflow: hidden;
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      .reader-top {
+        display: grid;
+        gap: 14px;
+        border-bottom: 1px solid var(--line);
+        background:
+          linear-gradient(90deg, rgba(49, 95, 77, 0.12), transparent),
+          #fff9ed;
+        padding: 18px 22px;
+      }
+
+      .reader-title {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .reader-title h2 {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 44px);
+      }
+
+      .reader-meta {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .reader-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .reader-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 260px;
+        gap: 24px;
+        padding: 24px;
+      }
+
+      .story {
+        max-width: 760px;
+        font-family: Georgia, "Songti SC", "SimSun", serif;
+        font-size: 20px;
+        line-height: 2.08;
+      }
+
+      .story p {
+        margin: 0 0 20px;
+      }
+
+      .story strong {
+        color: var(--green-2);
+        font-weight: 800;
+      }
+
+      .choice-text {
+        margin-top: 26px;
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+        font-family:
+          Inter, ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .choice-text h3 {
+        margin: 0 0 10px;
+      }
+
+      .choice-text p {
+        margin: 8px 0;
+      }
+
+      .gm-panel {
+        display: grid;
+        align-content: start;
+        gap: 12px;
+      }
+
+      .mini-map,
+      .gm-card {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fffaf0;
+        padding: 14px;
+      }
+
+      .mini-map {
+        min-height: 210px;
+        background:
+          linear-gradient(rgba(49, 95, 77, 0.16) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(49, 95, 77, 0.16) 1px, transparent 1px),
+          #fffaf0;
+        background-size: 28px 28px;
+        position: relative;
+      }
+
+      .mini-map::before,
+      .mini-map::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+      }
+
+      .mini-map::before {
+        width: 12px;
+        height: 12px;
+        left: 42%;
+        top: 48%;
+        background: var(--green);
+        box-shadow: 52px -30px 0 var(--red), -38px 42px 0 var(--gold);
+      }
+
+      .mini-map::after {
+        left: 18px;
+        right: 18px;
+        top: 72px;
+        height: 2px;
+        background: rgba(33, 29, 24, 0.18);
+        transform: rotate(-16deg);
+      }
+
+      .action-bar {
+        position: sticky;
+        bottom: 0;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(140px, 1.1fr);
+        gap: 8px;
+        border-top: 1px solid var(--line);
+        background: rgba(255, 250, 240, 0.95);
+        padding: 10px;
+        backdrop-filter: blur(12px);
+      }
+
+      .action-key {
+        min-height: 46px;
+        border: 1px solid rgba(49, 95, 77, 0.22);
+        border-radius: 6px;
+        background: #fffdf7;
+        color: var(--ink);
+        font-weight: 900;
+      }
+
+      .action-key.primary {
+        background: var(--green);
+        color: white;
+      }
+
+      .character-shell {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        overflow: hidden;
+        background: #fffaf0;
+        color: var(--ink);
+      }
+
+      .portrait-area {
+        display: grid;
+        align-content: end;
+        min-height: 560px;
+        background:
+          radial-gradient(circle at 50% 34%, rgba(243, 215, 150, 0.34), transparent 11rem),
+          linear-gradient(180deg, #213b33, #0f1713);
+        padding: 22px;
+        color: var(--paper);
+      }
+
+      .portrait-card {
+        display: grid;
+        min-height: 410px;
+        place-items: center;
+        border: 1px solid rgba(243, 215, 150, 0.28);
+        border-radius: 8px;
+        background:
+          linear-gradient(180deg, rgba(244, 239, 228, 0.1), rgba(0, 0, 0, 0.12)),
+          radial-gradient(ellipse at 50% 32%, rgba(244, 239, 228, 0.2), transparent 42%);
+      }
+
+      .silhouette {
+        width: 150px;
+        height: 260px;
+        border-radius: 80px 80px 18px 18px;
+        background:
+          radial-gradient(circle at 50% 24px, #d6c4a8 0 29px, transparent 30px),
+          linear-gradient(90deg, transparent 0 22px, #1d2422 22px 128px, transparent 128px),
+          linear-gradient(#27342e, #111715);
+        box-shadow: 0 0 60px rgba(243, 215, 150, 0.16);
+      }
+
+      .character-info {
+        display: grid;
+        gap: 18px;
+        align-content: start;
+        padding: 26px;
+      }
+
+      .character-info h2 {
+        margin: 0;
+        font-size: clamp(32px, 5vw, 54px);
+      }
+
+      .info-grid,
+      .status-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .info-box,
+      .status-box {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fffdf7;
+        padding: 14px;
+      }
+
+      .info-box small,
+      .status-box small {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .status-shell {
+        overflow: hidden;
+        background: #fffaf0;
+        color: var(--ink);
+      }
+
+      .status-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 18px;
+        align-items: end;
+        border-bottom: 1px solid var(--line);
+        background:
+          linear-gradient(120deg, rgba(49, 95, 77, 0.15), rgba(186, 138, 58, 0.12)),
+          #fff9ed;
+        padding: 24px;
+      }
+
+      .status-hero h2 {
+        margin: 0;
+        font-size: clamp(32px, 5vw, 52px);
+      }
+
+      .level-badge {
+        border: 1px solid rgba(49, 95, 77, 0.24);
+        border-radius: 8px;
+        background: white;
+        padding: 16px 20px;
+        text-align: center;
+      }
+
+      .level-badge strong {
+        display: block;
+        font-size: 32px;
+      }
+
+      .progress {
+        height: 8px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(49, 95, 77, 0.12);
+      }
+
+      .progress span {
+        display: block;
+        width: 78%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--green), var(--gold));
+      }
+
+      .status-content {
+        display: grid;
+        gap: 14px;
+        padding: 20px 24px 24px;
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      .list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .list-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid rgba(64, 52, 39, 0.12);
+        padding: 8px 0;
+      }
+
+      @media (max-width: 860px) {
+        .page {
+          width: min(720px, calc(100vw - 20px));
+          padding-top: 16px;
+        }
+
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .top-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          width: 100%;
+        }
+
+        .top-actions .btn {
+          width: 100%;
+        }
+
+        .launcher,
+        .reader-body,
+        .character-shell,
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+
+        .save-hero-content {
+          min-height: 430px;
+        }
+
+        .reader-title,
+        .status-hero {
+          grid-template-columns: 1fr;
+        }
+
+        .reader-body {
+          padding: 16px;
+        }
+
+        .story {
+          font-size: 18px;
+          line-height: 2;
+        }
+
+        .gm-panel {
+          display: none;
+        }
+
+        .action-bar {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .action-key.primary {
+          grid-column: 1 / -1;
+        }
+
+        .portrait-area {
+          min-height: 440px;
+        }
+
+        .info-grid,
+        .status-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">RF</span>
+          <span>RPGForge</span>
+        </div>
+        <nav class="top-actions" aria-label="预览导航">
+          <a class="btn" href="#launcher">启动器</a>
+          <a class="btn" href="#reader">剧情</a>
+          <a class="btn" href="#characters">角色</a>
+          <a class="btn" href="#status">状态</a>
+        </nav>
+      </header>
+
+      <section class="preview-title">
+        <h1>游戏化 UI 预览</h1>
+        <p>
+          方向：把 RPGForge 从“管理后台”收束为“文字 RPG 阅读器 + 存档启动器 + 角色资料馆”。
+          这只是静态 HTML 样张，用来确认视觉方向，不接入真实 API。
+        </p>
+      </section>
+
+      <div id="launcher" class="section-label">01 · 游戏启动器首页</div>
+      <section class="launcher">
+        <article class="save-hero">
+          <div class="save-hero-content">
+            <div>
+              <div class="kicker">当前存档 · 第 7 回合</div>
+              <h2>曙光之末</h2>
+              <p>
+                市第三人民医院三楼休息室。冷库恢复供电，楼梯间铁门正在变形，尸群已经逼近。
+              </p>
+            </div>
+            <div class="stat-row">
+              <span class="chip">Lv.1 主角</span>
+              <span class="chip">状态稳定</span>
+              <span class="chip">世界资料 8</span>
+              <span class="chip">记忆摘要 8</span>
+            </div>
+            <div class="quick-links">
+              <button class="btn primary">继续游戏</button>
+              <button class="btn">角色档案</button>
+              <button class="btn">旅程记录</button>
+            </div>
+          </div>
+        </article>
+
+        <aside class="side-panel">
+          <h3>存档列表</h3>
+          <div class="save-list">
+            <div class="save-row">
+              <strong>曙光之末 <span class="chip">active</span></strong>
+              <small>第 7 回合 · 市第三人民医院 · 更新于 16:36</small>
+            </div>
+            <div class="save-row">
+              <strong>雁回镇旧案 <span class="chip">draft</span></strong>
+              <small>黑暗武侠 · 规则生成中</small>
+            </div>
+          </div>
+          <button class="btn primary">创建新游戏</button>
+          <button class="btn">DeepSeek 设置</button>
+        </aside>
+      </section>
+
+      <div id="reader" class="section-label">02 · 剧情阅读器</div>
+      <section class="reader-shell">
+        <header class="reader-top">
+          <div class="reader-title">
+            <div>
+              <div class="kicker">剧情 · 第 7 回合</div>
+              <h2>曙光之末</h2>
+              <div class="reader-meta">市第三人民医院三楼休息室 · 傍晚 · Lv.1 · 状态稳定</div>
+            </div>
+            <button class="btn paper">主题：白天</button>
+          </div>
+          <nav class="reader-nav" aria-label="游戏内导航">
+            <button class="btn paper">返回</button>
+            <button class="btn paper">资料</button>
+            <button class="btn paper">状态</button>
+            <button class="btn paper">角色</button>
+            <button class="btn paper">历史</button>
+          </nav>
+        </header>
+
+        <div class="reader-body">
+          <article class="story">
+            <p>
+              <strong>主角</strong>将<strong>[据点]</strong>的微光压低，转身握住
+              <strong>角色F</strong>的手腕，将一支肾上腺素注射器轻轻拍进她掌心。
+            </p>
+            <p>
+              “反锁房门，只给我留暗号。”他声音压得极低，“如果我遇到麻烦，就用这根注射器敲水管，三长两短。”
+            </p>
+            <p>
+              备用楼梯藏在医院西翼最深处。消防门虚掩，推开时刮出一阵铁锈味的冷风。
+              越往下，空气越湿，积水突然没过了鞋底。
+            </p>
+            <p>
+              地下室铁门半开。发电机沉默如巨兽，管道虬结，墙边堆着生锈的油桶。
+              就在灯管重新亮起时，冷藏室门后传来极其微弱的撞击。
+            </p>
+
+            <section class="choice-text">
+              <h3>建议行动</h3>
+              <p><strong>A.</strong> 带角色F从药房正门进入，快速清理堵门丧尸。</p>
+              <p><strong>B.</strong> 从污物电梯井潜入药房，避开正门威胁。</p>
+              <p><strong>C.</strong> 返回地下室调查冷藏室，寻找晨星线索。</p>
+              <p><strong>D.</strong> 让角色F警戒，自己独自取药。</p>
+            </section>
+          </article>
+
+          <aside class="gm-panel">
+            <div class="mini-map" aria-label="场景示意图"></div>
+            <div class="gm-card">
+              <strong>当前压力</strong>
+              <p>楼梯间铁门即将失守，尸群将在短时间内抵达三楼。</p>
+            </div>
+            <div class="gm-card">
+              <strong>开放线索</strong>
+              <p>晨星设备维护单、[地点]钥匙、冷藏室撞击声。</p>
+            </div>
+          </aside>
+        </div>
+
+        <div class="action-bar" aria-label="行动按钮预览">
+          <button class="action-key">A</button>
+          <button class="action-key">B</button>
+          <button class="action-key">C</button>
+          <button class="action-key">D</button>
+          <button class="action-key primary">自由行动</button>
+        </div>
+      </section>
+
+      <div id="characters" class="section-label">03 · 角色档案</div>
+      <section class="character-shell">
+        <aside class="portrait-area">
+          <div class="portrait-card">
+            <div class="silhouette" aria-label="角色立绘占位"></div>
+          </div>
+        </aside>
+        <article class="character-info">
+          <div>
+            <div class="kicker">角色档案 · 主角 · 已公开</div>
+            <h2>主角</h2>
+            <p>
+              22 岁，前顶尖军校学员，光元素异能觉醒者。冷静睿智，擅长战术判断，
+              在末日废墟中承担队伍核心。
+            </p>
+          </div>
+          <div class="info-grid">
+            <div class="info-box">
+              <small>身份</small>
+              唯一觉醒[异能]的幸存者
+            </div>
+            <div class="info-box">
+              <small>关系</small>
+              角色F · 信任 22
+            </div>
+            <div class="info-box">
+              <small>外貌</small>
+              短发，灰色瞳孔，黑色战术背心
+            </div>
+            <div class="info-box">
+              <small>外貌描述</small>
+              Young man, dark hair, glowing Chinese longsword
+            </div>
+          </div>
+          <div class="quick-links">
+            <button class="btn primary">上传立绘</button>
+            <button class="btn paper">编辑档案</button>
+            <button class="btn paper">在剧情中允许点击查看</button>
+          </div>
+        </article>
+      </section>
+
+      <div id="status" class="section-label">04 · 状态面板</div>
+      <section class="status-shell">
+        <header class="status-hero">
+          <div>
+            <div class="kicker">角色状态</div>
+            <h2>主角</h2>
+            <p>市第三人民医院三楼休息室 · 傍晚 · 压力暂无</p>
+            <div class="progress" aria-label="经验 78/100"><span></span></div>
+          </div>
+          <div class="level-badge">
+            <small>等级</small>
+            <strong>Lv.1</strong>
+            <small>78 / 100 XP</small>
+          </div>
+        </header>
+        <div class="status-content">
+          <div class="status-grid">
+            <div class="status-box">
+              <small>光之力储备</small>
+              85
+            </div>
+            <div class="status-box">
+              <small>任务</small>
+              取得抗生素与关键药品
+            </div>
+            <div class="status-box">
+              <small>开放线索</small>
+              冷库钥匙、晨星维护单、撞击声
+            </div>
+            <div class="status-box">
+              <small>当前状态</small>
+              稳定，无持续负面状态
+            </div>
+          </div>
+          <div class="two-col">
+            <div class="status-box">
+              <small>技能熟练度</small>
+              <div class="list">
+                <div class="list-item"><span>近身格斗</span><strong>38%</strong></div>
+                <div class="list-item"><span>战术判断</span><strong>42%</strong></div>
+              </div>
+            </div>
+            <div class="status-box">
+              <small>NPC 关系</small>
+              <div class="list">
+                <div class="list-item"><span>角色F</span><strong>信任 22</strong></div>
+                <div class="list-item"><span>周德</span><strong>未知</strong></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

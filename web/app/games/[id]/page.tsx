@@ -97,12 +97,12 @@ function GameDetailView({ game }: { game: GameDetail }) {
       <GamePageHeader
         active="overview"
         backFallbackHref="/games"
-        eyebrow="游戏概览"
+        eyebrow="冒险总览"
         gameId={game.id}
         meta={<span className="app-pill">{game.status}</span>}
         primaryAction={
           <Link className="app-button app-button-primary w-full sm:w-fit" href={`/games/${game.id}/play`}>
-            {hasTurns ? "继续游戏" : "开始游戏"}
+            {hasTurns ? "继续冒险" : "开始冒险"}
           </Link>
         }
         subtitle={
@@ -122,10 +122,10 @@ function GameDetailView({ game }: { game: GameDetail }) {
 
       <StatusSnapshot game={game} stateV2={stateV2} />
 
-      <section className="app-card app-card-pad">
+      <section className="surface-panel surface-panel-strong">
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg font-semibold">记忆概览</h2>
+            <h2 className="surface-title">旅程记忆</h2>
             <span className="app-pill">{game.summaries.length} 条摘要</span>
           </div>
           <Link
@@ -149,11 +149,11 @@ function GameDetailView({ game }: { game: GameDetail }) {
         </div>
       </section>
 
-      <section className="app-card app-card-pad">
+      <section className="surface-panel">
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
-            <h2 className="text-lg font-semibold">世界资料</h2>
-            <p className="mt-1 text-sm text-[color:var(--muted)]">
+            <h2 className="surface-title">世界资料</h2>
+            <p className="surface-subtle mt-1">
               展示前 {featuredLore.length} 条，完整条目可在资料页查看。
             </p>
           </div>
@@ -167,7 +167,7 @@ function GameDetailView({ game }: { game: GameDetail }) {
           ) : (
             featuredLore.map((entry) => (
               <article
-                className="app-long-card rounded border border-[color:var(--border)] p-4"
+                className="archive-card archive-card-accent app-long-card"
                 key={entry.id}
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -185,18 +185,18 @@ function GameDetailView({ game }: { game: GameDetail }) {
         </div>
       </section>
 
-      <details className="app-card app-card-pad">
-        <summary className="cursor-pointer text-lg font-semibold">高级诊断</summary>
+      <details className="surface-panel">
+        <summary className="cursor-pointer surface-title">高级诊断</summary>
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <DiagnosticsPanel title="世界观" data={game.config?.worldview ?? {}} />
-          <section className="rounded border border-[color:var(--border)] p-4">
+          <section className="archive-card">
             <h3 className="font-semibold">模式注入</h3>
             {game.modes.length === 0 ? (
               <p className="mt-3 text-sm text-[color:var(--muted)]">暂无模式。</p>
             ) : (
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 {game.modes.map((mode) => (
-                  <article className="rounded bg-[color:var(--soft-panel)] p-3" key={mode.id}>
+                  <article className="archive-card" key={mode.id}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <h4 className="font-semibold">{mode.name}</h4>
                       <span className="app-pill">{mode.enabled ? "启用" : "停用"}</span>
@@ -212,7 +212,7 @@ function GameDetailView({ game }: { game: GameDetail }) {
         </div>
       </details>
 
-      <details className="app-card app-card-pad border-[color:var(--danger-border)]">
+      <details className="surface-panel border-[color:var(--danger-border)]">
         <summary className="cursor-pointer text-lg font-semibold text-[color:var(--danger-text)]">
           危险操作
         </summary>
@@ -241,11 +241,11 @@ function StatusSnapshot({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 
   const xpPercent = ratioPercent(protagonist.xp, protagonist.next_level_xp);
 
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel surface-panel-strong">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg font-semibold">状态概览</h2>
+            <h2 className="surface-title">当前局面</h2>
             <span className="app-pill">Lv.{protagonist.level}</span>
           </div>
           <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
@@ -285,18 +285,18 @@ function StatusSnapshot({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 
 
 function SnapshotMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3">
-      <p className="text-xs text-[color:var(--muted)]">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
+    <div className="metric-tile">
+      <p className="metric-tile-label">{label}</p>
+      <p className="mt-1 text-lg font-black">{value}</p>
     </div>
   );
 }
 
 function MetricCard({ label, value }: { label: string; value: number }) {
   return (
-    <article className="app-card p-3 sm:p-5">
-      <h2 className="text-xs font-medium text-[color:var(--muted)] sm:text-base">{label}</h2>
-      <p className="mt-1 text-2xl font-semibold sm:text-3xl">{value}</p>
+    <article className="metric-tile">
+      <h2 className="metric-tile-label">{label}</h2>
+      <p className="metric-tile-value">{value}</p>
     </article>
   );
 }
@@ -311,7 +311,7 @@ function SummaryPanel({
   content?: string;
 }) {
   return (
-    <article className="rounded border border-[color:var(--border)] p-4">
+    <article className="archive-card archive-card-green">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="font-semibold">{label}</h3>
         <span className="text-xs text-[color:var(--muted)]">{range}</span>
@@ -325,7 +325,7 @@ function SummaryPanel({
 
 function DiagnosticsPanel({ title, data }: { title: string; data: unknown }) {
   return (
-    <section className="rounded border border-[color:var(--border)] p-4">
+    <section className="archive-card">
       <h3 className="mb-3 font-semibold">{title}</h3>
       <JsonBlock data={data} />
     </section>

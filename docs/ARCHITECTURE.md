@@ -13,8 +13,8 @@ web: Next.js
   v
 api: FastAPI
   |
-  +-- worker: background jobs
-  +-- redis: job queue and progress snapshots
+  +-- redis: RQ job queue
+  +-- worker: RQ consumer for generation and turn jobs
   +-- postgres: relational data and pgvector lore retrieval
 ```
 
@@ -35,6 +35,7 @@ Main responsibilities:
 - Character archives and portrait file storage.
 - Worldbook retrieval and context summaries.
 - Runtime DeepSeek settings and task-level model routing.
+- Durable job records for refresh recovery and polling/SSE snapshots.
 
 Key directories:
 
@@ -57,13 +58,14 @@ Main responsibilities:
 - Focused play page with streamed narrative updates.
 - Game detail, history, status, memory, and character archive pages.
 - Settings page for API key, model slots, and task routing.
-- Theme switching and mobile layout.
+- Mobile layout and the current dark game UI.
 
 Key directories:
 
 - `web/app/`: Next.js App Router pages.
 - `web/components/`: shared UI components.
 - `web/lib/`: API client, types, and state helpers.
+- `web/lib/*JobStream.ts`: SSE plus polling fallback helpers for generation and turn jobs.
 
 ## AI Generation Flow
 
@@ -78,16 +80,19 @@ Game setup uses a staged flow:
 Gameplay uses a runtime flow:
 
 1. The player chooses A/B/C/D or submits a free-form action.
-2. The turn job builds context from recent turns, worldbook entries, state, summaries, and character data.
-3. The GM model streams story content.
-4. State extraction runs after the turn.
-5. Approved state changes update canonical game state.
-6. Memory summaries and context diagnostics are refreshed.
+2. The API writes a turn job record and enqueues it to Redis/RQ; the worker consumes it.
+3. The turn job builds context from recent turns, worldbook entries, state, summaries, and character data.
+4. The GM model streams story content, with progress saved to the database and sent over SSE.
+5. State extraction runs after the turn.
+6. Approved state changes update canonical game state.
+7. Memory summaries and context diagnostics are refreshed.
 
 ## Persistence
 
 PostgreSQL stores games, turns, state, summaries, lore, characters, runtime settings, and job records. pgvector is used for local vector search over lore entries.
 
-Redis stores job coordination and progress snapshots used by polling and server-sent events.
+Redis stores RQ job coordination. PostgreSQL stores durable job records and progress buffers
+so the frontend can recover after a page refresh. Server-sent events stream live updates while
+the browser remains connected, and the frontend falls back to polling job records when needed.
 
 Uploaded portraits are stored in the `portrait_data` Docker volume by default.

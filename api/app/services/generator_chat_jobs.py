@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from time import monotonic
 from typing import TypedDict
@@ -14,6 +15,7 @@ from app.services.generator_stream_events import generator_stream_event_broker
 
 STREAM_WRITE_INTERVAL_SECONDS = 0.8
 STREAM_WRITE_MIN_CHARS = 512
+CHAT_JOB_TIMEOUT_SECONDS = 6 * 60
 
 
 class StreamState(TypedDict):
@@ -81,7 +83,17 @@ async def run_chat_job(job_id: UUID) -> None:
                 message=_chat_progress_message(reasoning, content),
             )
 
-        result = await GameGeneratorService().interview_stream(request, on_update=on_update)
+        result = await asyncio.wait_for(
+            GameGeneratorService().interview_stream(request, on_update=on_update),
+            timeout=CHAT_JOB_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        _mark_job_failed(
+            job_id,
+            "访谈生成超过 6 分钟，已停止。请缩短输入或稍后重试。",
+            stream_state,
+        )
+        return
     except (DeepSeekError, ModelOutputValidationError, ValidationError, ValueError) as exc:
         _mark_job_failed(job_id, str(exc), stream_state)
         return

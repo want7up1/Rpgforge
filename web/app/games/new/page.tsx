@@ -2,21 +2,26 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { JsonBlock } from "@/components/JsonBlock";
 import {
-  createGeneratorChatJobEventSource,
   createGeneratorChatJob,
-  createGeneratorFinalizeJobEventSource,
   createGeneratorFinalizeJob,
   createGeneratedGame,
   createManualGame,
-  getGeneratorChatJob,
-  getGeneratorFinalizeJob,
-  parseGeneratorJobStreamEvent,
+  getActiveGeneratorChatJob,
+  getActiveGeneratorFinalizeJob,
 } from "@/lib/api";
+import {
+  createInitialChatProcess,
+  createInitialFinalizeProcess,
+  formatLastEvent,
+  waitForChatJobWithStream,
+  waitForFinalizeJobWithStream,
+  type StreamProcessJob
+} from "@/lib/generatorJobStream";
 import type {
   GeneratedGameConfig,
   GeneratorChatJobRead,
@@ -26,13 +31,6 @@ import type {
 } from "@/lib/types";
 
 const sampleIdea = "黑暗武侠，主角是失忆镖师，地点是雁回镇义庄。";
-const chatPollIntervalMs = 1500;
-const chatMaxPolls = 80;
-const finalizePollIntervalMs = 2000;
-const finalizeMaxPolls = 450;
-const generatorStreamConnectTimeoutMs = 6000;
-const generatorStreamErrorFallbackMs = 4000;
-
 export default function NewGamePage() {
   const router = useRouter();
   const [idea, setIdea] = useState(sampleIdea);
@@ -48,6 +46,84 @@ export default function NewGamePage() {
   const [chatProcess, setChatProcess] = useState<GeneratorChatJobRead | null>(null);
   const [finalizeProcess, setFinalizeProcess] = useState<GeneratorFinalizeJobRead | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreActiveJobs() {
+      try {
+        const [activeFinalizeJob, activeChatJob] = await Promise.all([
+          getActiveGeneratorFinalizeJob(),
+          getActiveGeneratorChatJob()
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        if (activeFinalizeJob) {
+          setError(null);
+          setPendingAction("finalize");
+          setFinalizeProcess(activeFinalizeJob);
+          setFinalizeProgress(
+            activeFinalizeJob.progress_message || "检测到未完成冒险世界生成，正在恢复实时连接..."
+          );
+          const completedJob = await waitForFinalizeJobWithStream(
+            activeFinalizeJob.id,
+            setFinalizeProgress,
+            setFinalizeProcess,
+            activeFinalizeJob
+          );
+          if (cancelled) {
+            return;
+          }
+          if (!completedJob.config) {
+            throw new Error("恢复的生成任务已完成，但没有返回冒险世界。");
+          }
+          setGeneratedConfig(completedJob.config);
+          setFinalizeProgress(completedJob.progress_message || "冒险世界生成完成。");
+          setPendingAction(null);
+          return;
+        }
+
+        if (activeChatJob) {
+          setError(null);
+          setPendingAction("chat");
+          setChatProcess(activeChatJob);
+          setChatProgress(
+            activeChatJob.progress_message || "检测到未完成设定确认，正在恢复实时连接..."
+          );
+          const completedJob = await waitForChatJobWithStream(
+            activeChatJob.id,
+            setChatProgress,
+            setChatProcess,
+            activeChatJob
+          );
+          if (cancelled) {
+            return;
+          }
+          if (!completedJob.response) {
+            throw new Error("恢复的设定确认任务已完成，但没有返回内容。");
+          }
+          setLastReply(completedJob.response);
+          setConfirmed(completedJob.response.confirmed_requirements);
+          setChatProgress(`设定已确认，模型：${completedJob.response.model_used}`);
+          setPendingAction(null);
+        }
+      } catch (caught) {
+        if (cancelled) {
+          return;
+        }
+        setError(caught instanceof Error ? caught.message : "恢复生成任务失败。");
+        setPendingAction(null);
+      }
+    }
+
+    void restoreActiveJobs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!idea.trim()) {
@@ -55,7 +131,7 @@ export default function NewGamePage() {
     }
 
     setError(null);
-    setChatProgress("已创建访谈任务，等待 DeepSeek Pro 返回...");
+    setChatProgress("已开始确认设定，等待 DeepSeek Pro 返回...");
     setFinalizeProgress(null);
     setChatProcess(null);
     setGeneratedConfig(null);
@@ -73,7 +149,7 @@ export default function NewGamePage() {
         setChatProcess
       );
       if (!completedJob.response) {
-        throw new Error("访谈任务已完成，但没有返回内容。");
+        throw new Error("设定确认任务已完成，但没有返回内容。");
       }
       const response = completedJob.response;
       setLastReply(response);
@@ -83,10 +159,10 @@ export default function NewGamePage() {
         { role: "user", content: idea },
         { role: "assistant", content: response.assistant_reply }
       ]);
-      setChatProgress(`访谈完成，模型：${response.model_used}`);
+      setChatProgress(`设定已确认，模型：${response.model_used}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "规则生成器请求失败。");
-      setChatProgress("访谈失败，已保留收到的过程信息。");
+      setError(caught instanceof Error ? caught.message : "冒险设定确认失败。");
+      setChatProgress("设定确认失败，已保留收到的过程信息。");
     } finally {
       setPendingAction(null);
     }
@@ -98,7 +174,7 @@ export default function NewGamePage() {
     }
 
     setError(null);
-    setFinalizeProgress("已创建生成任务，等待 DeepSeek Pro 返回配置...");
+    setFinalizeProgress("已开始生成冒险世界，等待 DeepSeek Pro 返回...");
     setFinalizeProcess(null);
     setPendingAction("finalize");
     try {
@@ -114,13 +190,13 @@ export default function NewGamePage() {
         setFinalizeProcess
       );
       if (!completedJob.config) {
-        throw new Error("生成任务已完成，但没有返回配置。");
+        throw new Error("生成任务已完成，但没有返回冒险世界。");
       }
       setGeneratedConfig(completedJob.config);
       setFinalizeProgress(`生成完成，模型：${completedJob.model_used ?? "unknown"}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "游戏配置生成失败。");
-      setFinalizeProgress("完整配置生成失败，已保留收到的过程信息。");
+      setError(caught instanceof Error ? caught.message : "冒险世界生成失败。");
+      setFinalizeProgress("冒险世界生成失败，已保留收到的过程信息。");
     } finally {
       setPendingAction(null);
     }
@@ -137,7 +213,7 @@ export default function NewGamePage() {
       const response = await createGeneratedGame(generatedConfig);
       router.push(`/games/${response.game.id}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "创建游戏失败。");
+      setError(caught instanceof Error ? caught.message : "创建冒险失败。");
     } finally {
       setPendingAction(null);
     }
@@ -168,25 +244,35 @@ export default function NewGamePage() {
 
   return (
     <AppShell>
-      <section className="flex flex-col gap-2">
-        <Link className="app-button w-fit" href="/games">
-          返回游戏列表
-        </Link>
-        <h1 className="text-2xl font-semibold sm:text-3xl">规则生成器</h1>
-        <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
-          与 DeepSeek V4 讨论游戏需求，生成世界观、剧本骨架、世界资料、模式注入和初始状态。
-        </p>
+      <section className="game-page-hero">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div>
+            <Link className="app-button mb-4 w-fit" href="/games">
+              返回存档
+            </Link>
+            <p className="game-page-eyebrow">Adventure Forge</p>
+            <h1 className="game-page-title">创建冒险</h1>
+            <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--muted)]">
+              先确认冒险方向，再生成世界资料、角色、状态、剧情导演和初始剧情。
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 lg:min-w-96">
+            <StatusStep active={pendingAction === "chat"} complete={history.length > 0} label="确认设定" />
+            <StatusStep active={pendingAction === "finalize"} complete={Boolean(generatedConfig)} label="生成世界" />
+            <StatusStep active={pendingAction === "create-generated"} complete={false} label="开始冒险" />
+          </div>
+        </div>
       </section>
 
       {error ? (
         <section className="app-alert">{error}</section>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[1.05fr_0.95fr]">
-        <section className="app-card app-card-pad">
+      <div className="generator-shell">
+        <section className="generator-console">
           <form className="flex flex-col gap-4" onSubmit={handleChat}>
             <label className="grid gap-2">
-              <span className="text-sm font-semibold">游戏想法</span>
+              <span className="surface-title">冒险想法</span>
               <textarea
                 className="app-input min-h-40 resize-y leading-6"
                 onChange={(event) => setIdea(event.target.value)}
@@ -199,7 +285,7 @@ export default function NewGamePage() {
                 disabled={pendingAction !== null}
                 type="submit"
               >
-                {pendingAction === "chat" ? "访谈中..." : "发送给规则生成器"}
+                {pendingAction === "chat" ? "确认中..." : "确认冒险设定"}
               </button>
               <button
                 className="app-button"
@@ -207,18 +293,21 @@ export default function NewGamePage() {
                 onClick={handleFinalize}
                 type="button"
               >
-                {pendingAction === "finalize" ? "生成任务运行中..." : "生成完整配置"}
+                {pendingAction === "finalize" ? "生成世界中..." : "生成冒险世界"}
               </button>
             </div>
             {!canFinalize ? (
-              <p className="text-xs leading-5 text-[color:var(--muted)]">
-                规则生成器确认设定后，才能生成完整配置。
+              <p className="surface-subtle">
+                冒险设定确认后，才能生成完整冒险世界。
               </p>
             ) : null}
           </form>
 
-          <div className="mt-6 border-t border-[color:var(--border)] pt-5">
-            <h2 className="text-lg font-semibold">访谈记录</h2>
+          <div className="mt-5 border-t border-[color:var(--border)] pt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="surface-title">设定确认记录</h2>
+              <span className="app-pill">{history.length} 条消息</span>
+            </div>
             {chatProgress ? (
               <div className="app-status mt-3">
                 {chatProgress}
@@ -227,19 +316,25 @@ export default function NewGamePage() {
             <StreamProcessPanel
               contentLabel="回复内容"
               job={chatProcess}
-              title="访谈过程"
+              title="设定确认过程"
             />
             <div className="mt-3 grid gap-3">
               {history.length === 0 ? (
-                <p className="text-sm text-[color:var(--muted)]">暂无记录。</p>
+                <p className="surface-panel surface-subtle">
+                  暂无记录。输入冒险想法后，系统会先确认题材、主角、核心冲突和玩法边界。
+                </p>
               ) : (
                 history.map((message, index) => (
                   <div
-                    className="rounded border border-[color:var(--border)] p-3 text-sm leading-6"
+                    className={
+                      message.role === "user"
+                        ? "archive-card archive-card-green text-sm leading-6"
+                        : "archive-card archive-card-accent text-sm leading-6"
+                    }
                     key={`${message.role}-${index}`}
                   >
                     <span className="font-semibold">
-                      {message.role === "user" ? "你" : "规则生成器"}
+                      {message.role === "user" ? "你" : "冒险引导"}
                     </span>
                     <p className="mt-1 text-[color:var(--muted)]">{message.content}</p>
                   </div>
@@ -249,17 +344,41 @@ export default function NewGamePage() {
           </div>
         </section>
 
-        <aside className="flex flex-col gap-5">
-          <details className="app-card app-card-pad" open={Boolean(lastReply)}>
-            <summary className="cursor-pointer text-lg font-semibold">已确认设定</summary>
+        <aside className="surface-grid">
+          <section className="surface-panel surface-panel-strong">
+            <h2 className="surface-title">生成流程</h2>
+            <div className="generator-timeline mt-4">
+              <div className="generator-step">
+                <div>
+                  <strong className="block text-[color:var(--foreground)]">确认冒险方向</strong>
+                  <span>确认关键设定，避免后续世界资料偏离最初想法。</span>
+                </div>
+              </div>
+              <div className="generator-step">
+                <div>
+                  <strong className="block text-[color:var(--foreground)]">生成冒险世界</strong>
+                  <span>导演层会拆分任务，生成规则、世界书、角色、状态和剧情初始条件。</span>
+                </div>
+              </div>
+              <div className="generator-step">
+                <div>
+                  <strong className="block text-[color:var(--foreground)]">开始冒险</strong>
+                  <span>确认结果后写入存档，进入概览或直接开始第一回合。</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <details className="surface-panel" open={Boolean(lastReply)}>
+            <summary className="cursor-pointer surface-title">已确认设定</summary>
             <div className="mt-3">
               <JsonBlock data={confirmed} />
             </div>
             {lastReply ? (
-              <div className="mt-4 rounded border border-[color:var(--border)] p-3 text-sm leading-6">
+              <div className="archive-card mt-4 text-sm leading-6">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">阶段</span>
-                  <span className="rounded bg-[#edf2eb] px-2 py-1 text-xs font-medium text-[color:var(--accent-strong)]">
+                  <span className="app-pill">
                     {lastReply.stage}
                   </span>
                   <span className="text-xs text-[color:var(--muted)]">{lastReply.model_used}</span>
@@ -270,10 +389,10 @@ export default function NewGamePage() {
           </details>
 
           <details
-            className="app-card app-card-pad"
+            className="surface-panel"
             open={Boolean(finalizeProcess || finalizeProgress || generatedConfig)}
           >
-            <summary className="cursor-pointer text-lg font-semibold">生成结果</summary>
+            <summary className="cursor-pointer surface-title">生成结果</summary>
             {finalizeProgress ? (
               <div className="app-status mt-3">
                 {finalizeProgress}
@@ -282,11 +401,11 @@ export default function NewGamePage() {
             <StreamProcessPanel
               contentLabel="生成内容"
               job={finalizeProcess}
-              title="完整配置生成过程"
+              title="冒险世界生成过程"
             />
             {generatedConfig ? (
               <div className="mt-3 grid gap-4">
-                <div className="grid gap-2 text-sm">
+                <div className="archive-card grid gap-2 text-sm">
                   <div>
                     <span className="font-semibold">{generatedConfig.title}</span>
                     <span className="ml-2 text-[color:var(--muted)]">
@@ -305,20 +424,20 @@ export default function NewGamePage() {
                   onClick={handleCreateGenerated}
                   type="button"
                 >
-                  {pendingAction === "create-generated" ? "创建中..." : "确认并创建游戏"}
+                  {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
                 </button>
               </div>
             ) : (
-              <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">
-                完成访谈后生成完整配置，确认后写入数据库。
+              <p className="surface-subtle mt-3">
+                确认设定后生成冒险世界，确认后写入存档。
               </p>
             )}
           </details>
 
-          <details className="app-card app-card-pad">
-            <summary className="cursor-pointer text-lg font-semibold">高级：创建草稿游戏</summary>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              这个入口只创建结构化草稿，不伪造 AI 输出。用于验证数据库和页面流程。
+          <details className="surface-panel">
+            <summary className="cursor-pointer surface-title">高级：创建草稿冒险</summary>
+            <p className="surface-subtle mt-2">
+              这个入口只创建结构化草稿，不伪造 AI 输出。用于验证存档和页面流程。
             </p>
             <div className="mt-4 flex flex-col gap-3">
               <input
@@ -332,7 +451,7 @@ export default function NewGamePage() {
                 onClick={handleManualCreate}
                 type="button"
               >
-                {pendingAction === "create-manual" ? "创建中..." : "创建草稿游戏"}
+                {pendingAction === "create-manual" ? "创建中..." : "创建草稿冒险"}
               </button>
             </div>
           </details>
@@ -342,228 +461,30 @@ export default function NewGamePage() {
   );
 }
 
-async function waitForChatJob(
-  jobId: string,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: GeneratorChatJobRead) => void
-) {
-  for (let attempt = 0; attempt < chatMaxPolls; attempt += 1) {
-    await sleep(chatPollIntervalMs);
-    const job = await getGeneratorChatJob(jobId);
-    onSnapshot(job);
-    if (job.status === "completed") {
-      return job;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.error_message || "规则生成器访谈失败。");
-    }
-    onProgress(
-      buildJobProgressMessage(job, "访谈任务", (attempt + 1) * chatPollIntervalMs)
-    );
-  }
-  throw new Error("规则生成器访谈超时，请稍后重试。");
-}
-
-async function waitForChatJobWithStream(
-  jobId: string,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: GeneratorChatJobRead) => void
-) {
-  return waitForGeneratorJobWithStream(
-    jobId,
-    createGeneratorChatJobEventSource,
-    () => waitForChatJob(jobId, onProgress, onSnapshot),
-    onProgress,
-    onSnapshot
+function StatusStep({
+  active,
+  complete,
+  label
+}: {
+  active: boolean;
+  complete: boolean;
+  label: string;
+}) {
+  return (
+    <div
+      className={
+        active || complete
+          ? "metric-tile border-[color:var(--accent-strong)]"
+          : "metric-tile"
+      }
+    >
+      <p className="metric-tile-label">{label}</p>
+      <p className="mt-1 text-sm font-semibold">
+        {complete ? "完成" : active ? "运行中" : "待开始"}
+      </p>
+    </div>
   );
 }
-
-async function waitForFinalizeJob(
-  jobId: string,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: GeneratorFinalizeJobRead) => void
-) {
-  for (let attempt = 0; attempt < finalizeMaxPolls; attempt += 1) {
-    await sleep(finalizePollIntervalMs);
-    const job = await getGeneratorFinalizeJob(jobId);
-    onSnapshot(job);
-    if (job.status === "completed") {
-      return job;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.error_message || "完整配置生成失败。");
-    }
-    onProgress(
-      buildJobProgressMessage(job, "生成任务", (attempt + 1) * finalizePollIntervalMs)
-    );
-  }
-  throw new Error(
-    `完整配置生成已等待 15 分钟，任务仍未完成。任务 ID：${jobId}。请稍后刷新或联系我查看任务状态。`
-  );
-}
-
-async function waitForFinalizeJobWithStream(
-  jobId: string,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: GeneratorFinalizeJobRead) => void
-) {
-  return waitForGeneratorJobWithStream(
-    jobId,
-    createGeneratorFinalizeJobEventSource,
-    () => waitForFinalizeJob(jobId, onProgress, onSnapshot),
-    onProgress,
-    onSnapshot
-  );
-}
-
-type StreamableGeneratorJob = GeneratorChatJobRead | GeneratorFinalizeJobRead;
-
-function waitForGeneratorJobWithStream<TJob extends StreamableGeneratorJob>(
-  jobId: string,
-  createEventSource: (jobId: string) => EventSource,
-  pollingFallback: () => Promise<TJob>,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: TJob) => void
-) {
-  if (typeof window === "undefined" || typeof EventSource === "undefined") {
-    return pollingFallback();
-  }
-
-  return new Promise<TJob>((resolve, reject) => {
-    let eventSource: EventSource | null = null;
-    let connectTimer: number | null = null;
-    let errorTimer: number | null = null;
-    let settled = false;
-    let fallbackStarted = false;
-    let hasReceivedEvent = false;
-
-    const cleanup = () => {
-      settled = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-      }
-      if (eventSource) {
-        eventSource.close();
-      }
-    };
-
-    const resolveOnce = (job: TJob) => {
-      if (settled) {
-        return;
-      }
-      cleanup();
-      resolve(job);
-    };
-
-    const rejectOnce = (error: unknown) => {
-      if (settled) {
-        return;
-      }
-      cleanup();
-      reject(error);
-    };
-
-    const startPollingFallback = (message: string) => {
-      if (settled || fallbackStarted) {
-        return;
-      }
-      fallbackStarted = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-      }
-      if (eventSource) {
-        eventSource.close();
-      }
-      onProgress(message);
-      pollingFallback().then(resolveOnce).catch(rejectOnce);
-    };
-
-    const applySnapshot = (job: TJob) => {
-      onSnapshot(job);
-      if (job.progress_message) {
-        onProgress(job.progress_message);
-      }
-      if (job.status === "completed") {
-        resolveOnce(job);
-      }
-      if (job.status === "failed") {
-        rejectOnce(new Error(job.error_message || "生成任务失败。"));
-      }
-    };
-
-    const handleStreamEvent = (message: MessageEvent) => {
-      if (settled || fallbackStarted) {
-        return;
-      }
-      hasReceivedEvent = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-        connectTimer = null;
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-        errorTimer = null;
-      }
-
-      try {
-        const streamEvent = parseGeneratorJobStreamEvent(message);
-        if (streamEvent.job) {
-          applySnapshot(streamEvent.job as TJob);
-        }
-      } catch {
-        startPollingFallback("实时生成事件解析失败，已切换为轮询确认任务状态。");
-      }
-    };
-
-    try {
-      eventSource = createEventSource(jobId);
-      for (const eventName of ["snapshot", "progress", "completed", "failed", "heartbeat"]) {
-        eventSource.addEventListener(eventName, handleStreamEvent as EventListener);
-      }
-      eventSource.onerror = () => {
-        if (settled || fallbackStarted || errorTimer !== null) {
-          return;
-        }
-        const delay = hasReceivedEvent ? generatorStreamErrorFallbackMs : 1500;
-        errorTimer = window.setTimeout(() => {
-          startPollingFallback("实时生成连接中断，已切换为轮询确认任务状态。");
-        }, delay);
-      };
-      connectTimer = window.setTimeout(() => {
-        startPollingFallback("实时生成连接超时，已切换为轮询确认任务状态。");
-      }, generatorStreamConnectTimeoutMs);
-    } catch (caught) {
-      startPollingFallback(
-        caught instanceof Error
-          ? `实时生成连接失败，已切换为轮询：${caught.message}`
-          : "实时生成连接失败，已切换为轮询确认任务状态。"
-      );
-    }
-  });
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-type StreamProcessJob = Pick<
-  GeneratorChatJobRead,
-  | "id"
-  | "status"
-  | "model_used"
-  | "error_message"
-  | "reasoning_content"
-  | "content_buffer"
-  | "progress_message"
-  | "stream_started_at"
-  | "last_event_at"
->;
 
 function StreamProcessPanel({
   title,
@@ -622,72 +543,4 @@ function StreamProcessPanel({
       </details>
     </div>
   );
-}
-
-function createInitialChatProcess(
-  id: string,
-  status: GeneratorChatJobRead["status"]
-): GeneratorChatJobRead {
-  return {
-    id,
-    status,
-    response: null,
-    model_used: null,
-    error_message: null,
-    reasoning_content: "",
-    content_buffer: "",
-    progress_message: "任务已创建，等待 DeepSeek Pro 开始流式返回。",
-    stream_started_at: null,
-    last_event_at: null
-  };
-}
-
-function createInitialFinalizeProcess(
-  id: string,
-  status: GeneratorFinalizeJobRead["status"]
-): GeneratorFinalizeJobRead {
-  return {
-    id,
-    status,
-    config: null,
-    model_used: null,
-    error_message: null,
-    reasoning_content: "",
-    content_buffer: "",
-    progress_message: "任务已创建，等待 DeepSeek Pro 开始流式返回。",
-    stream_started_at: null,
-    last_event_at: null
-  };
-}
-
-function buildJobProgressMessage(
-  job: StreamProcessJob,
-  label: string,
-  elapsedMs: number
-): string {
-  const statusText = job.status === "running" ? "运行中" : "排队中";
-  const seconds = Math.round(elapsedMs / 1000);
-  const base = job.progress_message || `${label}${statusText}`;
-  return `${base}（${statusText}，已等待 ${seconds} 秒，最近更新：${formatLastEvent(
-    job.last_event_at
-  )}）`;
-}
-
-function formatLastEvent(value: string | null): string {
-  if (!value) {
-    return "暂无";
-  }
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) {
-    return "未知";
-  }
-  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 2) {
-    return "刚刚";
-  }
-  if (seconds < 60) {
-    return `${seconds} 秒前`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes} 分钟前`;
 }

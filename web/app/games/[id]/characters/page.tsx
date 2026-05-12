@@ -29,12 +29,10 @@ type LoadState =
   | { status: "error"; message: string };
 
 type DraftState = {
-  aliases: string;
   role: CharacterRole;
   identity: string;
   description: string;
   appearance: string;
-  portrait_prompt: string;
   is_visible: boolean;
 };
 
@@ -106,7 +104,7 @@ export default function CharactersPage() {
       ) : state.status === "error" ? (
         <section className="app-alert">{state.message}</section>
       ) : (
-        <div className="mx-auto grid w-full max-w-4xl gap-4">
+        <div className="mx-auto grid w-full max-w-6xl gap-4">
           <GamePageHeader
             active="characters"
             eyebrow="角色"
@@ -128,7 +126,7 @@ export default function CharactersPage() {
 
           <section className="grid gap-3">
             {state.characters.length === 0 ? (
-              <div className="app-card app-card-pad text-sm leading-6 text-[color:var(--muted)]">
+              <div className="surface-panel text-sm leading-6 text-[color:var(--muted)]">
                 暂无角色档案。可以点击“同步角色”从当前游戏状态和世界书中建立档案。
               </div>
             ) : (
@@ -165,12 +163,10 @@ function CharacterEditor({
     setStatusText("正在保存...");
     try {
       const updated = await updateCharacter(gameId, character.id, {
-        aliases: parseAliases(draft.aliases),
         role: draft.role,
         identity: draft.identity,
         description: draft.description,
         appearance: draft.appearance,
-        portrait_prompt: draft.portrait_prompt,
         is_visible: draft.is_visible,
         visibility: draft.is_visible ? "visible" : "hidden"
       });
@@ -210,8 +206,8 @@ function CharacterEditor({
   }
 
   return (
-    <article className="app-card app-card-pad">
-      <div className="grid gap-4 md:grid-cols-[12rem_minmax(0,1fr)]">
+    <article className="character-card">
+      <div className="grid gap-4 lg:grid-cols-[13rem_minmax(0,1fr)]">
         <div className="grid content-start gap-3 md:self-start">
           <CharacterPortrait character={character} />
           <label className="app-button cursor-pointer text-center">
@@ -228,123 +224,126 @@ function CharacterEditor({
               移除立绘
             </button>
           ) : null}
+          {statusText ? (
+            <span className="text-sm leading-5 text-[color:var(--muted)]">{statusText}</span>
+          ) : null}
         </div>
-        <form className="grid gap-3" onSubmit={handleSave}>
+
+        <div className="grid content-start gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-lg font-semibold">{character.name}</h2>
+            <h2 className="break-words text-2xl font-black">{character.name}</h2>
             <span className="app-pill">{roleLabels[character.role]}</span>
             <span className="app-pill">{character.is_visible ? "已公开" : "隐藏"}</span>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">角色类型</span>
-              <select
-                className="app-input"
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    role: event.target.value as CharacterRole
-                  }))
-                }
-                value={draft.role}
-              >
-                <option value="protagonist">主角</option>
-                <option value="companion">同伴</option>
-                <option value="npc">NPC</option>
-                <option value="other">其他</option>
-              </select>
-            </label>
-            <label className="grid gap-1 text-sm">
-              <span className="font-semibold">别名</span>
-              <input
-                className="app-input"
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, aliases: event.target.value }))
-                }
-                placeholder="用逗号分隔"
-                value={draft.aliases}
-              />
-            </label>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <CharacterReadOnlyBlock label="身份介绍" value={character.identity} />
+            <CharacterReadOnlyBlock label="公开介绍" value={character.description} wide />
+            <CharacterReadOnlyBlock label="外貌描述" value={character.appearance} wide />
           </div>
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">身份</span>
-            <input
-              className="app-input"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, identity: event.target.value }))
-              }
-              value={draft.identity}
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">公开介绍</span>
-            <textarea
-              className="app-input min-h-20 resize-y leading-6"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, description: event.target.value }))
-              }
-              value={draft.description}
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">外貌描述</span>
-            <textarea
-              className="app-input min-h-20 resize-y leading-6"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, appearance: event.target.value }))
-              }
-              value={draft.appearance}
-            />
-          </label>
-          <label className="grid gap-1 text-sm">
-            <span className="font-semibold">立绘参考词</span>
-            <textarea
-              className="app-input min-h-24 resize-y leading-6"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, portrait_prompt: event.target.value }))
-              }
-              value={draft.portrait_prompt}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              checked={draft.is_visible}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, is_visible: event.target.checked }))
-              }
-              type="checkbox"
-            />
-            <span>在剧情中允许点击查看</span>
-          </label>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <button className="app-button app-button-primary" type="submit">
-              保存档案
-            </button>
-            {statusText ? (
-              <span className="text-sm text-[color:var(--muted)]">{statusText}</span>
-            ) : null}
-          </div>
-        </form>
+
+          <details className="character-edit-details">
+            <summary className="cursor-pointer font-semibold">编辑角色档案</summary>
+            <form className="character-card-form mt-4" onSubmit={handleSave}>
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold">角色类型</span>
+                <select
+                  className="app-input"
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      role: event.target.value as CharacterRole
+                    }))
+                  }
+                  value={draft.role}
+                >
+                  <option value="protagonist">主角</option>
+                  <option value="companion">同伴</option>
+                  <option value="npc">NPC</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold">身份介绍</span>
+                <input
+                  className="app-input"
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, identity: event.target.value }))
+                  }
+                  value={draft.identity}
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold">公开介绍</span>
+                <textarea
+                  className="app-input min-h-20 resize-y leading-6"
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, description: event.target.value }))
+                  }
+                  value={draft.description}
+                />
+              </label>
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold">外貌描述</span>
+                <textarea
+                  className="app-input min-h-20 resize-y leading-6"
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, appearance: event.target.value }))
+                  }
+                  value={draft.appearance}
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  checked={draft.is_visible}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, is_visible: event.target.checked }))
+                  }
+                  type="checkbox"
+                />
+                <span>在剧情中允许点击查看</span>
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <button className="app-button app-button-primary" type="submit">
+                  保存档案
+                </button>
+                {statusText ? (
+                  <span className="text-sm text-[color:var(--muted)]">{statusText}</span>
+                ) : null}
+              </div>
+            </form>
+          </details>
+        </div>
       </div>
     </article>
   );
 }
 
+function CharacterReadOnlyBlock({
+  label,
+  value,
+  wide = false
+}: {
+  label: string;
+  value?: string | null;
+  wide?: boolean;
+}) {
+  return (
+    <section className={wide ? "archive-card lg:col-span-2" : "archive-card"}>
+      <div className="text-xs font-semibold text-[color:var(--muted)]">{label}</div>
+      <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
+        {value?.trim() || "暂无记录。"}
+      </p>
+    </section>
+  );
+}
+
 function draftFromCharacter(character: CharacterRead): DraftState {
   return {
-    aliases: character.aliases.join("，"),
     role: character.role,
     identity: character.identity ?? "",
     description: character.description ?? "",
     appearance: character.appearance ?? "",
-    portrait_prompt: character.portrait_prompt ?? "",
     is_visible: character.is_visible
   };
-}
-
-function parseAliases(value: string): string[] {
-  return value
-    .split(/[，,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }

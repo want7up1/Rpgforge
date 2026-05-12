@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import anyio
 from fastapi.testclient import TestClient
@@ -19,6 +20,7 @@ from app.services.deepseek_client import (
 )
 from app.services.game_generator import GameGeneratorService
 from app.services.generator_jobs import run_finalize_job
+from app.services.job_queue import recover_stale_jobs
 from app.services.model_router import ModelRouter
 
 
@@ -318,10 +320,10 @@ def test_generator_finalize_job_persists_stream_progress(db_session, monkeypatch
 
 
 def test_generator_chat_job_lifecycle(reset_database, monkeypatch) -> None:
-    async def fake_run_chat_job(job_id):
+    def fake_enqueue_chat_job(job_id):
         del job_id
 
-    monkeypatch.setattr("app.routers.generator.run_chat_job", fake_run_chat_job)
+    monkeypatch.setattr("app.routers.generator.enqueue_chat_job", fake_enqueue_chat_job)
     client = TestClient(app)
 
     response = client.post(
@@ -342,6 +344,10 @@ def test_generator_chat_job_lifecycle(reset_database, monkeypatch) -> None:
     assert read_response.status_code == 200
     assert read_response.json()["status"] == "pending"
     assert read_response.json()["response"] is None
+
+    active_response = client.get("/api/generator/chat-jobs/active")
+    assert active_response.status_code == 200
+    assert active_response.json()["id"] == payload["id"]
 
 
 def test_generator_chat_job_returns_completed_response(db_session) -> None:
@@ -376,10 +382,13 @@ def test_generator_chat_job_returns_completed_response(db_session) -> None:
 
 
 def test_generator_finalize_job_lifecycle(reset_database, monkeypatch) -> None:
-    async def fake_run_finalize_job(job_id):
+    def fake_enqueue_finalize_job(job_id):
         del job_id
 
-    monkeypatch.setattr("app.routers.generator.run_finalize_job", fake_run_finalize_job)
+    monkeypatch.setattr(
+        "app.routers.generator.enqueue_finalize_job",
+        fake_enqueue_finalize_job,
+    )
     client = TestClient(app)
 
     response = client.post(
@@ -400,6 +409,10 @@ def test_generator_finalize_job_lifecycle(reset_database, monkeypatch) -> None:
     assert read_response.status_code == 200
     assert read_response.json()["status"] == "pending"
     assert read_response.json()["config"] is None
+
+    active_response = client.get("/api/generator/finalize-jobs/active")
+    assert active_response.status_code == 200
+    assert active_response.json()["id"] == payload["id"]
 
 
 def test_generator_finalize_job_returns_completed_config(db_session) -> None:
@@ -424,6 +437,40 @@ def test_generator_finalize_job_returns_completed_config(db_session) -> None:
     assert payload["status"] == "completed"
     assert payload["model_used"] == "deepseek-reasoner"
     assert payload["config"]["title"] == "雁回镇旧案"
+
+
+def test_recover_stale_jobs_marks_missing_pending_and_timed_out(db_session, monkeypatch) -> None:
+    pending = GeneratorChatJob(
+        status="pending",
+        request_json={
+            "user_input": "黑暗武侠",
+            "history": [],
+            "confirmed_requirements": {},
+        },
+    )
+    running = GeneratorFinalizeJob(
+        status="running",
+        request_json={
+            "concept": "黑暗武侠",
+            "history": [],
+            "confirmed_requirements": {"genre": "武侠"},
+        },
+        last_event_at=datetime.now(UTC) - timedelta(minutes=20),
+    )
+    db_session.add_all([pending, running])
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.services.job_queue._rq_job_exists",
+        lambda connection, job_id: False,
+    )
+
+    counts = recover_stale_jobs(connection=object())
+
+    db_session.expire_all()
+    assert counts == {"running_timeout": 1, "pending_missing": 1}
+    assert db_session.get(GeneratorChatJob, pending.id).status == "failed"
+    assert db_session.get(GeneratorFinalizeJob, running.id).status == "failed"
 
 
 def test_generator_finalize_job_events_returns_terminal_snapshot(db_session) -> None:

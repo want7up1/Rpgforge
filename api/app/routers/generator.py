@@ -2,14 +2,14 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob
-from app.routers.games import get_game_or_404
+from app.routers.games import game_detail_response, get_game_or_404
 from app.schemas.generator import (
     GeneratedGameConfig,
     GeneratorChatJobCreateResponse,
@@ -26,9 +26,8 @@ from app.schemas.generator import (
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
 from app.services.game_creator import create_game_from_config
 from app.services.game_generator import GameGeneratorService, ModelOutputValidationError
-from app.services.generator_chat_jobs import run_chat_job
-from app.services.generator_jobs import run_finalize_job
 from app.services.generator_stream_events import generator_stream_event_broker
+from app.services.job_queue import enqueue_chat_job, enqueue_finalize_job
 from app.services.turn_stream_events import format_sse_event
 
 router = APIRouter(prefix="/api/generator", tags=["generator"])
@@ -75,7 +74,6 @@ async def generator_chat(
 )
 async def create_chat_job(
     payload: GeneratorChatRequest,
-    background_tasks: BackgroundTasks,
     db: Session = DB_DEPENDENCY,
 ) -> GeneratorChatJobCreateResponse:
     job = GeneratorChatJob(
@@ -85,8 +83,35 @@ async def create_chat_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(run_chat_job, job.id)
+    try:
+        enqueue_chat_job(job.id)
+    except Exception as exc:
+        now = datetime.now(UTC)
+        job.status = "failed"
+        job.error_message = f"任务队列不可用：{exc}"
+        job.progress_message = "任务队列不可用，请检查 Redis/RQ worker。"
+        job.completed_at = now
+        job.last_event_at = now
+        db.add(job)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="任务队列不可用，请检查 Redis/RQ worker。",
+        ) from exc
     return GeneratorChatJobCreateResponse(id=job.id, status=job.status)
+
+
+@router.get("/chat-jobs/active", response_model=GeneratorChatJobRead | None)
+def get_active_chat_job(db: Session = DB_DEPENDENCY) -> GeneratorChatJobRead | None:
+    job = db.scalars(
+        select(GeneratorChatJob)
+        .where(GeneratorChatJob.status.in_(("pending", "running")))
+        .order_by(GeneratorChatJob.created_at.desc())
+        .limit(1)
+    ).first()
+    if job is None:
+        return None
+    return _chat_job_read(job)
 
 
 @router.get("/chat-jobs/{job_id}", response_model=GeneratorChatJobRead)
@@ -153,7 +178,6 @@ async def generator_finalize(
 )
 async def create_finalize_job(
     payload: GeneratorFinalizeRequest,
-    background_tasks: BackgroundTasks,
     db: Session = DB_DEPENDENCY,
 ) -> GeneratorFinalizeJobCreateResponse:
     job = GeneratorFinalizeJob(
@@ -163,8 +187,35 @@ async def create_finalize_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(run_finalize_job, job.id)
+    try:
+        enqueue_finalize_job(job.id)
+    except Exception as exc:
+        now = datetime.now(UTC)
+        job.status = "failed"
+        job.error_message = f"任务队列不可用：{exc}"
+        job.progress_message = "任务队列不可用，请检查 Redis/RQ worker。"
+        job.completed_at = now
+        job.last_event_at = now
+        db.add(job)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="任务队列不可用，请检查 Redis/RQ worker。",
+        ) from exc
     return GeneratorFinalizeJobCreateResponse(id=job.id, status=job.status)
+
+
+@router.get("/finalize-jobs/active", response_model=GeneratorFinalizeJobRead | None)
+def get_active_finalize_job(db: Session = DB_DEPENDENCY) -> GeneratorFinalizeJobRead | None:
+    job = db.scalars(
+        select(GeneratorFinalizeJob)
+        .where(GeneratorFinalizeJob.status.in_(("pending", "running")))
+        .order_by(GeneratorFinalizeJob.created_at.desc())
+        .limit(1)
+    ).first()
+    if job is None:
+        return None
+    return _finalize_job_read(job)
 
 
 @router.get("/finalize-jobs/{job_id}", response_model=GeneratorFinalizeJobRead)
@@ -215,7 +266,7 @@ def generator_create_game(
     db: Session = DB_DEPENDENCY,
 ) -> GeneratorCreateGameResponse:
     game = create_game_from_config(db, payload.generated_config)
-    return GeneratorCreateGameResponse(game=get_game_or_404(db, game.id))
+    return GeneratorCreateGameResponse(game=game_detail_response(get_game_or_404(db, game.id)))
 
 
 def _chat_job_read(job: GeneratorChatJob) -> GeneratorChatJobRead:

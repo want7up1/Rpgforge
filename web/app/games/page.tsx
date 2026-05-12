@@ -78,13 +78,14 @@ export default function GamesPage() {
     <AppShell>
       <section className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <div>
-          <h1 className="text-2xl font-semibold sm:text-3xl">游戏列表</h1>
+          <p className="text-sm font-bold uppercase text-[color:var(--gold)]">Adventures</p>
+          <h1 className="mt-2 text-3xl font-black sm:text-4xl">冒险存档</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
-            选择一局继续剧情，或进入详情查看世界资料和记忆。
+            选择一局继续剧情，或进入概览查看世界资料、角色档案和旅程记忆。
           </p>
         </div>
         <Link className="app-button app-button-primary" href="/games/new">
-          新建游戏
+          创建新冒险
         </Link>
       </section>
 
@@ -119,13 +120,13 @@ function EmptyGames() {
   return (
     <div className="flex flex-col gap-4 rounded border border-dashed border-[color:var(--border)] p-4 sm:p-6">
       <div>
-        <h2 className="text-xl font-semibold">还没有游戏</h2>
+        <h2 className="text-xl font-semibold">还没有冒险存档</h2>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--muted)]">
-          从规则生成器开始，输入一个游戏想法，确认设定后创建第一局 RPG。
+          输入一个冒险想法，确认设定后生成世界并开始第一局 RPG。
         </p>
       </div>
       <Link className="app-button app-button-primary sm:w-fit" href="/games/new">
-        打开规则生成器
+        创建新冒险
       </Link>
     </div>
   );
@@ -157,15 +158,15 @@ function GameCard({
             更新于 {formatDate(game.updated_at)}
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-2 sm:flex lg:min-w-48">
+        <div className="grid grid-cols-2 gap-2 sm:flex lg:min-w-48">
           <Link className="app-button app-button-primary" href={`/games/${game.id}/play`}>
-            继续
+            继续冒险
           </Link>
           <Link className="app-button" href={`/games/${game.id}`}>
-            详情
+            概览
           </Link>
           <button
-            className="app-button border-[color:var(--danger-border)] text-[color:var(--danger-text)]"
+            className="app-button col-span-2 border-[color:var(--danger-border)] text-[color:var(--danger-text)] sm:col-span-1"
             disabled={disabled}
             onClick={() => onDelete(game)}
             type="button"

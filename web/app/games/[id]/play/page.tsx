@@ -2,35 +2,36 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { CharacterModal } from "@/components/CharacterModal";
-import { GamePageHeader } from "@/components/GamePageHeader";
+import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { StoryMarkdown } from "@/components/StoryMarkdown";
+import { buildTurnSettlement, type TurnSettlementView } from "@/lib/gameExperience";
 import {
   createTurnJob,
-  createTurnJobEventSource,
+  getActiveTurnJob,
   getCharacters,
   getGame,
-  getTurnJob,
-  getTurns,
-  parseTurnJobStreamEvent
+  getTurns
 } from "@/lib/api";
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
+import {
+  createInitialTurnProcess,
+  formatLastEvent,
+  waitForTurnJobWithStream,
+  type StoryProcessJob
+} from "@/lib/turnJobStream";
 import type {
   ActionOption,
   CharacterRead,
   GameDetail,
   TurnJobRead,
-  TurnJobStreamEvent,
   TurnRead
 } from "@/lib/types";
 
-const turnPollIntervalMs = 1500;
-const turnMaxPolls = 560;
-const turnStreamConnectTimeoutMs = 6000;
-const turnStreamErrorFallbackMs = 4000;
+type ActionMode = "action" | "say" | "story" | "continue";
 
 type LoadState =
   | { status: "loading" }
@@ -45,21 +46,90 @@ export default function PlayPage() {
   const [pending, setPending] = useState(false);
   const [turnProgress, setTurnProgress] = useState<string | null>(null);
   const [turnProcess, setTurnProcess] = useState<TurnJobRead | null>(null);
-  const [freeActionOpen, setFreeActionOpen] = useState(false);
+  const [actionMode, setActionMode] = useState<ActionMode>("action");
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterRead | null>(null);
+
+  const latestTurn = useMemo(() => {
+    if (state.status !== "ready" || state.turns.length === 0) {
+      return null;
+    }
+    return state.turns[state.turns.length - 1];
+  }, [state]);
+
+  const stateV2 = useMemo(
+    () => (state.status === "ready" ? getStateV2FromGame(state.game) : null),
+    [state]
+  );
+
+  const refreshAfterTurnJob = useCallback(async (gameId: string, completedJob: TurnJobRead) => {
+    const turn = completedJob.turn;
+    if (!turn) {
+      throw new Error("回合任务已完成，但没有返回回合内容。");
+    }
+
+    try {
+      const [refreshedGame, refreshedTurns] = await Promise.all([
+        getGame(gameId),
+        getTurns(gameId)
+      ]);
+      setState((current) =>
+        current.status === "ready"
+          ? { ...current, game: refreshedGame, turns: refreshedTurns }
+          : current
+      );
+    } catch {
+      setState((current) => {
+        if (current.status !== "ready") {
+          return current;
+        }
+        const exists = current.turns.some((item) => item.id === turn.id);
+        return {
+          ...current,
+          turns: exists ? current.turns : [...current.turns, turn]
+        };
+      });
+    }
+  }, []);
+
+  const restoreActiveTurnJob = useCallback(async (activeJob: TurnJobRead) => {
+    setError(null);
+    setPending(true);
+    setTurnProcess(activeJob);
+    setTurnProgress(activeJob.progress_message || "检测到未完成回合任务，正在恢复实时连接...");
+    try {
+      const completedJob = await waitForTurnJobWithStream(
+        params.id,
+        activeJob.id,
+        setTurnProgress,
+        setTurnProcess,
+        activeJob
+      );
+      await refreshAfterTurnJob(params.id, completedJob);
+      setTurnProgress(completedJob.progress_message || "剧情生成完成。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "恢复回合任务失败。");
+      setTurnProgress("回合恢复失败，已保留收到的过程信息。");
+    } finally {
+      setPending(false);
+    }
+  }, [params.id, refreshAfterTurnJob]);
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function load() {
       try {
-        const [game, turns, characters] = await Promise.all([
+        const [game, turns, characters, activeJob] = await Promise.all([
           getGame(params.id),
           getTurns(params.id),
-          getCharacters(params.id)
+          getCharacters(params.id),
+          getActiveTurnJob(params.id)
         ]);
         if (!controller.signal.aborted) {
           setState({ status: "ready", game, turns, characters });
+          if (activeJob) {
+            void restoreActiveTurnJob(activeJob);
+          }
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
@@ -74,19 +144,7 @@ export default function PlayPage() {
     load();
 
     return () => controller.abort();
-  }, [params.id]);
-
-  const latestTurn = useMemo(() => {
-    if (state.status !== "ready" || state.turns.length === 0) {
-      return null;
-    }
-    return state.turns[state.turns.length - 1];
-  }, [state]);
-
-  const stateV2 = useMemo(
-    () => (state.status === "ready" ? getStateV2FromGame(state.game) : null),
-    [state]
-  );
+  }, [params.id, restoreActiveTurnJob]);
 
   async function submitTurn(payload: Parameters<typeof createTurnJob>[1]) {
     if (state.status !== "ready" || pending) {
@@ -106,24 +164,9 @@ export default function PlayPage() {
         setTurnProgress,
         setTurnProcess
       );
-      const turn = completedJob.turn;
-      if (!turn) {
-        throw new Error("回合任务已完成，但没有返回回合内容。");
-      }
-      let refreshedGame = state.game;
-      try {
-        refreshedGame = await getGame(state.game.id);
-      } catch {
-        // The new turn is still usable even if the status refresh misses once.
-      }
-      setState((current) =>
-        current.status === "ready"
-          ? { ...current, game: refreshedGame, turns: [...current.turns, turn] }
-          : current
-      );
+      await refreshAfterTurnJob(state.game.id, completedJob);
       setInput("");
-      setFreeActionOpen(false);
-      setTurnProgress("剧情生成完成，状态变更正在后台写入。");
+      setTurnProgress(completedJob.progress_message || "剧情生成完成。");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "提交回合失败。");
       setTurnProgress("回合生成失败，已保留收到的过程信息。");
@@ -135,14 +178,17 @@ export default function PlayPage() {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = input.trim();
-    if (!trimmed) {
+    const fallbackInput =
+      actionMode === "continue" ? "继续推进当前剧情。" : "";
+    const playerInput = trimmed || fallbackInput;
+    if (!playerInput) {
       return;
     }
-    submitTurn({ player_input: trimmed });
+    submitTurn({ player_input: playerInput });
   }
 
   return (
-    <AppShell variant="focus">
+    <AppShell variant="gameplay">
       {state.status === "loading" ? (
         <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
           正在读取游戏...
@@ -151,51 +197,232 @@ export default function PlayPage() {
         <section className="app-alert">{state.message}</section>
       ) : (
         <>
-          <div className="mx-auto grid w-full max-w-3xl gap-3 pb-36 sm:gap-4 sm:pb-32">
-            <section className="flex min-w-0 flex-col gap-3 sm:gap-4">
-              <GamePageHeader
-                active="play"
-                eyebrow="剧情"
-                gameId={params.id}
-                subtitle={`当前回合 ${latestTurn?.turn_number ?? 0}`}
-                title={state.game.title}
-              />
+          <div className="adventure-mobile-tabs" aria-label="移动端游戏导航">
+            <Link className="app-button" href={`/games/${params.id}`}>
+              冒险
+            </Link>
+            <Link className="app-button" href={`/games/${params.id}/memory`}>
+              资料
+            </Link>
+            <Link className="app-button" href={`/games/${params.id}/characters`}>
+              角色
+            </Link>
+            <Link className="app-button" href={`/games/${params.id}/status`}>
+              状态
+            </Link>
+            <Link className="app-button" href={`/games/${params.id}/history`}>
+              历史
+            </Link>
+            <Link className="app-button" href="/games">
+              存档
+            </Link>
+          </div>
+          <div className="adventure-frame">
+            <AdventureSidebar
+              currentTurn={latestTurn?.turn_number ?? 0}
+              game={state.game}
+              stateV2={stateV2}
+            />
 
-              {error ? (
-                <div className="app-alert">{error}</div>
-              ) : null}
+            <main className="adventure-main">
+              <header className="adventure-topbar">
+                <div className="min-w-0">
+                  <h1 className="truncate text-xl font-black">{state.game.title}</h1>
+                  <p className="mt-1 truncate text-sm text-[color:var(--muted)]">
+                    第 {latestTurn?.turn_number ?? 0} 回合
+                    {stateV2?.active_scene.location
+                      ? ` · ${stateV2.active_scene.location}`
+                      : ""}
+                    {stateV2?.active_scene.time ? ` · ${stateV2.active_scene.time}` : ""}
+                  </p>
+                </div>
+                <div className="adventure-topbar-actions flex flex-wrap justify-end gap-2">
+                  <Link className="app-button" href={`/games/${params.id}`}>
+                    概览
+                  </Link>
+                  <Link className="app-button" href={`/games/${params.id}/history`}>
+                    历史
+                  </Link>
+                  <Link className="app-button" href="/games">
+                    存档
+                  </Link>
+                </div>
+              </header>
 
-              {stateV2 ? <PlayStateStrip gameId={params.id} stateV2={stateV2} /> : null}
+              <section className="adventure-story-scroll">
+                <div className="adventure-story-column">
+                  {error ? <div className="app-alert mb-4">{error}</div> : null}
+                  {stateV2 ? (
+                    <PresentCharactersStrip
+                      characters={state.characters}
+                      latestTurn={latestTurn}
+                      onCharacterClick={setSelectedCharacter}
+                      stateV2={stateV2}
+                    />
+                  ) : null}
+                  <StoryPanel
+                    characters={state.characters}
+                    latestTurn={latestTurn}
+                    onCharacterClick={setSelectedCharacter}
+                    onSelectAction={(option) => submitTurn({ selected_option: option })}
+                    pending={pending}
+                    process={turnProcess}
+                    progress={turnProgress}
+                  />
+                  <AdventureComposer
+                    actionMode={actionMode}
+                    disabled={pending}
+                    input={input}
+                    onInputChange={setInput}
+                    onModeChange={setActionMode}
+                    onSubmit={handleSubmit}
+                    pending={pending}
+                  />
+                </div>
+              </section>
+            </main>
 
-              <StoryPanel
-                latestTurn={latestTurn}
-                characters={state.characters}
-                onCharacterClick={setSelectedCharacter}
-                pending={pending}
-                progress={turnProgress}
-                process={turnProcess}
-              />
-            </section>
+            <AdventureInspector
+              characters={state.characters}
+              game={state.game}
+              stateV2={stateV2}
+            />
           </div>
           <CharacterModal
             character={selectedCharacter}
             onClose={() => setSelectedCharacter(null)}
           />
-
-          <FloatingActionBar
-            disabled={pending}
-            input={input}
-            onInputChange={setInput}
-            onOpenChange={setFreeActionOpen}
-            onSelect={(option) => submitTurn({ selected_option: option })}
-            onSubmit={handleSubmit}
-            open={freeActionOpen}
-            options={latestTurn?.action_options_json ?? []}
-            pending={pending}
-          />
         </>
       )}
     </AppShell>
+  );
+}
+
+function AdventureSidebar({
+  currentTurn,
+  game,
+  stateV2
+}: {
+  currentTurn: number;
+  game: GameDetail;
+  stateV2: StateV2 | null;
+}) {
+  return (
+    <aside className="adventure-sidebar">
+      <Link className="mb-6 flex items-center gap-2 font-black" href="/">
+        <span className="brand-mark-small">RF</span>
+        <span>RPGForge</span>
+      </Link>
+
+      <section className="mb-5 grid gap-2">
+        <p className="text-xs font-black uppercase text-[color:var(--faint)]">Adventure</p>
+        <div className="app-link-card">
+          <div className="flex items-center justify-between gap-3">
+            <strong className="min-w-0 truncate">{game.title}</strong>
+            <span className="app-pill">{currentTurn}</span>
+          </div>
+          <p className="text-xs leading-5 text-[color:var(--muted)]">
+            {stateV2?.active_scene.location || game.genre || "当前冒险"}
+          </p>
+        </div>
+        <Link className="app-button app-button-primary" href={`/games/${game.id}/play`}>
+          剧情
+        </Link>
+      </section>
+
+      <section className="mb-5 grid gap-2">
+        <p className="text-xs font-black uppercase text-[color:var(--faint)]">Tools</p>
+        <Link className="app-button" href={`/games/${game.id}/memory`}>
+          世界资料 · {game.lore_entries.length}
+        </Link>
+        <Link className="app-button" href={`/games/${game.id}/characters`}>
+          角色档案
+        </Link>
+        <Link className="app-button" href={`/games/${game.id}/status`}>
+          状态面板
+        </Link>
+        <Link className="app-button" href={`/games/${game.id}/history`}>
+          旅程记录
+        </Link>
+      </section>
+
+      <section className="app-status text-xs">
+        <strong className="block text-[color:var(--foreground)]">当前存档</strong>
+        <span className="mt-1 block">
+          Lv.{stateV2?.protagonist_sheet.level ?? 1} ·{" "}
+          {stateV2?.conditions.length ? `${stateV2.conditions.length} 个状态` : "状态稳定"}
+        </span>
+      </section>
+    </aside>
+  );
+}
+
+function AdventureInspector({
+  characters,
+  game,
+  stateV2
+}: {
+  characters: CharacterRead[];
+  game: GameDetail;
+  stateV2: StateV2 | null;
+}) {
+  const visibleCharacters = characters.filter((character) => character.is_visible).slice(0, 3);
+
+  return (
+    <aside className="adventure-inspector">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-xl font-black">冒险资料</h2>
+        <Link className="app-button" href={`/games/${game.id}/memory`}>
+          打开
+        </Link>
+      </div>
+
+      {stateV2 ? <PlayStateStrip gameId={game.id} stateV2={stateV2} /> : null}
+
+      <section className="app-card app-card-pad mt-3">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-semibold">角色</h3>
+          <Link className="text-sm text-[color:var(--muted)]" href={`/games/${game.id}/characters`}>
+            全部
+          </Link>
+        </div>
+        <div className="grid gap-3">
+          {visibleCharacters.length > 0 ? (
+            visibleCharacters.map((character) => (
+              <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-3" key={character.id}>
+                <CharacterPortrait character={character} />
+                <div className="min-w-0">
+                  <strong className="block truncate">{character.name}</strong>
+                  <p className="truncate text-xs text-[color:var(--muted)]">
+                    {character.identity || character.description || "角色档案"}
+                  </p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-[color:var(--muted)]">暂无可见角色。</p>
+          )}
+        </div>
+      </section>
+
+      <section className="app-card app-card-pad mt-3">
+        <h3 className="font-semibold">世界资料</h3>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {game.lore_entries.slice(0, 6).map((entry) => (
+            <span className="app-pill" key={entry.id}>
+              {entry.title}
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <section className="app-card app-card-pad mt-3">
+        <h3 className="font-semibold">旅程记忆</h3>
+        <p className="mt-2 line-clamp-5 text-sm leading-6 text-[color:var(--muted)]">
+          {game.summaries[0]?.content || game.description || "暂无记忆摘要。"}
+        </p>
+      </section>
+    </aside>
   );
 }
 
@@ -207,14 +434,20 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
     stateV2.conditions.length > 0 ? `${stateV2.conditions.length} 个状态` : "状态稳定";
 
   return (
-    <section className="rounded border border-[color:var(--border)] bg-[color:var(--panel)] p-3">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <section className="app-card app-card-pad">
+      <div className="grid gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="font-semibold">Lv.{protagonist.level}</span>
             <span className="text-[color:var(--muted)]">
-              {scene.location || "未知地点"} · {conditionLabel}
+              {protagonist.xp}/{protagonist.next_level_xp}
             </span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <span className="text-[color:var(--muted)]">
+              {scene.location || "未知地点"}
+            </span>
+            <span className="text-[color:var(--muted)]">· {conditionLabel}</span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[color:var(--soft-panel)]">
             <div
@@ -231,351 +464,169 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
   );
 }
 
-function FloatingActionBar({
+function PresentCharactersStrip({
+  characters,
+  latestTurn,
+  onCharacterClick,
+  stateV2
+}: {
+  characters: CharacterRead[];
+  latestTurn: TurnRead | null;
+  onCharacterClick: (character: CharacterRead) => void;
+  stateV2: StateV2;
+}) {
+  const sourceNames = uniqueNames([
+    ...stateV2.active_scene.present_npcs,
+    ...inferPresentCharacterNames(characters, stateV2, latestTurn)
+  ]);
+  const present = sourceNames
+    .map((name) => {
+      const character = findCharacterByName(characters, name);
+      const npcState = stateV2.npc_registry.find(
+        (npc) => normalizeName(npc.name) === normalizeName(name)
+      );
+      return {
+        character,
+        identity: character?.identity || npcState?.identity || character?.description || "在场角色",
+        name: character?.name || npcState?.name || name,
+        status: npcState?.status || npcState?.relationship || npcState?.attitude || ""
+      };
+    })
+    .filter((entry, index, list) =>
+      Boolean(entry.name) &&
+      list.findIndex((item) => normalizeName(item.name) === normalizeName(entry.name)) === index
+    );
+
+  if (present.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="present-characters-strip" aria-label="当前在场角色">
+      <div className="present-characters-header">
+        <span className="story-label">当前在场角色</span>
+        <span className="app-pill">{present.length}</span>
+      </div>
+      <div className="present-characters-list">
+        {present.map((entry) => (
+          <button
+            className="present-character-chip"
+            disabled={!entry.character}
+            key={entry.name}
+            onClick={() => {
+              if (entry.character) {
+                onCharacterClick(entry.character);
+              }
+            }}
+            type="button"
+          >
+            {entry.character ? (
+              <CharacterPortrait character={entry.character} />
+            ) : (
+              <span className="present-character-fallback">
+                {entry.name.slice(0, 1)}
+              </span>
+            )}
+            <span className="min-w-0 text-left">
+              <strong className="block truncate">{entry.name}</strong>
+              <span className="block truncate text-xs text-[color:var(--muted)]">
+                {[entry.identity, entry.status].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AdventureComposer({
+  actionMode,
   disabled,
   input,
   onInputChange,
-  onOpenChange,
-  onSelect,
+  onModeChange,
   onSubmit,
-  open,
-  options,
   pending
 }: {
+  actionMode: ActionMode;
   disabled: boolean;
   input: string;
   onInputChange: (value: string) => void;
-  onOpenChange: (open: boolean) => void;
-  onSelect: (option: ActionOption) => void;
+  onModeChange: (mode: ActionMode) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  open: boolean;
-  options: ActionOption[];
   pending: boolean;
 }) {
-  const hasOptions = options.length > 0;
+  const modeOptions: { key: ActionMode; label: string }[] = [
+    { key: "action", label: "行动" },
+    { key: "say", label: "对话" },
+    { key: "story", label: "叙述" },
+    { key: "continue", label: "继续" }
+  ];
 
   return (
-    <div className="pointer-events-none fixed inset-x-2 bottom-2 z-40 sm:inset-x-4">
-      <div className="pointer-events-auto mx-auto grid w-full max-w-3xl gap-2 rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)]/95 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_24px_rgba(32,38,30,0.12)] backdrop-blur">
-        {open ? (
-          <form className="grid gap-2" onSubmit={onSubmit}>
-            <label className="sr-only" htmlFor="free-action-input">
-              自由行动
-            </label>
-            <textarea
-              className="min-h-20 resize-y rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3 text-base leading-6 outline-none focus:border-[color:var(--accent)] sm:min-h-20 sm:text-sm"
-              disabled={disabled}
-              id="free-action-input"
-              onChange={(event) => onInputChange(event.target.value)}
-              placeholder="输入你的具体行动..."
-              value={input}
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                className="app-button"
-                disabled={disabled}
-                onClick={() => onOpenChange(false)}
-                type="button"
-              >
-                收起
-              </button>
-              <button
-                className="app-button app-button-primary"
-                disabled={disabled || !input.trim()}
-                type="submit"
-              >
-                {pending ? "生成中..." : "提交"}
-              </button>
-            </div>
-          </form>
-        ) : null}
-
-        {open ? null : (
-          <div
-            className={
-              hasOptions
-                ? "grid grid-cols-4 gap-2 sm:grid-cols-[repeat(4,minmax(0,1fr))_minmax(7rem,1.1fr)]"
-                : "grid gap-2 sm:justify-end"
-            }
-          >
-            {hasOptions
-              ? options.map((option) => (
-                  <button
-                    aria-label={`选择建议行动 ${option.key}`}
-                    className="app-button bg-[color:var(--input)] text-base font-semibold transition hover:border-[color:var(--accent)]"
-                    disabled={disabled}
-                    key={option.key}
-                    onClick={() => onSelect(option)}
-                    type="button"
-                  >
-                    {option.key}
-                  </button>
-                ))
-              : null}
+    <footer className="adventure-composer">
+      <form className="adventure-composer-inner" onSubmit={onSubmit}>
+        <div className="adventure-mode-row" aria-label="输入模式">
+          {modeOptions.map((mode) => (
             <button
-              aria-expanded={open}
               className={
-                hasOptions
-                  ? "app-button app-button-primary col-span-4 sm:col-span-1"
-                  : "app-button app-button-primary sm:min-w-32"
+                actionMode === mode.key
+                  ? "adventure-mode-button adventure-mode-button-active"
+                  : "adventure-mode-button"
               }
-              disabled={disabled}
-              onClick={() => onOpenChange(true)}
+              key={mode.key}
+              onClick={() => onModeChange(mode.key)}
               type="button"
             >
-              自由行动
+              {mode.label}
             </button>
-          </div>
-        )}
-      </div>
-    </div>
+          ))}
+        </div>
+
+        <div className="adventure-input-row">
+          <label className="sr-only" htmlFor="free-action-input">
+            自由行动
+          </label>
+          <textarea
+            className="app-input leading-6"
+            disabled={disabled}
+            id="free-action-input"
+            onChange={(event) => onInputChange(event.target.value)}
+            placeholder={placeholderForMode(actionMode)}
+            value={input}
+          />
+          <button
+            className="app-button app-button-primary"
+            disabled={disabled || (actionMode !== "continue" && !input.trim())}
+            type="submit"
+          >
+            {pending ? "发送中..." : actionMode === "continue" ? "继续" : "发送"}
+          </button>
+        </div>
+      </form>
+    </footer>
   );
 }
 
-async function waitForTurnJob(
-  gameId: string,
-  jobId: string,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: TurnJobRead) => void
-) {
-  for (let attempt = 0; attempt < turnMaxPolls; attempt += 1) {
-    await sleep(turnPollIntervalMs);
-    const job = await getTurnJob(gameId, jobId);
-    onSnapshot(job);
-    if (job.status === "completed") {
-      return job;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.error_message || "回合生成失败。");
-    }
-    onProgress(
-      buildJobProgressMessage(job, "回合任务", (attempt + 1) * turnPollIntervalMs)
-    );
+function placeholderForMode(mode: ActionMode): string {
+  if (mode === "say") {
+    return "输入角色说的话。例：我对角色F说，跟紧我。";
   }
-  throw new Error(
-    `回合生成已等待 14 分钟，任务仍未完成。任务 ID：${jobId}。请稍后刷新或联系我查看任务状态。`
-  );
-}
-
-async function waitForTurnJobWithStream(
-  gameId: string,
-  jobId: string,
-  onProgress: (message: string) => void,
-  onSnapshot: (job: TurnJobRead) => void
-) {
-  if (typeof window === "undefined" || typeof EventSource === "undefined") {
-    return waitForTurnJob(gameId, jobId, onProgress, onSnapshot);
+  if (mode === "story") {
+    return "输入你希望推动的叙述方向。例：镜头转向地下冷库门后。";
   }
-
-  return new Promise<TurnJobRead>((resolve, reject) => {
-    let latestJob = createInitialTurnProcess(gameId, jobId, "pending");
-    let eventSource: EventSource | null = null;
-    let connectTimer: number | null = null;
-    let errorTimer: number | null = null;
-    let settled = false;
-    let fallbackStarted = false;
-    let hasReceivedEvent = false;
-
-    const cleanup = () => {
-      settled = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-      }
-      if (eventSource) {
-        eventSource.close();
-      }
-    };
-
-    const resolveOnce = (job: TurnJobRead) => {
-      if (settled) {
-        return;
-      }
-      cleanup();
-      resolve(job);
-    };
-
-    const rejectOnce = (error: unknown) => {
-      if (settled) {
-        return;
-      }
-      cleanup();
-      reject(error);
-    };
-
-    const startPollingFallback = (message: string) => {
-      if (settled || fallbackStarted) {
-        return;
-      }
-      fallbackStarted = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-      }
-      if (eventSource) {
-        eventSource.close();
-      }
-      onProgress(message);
-      waitForTurnJob(gameId, jobId, onProgress, (job) => {
-        latestJob = mergeTurnJobSnapshot(latestJob, job);
-        onSnapshot(latestJob);
-      })
-        .then(resolveOnce)
-        .catch(rejectOnce);
-    };
-
-    const applySnapshot = (job: TurnJobRead) => {
-      latestJob = mergeTurnJobSnapshot(latestJob, job);
-      onSnapshot(latestJob);
-      if (latestJob.progress_message) {
-        onProgress(latestJob.progress_message);
-      }
-      if (latestJob.status === "completed") {
-        resolveOnce(latestJob);
-      }
-      if (latestJob.status === "failed") {
-        rejectOnce(new Error(latestJob.error_message || "回合生成失败。"));
-      }
-    };
-
-    const applyDelta = (streamEvent: TurnJobStreamEvent) => {
-      const reasoningContent = streamEvent.reset_buffers
-        ? streamEvent.reasoning_delta ?? ""
-        : latestJob.reasoning_content + (streamEvent.reasoning_delta ?? "");
-      const contentBuffer = streamEvent.reset_buffers
-        ? streamEvent.content_delta ?? ""
-        : latestJob.content_buffer + (streamEvent.content_delta ?? "");
-      latestJob = {
-        ...latestJob,
-        status: streamEvent.status ?? latestJob.status,
-        model_used: streamEvent.model_used ?? latestJob.model_used,
-        reasoning_content: reasoningContent,
-        content_buffer: contentBuffer,
-        narrative_buffer: streamEvent.narrative_buffer ?? latestJob.narrative_buffer,
-        progress_message: streamEvent.progress_message ?? latestJob.progress_message,
-        last_event_at:
-          streamEvent.last_event_at ?? streamEvent.sent_at ?? latestJob.last_event_at
-      };
-      onSnapshot(latestJob);
-      if (streamEvent.progress_message) {
-        onProgress(streamEvent.progress_message);
-      }
-    };
-
-    const handleStreamEvent = (message: MessageEvent) => {
-      if (settled || fallbackStarted) {
-        return;
-      }
-      hasReceivedEvent = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-        connectTimer = null;
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-        errorTimer = null;
-      }
-
-      let streamEvent: TurnJobStreamEvent;
-      try {
-        streamEvent = parseTurnJobStreamEvent(message);
-      } catch {
-        startPollingFallback("实时剧情事件解析失败，已切换为轮询确认任务状态。");
-        return;
-      }
-
-      if (streamEvent.job) {
-        applySnapshot(streamEvent.job);
-        return;
-      }
-      if (streamEvent.type === "delta" || streamEvent.type === "progress") {
-        applyDelta(streamEvent);
-      }
-    };
-
-    const streamEventNames: TurnJobStreamEvent["type"][] = [
-      "snapshot",
-      "delta",
-      "progress",
-      "completed",
-      "failed",
-      "heartbeat"
-    ];
-
-    try {
-      eventSource = createTurnJobEventSource(gameId, jobId);
-      for (const eventName of streamEventNames) {
-        eventSource.addEventListener(eventName, handleStreamEvent as EventListener);
-      }
-      eventSource.onerror = () => {
-        if (settled || fallbackStarted || errorTimer !== null) {
-          return;
-        }
-        const delay = hasReceivedEvent ? turnStreamErrorFallbackMs : 1500;
-        errorTimer = window.setTimeout(() => {
-          startPollingFallback("实时剧情连接中断，已切换为轮询确认任务状态。");
-        }, delay);
-      };
-      connectTimer = window.setTimeout(() => {
-        startPollingFallback("实时剧情连接超时，已切换为轮询确认任务状态。");
-      }, turnStreamConnectTimeoutMs);
-    } catch (caught) {
-      startPollingFallback(
-        caught instanceof Error
-          ? `实时剧情连接失败，已切换为轮询：${caught.message}`
-          : "实时剧情连接失败，已切换为轮询确认任务状态。"
-      );
-    }
-  });
-}
-
-function mergeTurnJobSnapshot(current: TurnJobRead, incoming: TurnJobRead): TurnJobRead {
-  if (incoming.status === "completed" || incoming.status === "failed") {
-    return incoming;
+  if (mode === "continue") {
+    return "留空发送，直接让 GM 继续推进当前剧情。";
   }
-
-  return {
-    ...incoming,
-    reasoning_content:
-      incoming.reasoning_content.length >= current.reasoning_content.length
-        ? incoming.reasoning_content
-        : current.reasoning_content,
-    content_buffer:
-      incoming.content_buffer.length >= current.content_buffer.length
-        ? incoming.content_buffer
-        : current.content_buffer,
-    narrative_buffer:
-      incoming.narrative_buffer.length >= current.narrative_buffer.length
-        ? incoming.narrative_buffer
-        : current.narrative_buffer
-  };
+  return "输入你的行动。例：我带角色F从污物电梯井潜入药房。";
 }
-
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-type StoryProcessJob = Pick<
-  TurnJobRead,
-  | "id"
-  | "status"
-  | "model_used"
-  | "error_message"
-  | "reasoning_content"
-  | "narrative_buffer"
-  | "progress_message"
-  | "stream_started_at"
-  | "last_event_at"
->;
 
 function StoryPanel({
   characters,
   latestTurn,
   onCharacterClick,
+  onSelectAction,
   pending,
   process,
   progress
@@ -583,6 +634,7 @@ function StoryPanel({
   characters: CharacterRead[];
   latestTurn: TurnRead | null;
   onCharacterClick: (character: CharacterRead) => void;
+  onSelectAction: (option: ActionOption) => void;
   pending: boolean;
   process: StoryProcessJob | null;
   progress: string | null;
@@ -592,21 +644,28 @@ function StoryPanel({
   const displayedNarrative = pending ? liveNarrative : liveNarrative || latestTurn?.gm_output;
   const hasLiveProcess = process !== null;
   const actionOptions = pending ? [] : latestTurn?.action_options_json ?? [];
+  const settlement = useMemo(
+    () => (latestTurn ? buildTurnSettlement(latestTurn) : null),
+    [latestTurn]
+  );
 
   return (
-    <article className="min-h-72 bg-[color:var(--panel)] px-1 py-2 sm:min-h-[28rem] sm:px-2 sm:py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">剧情</h2>
-        {hasLiveProcess ? (
-          <span className="rounded bg-[#edf2eb] px-2 py-1 text-xs font-medium text-[color:var(--accent-strong)]">
-            {process.status}
-          </span>
-        ) : null}
-      </div>
+    <div className="grid gap-4">
+      {latestTurn && !pending ? (
+        <article className="story-block story-block-player">
+          <div className="story-label">你 · 第 {latestTurn.turn_number} 回合</div>
+          <p className="mt-2 whitespace-pre-wrap text-base leading-8">{latestTurn.player_input}</p>
+        </article>
+      ) : null}
 
       {hasLiveProcess ? (
-        <div className="mt-3 grid gap-3">
+        <article className="story-block">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="story-label">DeepSeek Pro · 剧情生成</div>
+            <span className="app-pill">{process.status}</span>
+          </div>
           <div className="app-status text-xs">
+            <TurnStageProgress process={process} />
             <div>{progress || process.progress_message || "等待 DeepSeek 返回剧情。"}</div>
             <div className="mt-1">
               最近更新：{formatLastEvent(process.last_event_at)} · 思考 {reasoning.length} 字 ·
@@ -614,7 +673,12 @@ function StoryPanel({
               {process.model_used ? ` · ${process.model_used}` : ""}
             </div>
           </div>
-          <details className="rounded border border-[color:var(--border)] bg-[color:var(--input)]">
+          <GenerationDetails
+            narrativeLength={liveNarrative.length}
+            process={process}
+            reasoningLength={reasoning.length}
+          />
+          <details className="mt-3 rounded border border-[color:var(--border)] bg-[color:var(--input)]">
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
               思考过程
             </summary>
@@ -622,90 +686,277 @@ function StoryPanel({
               {reasoning || "尚未收到思考过程。"}
             </pre>
           </details>
-        </div>
+        </article>
       ) : null}
 
-      {displayedNarrative ? (
-        <StoryMarkdown
-          characters={characters}
-          className="mt-5"
-          content={displayedNarrative}
-          onCharacterClick={onCharacterClick}
-          showCaret={pending && Boolean(liveNarrative)}
-        />
-      ) : (
-        <p className="mt-4 text-sm leading-6 text-[color:var(--muted)]">
-          {pending ? "正在等待剧情正文..." : "还没有回合。输入自由行动开始第一回合。"}
-        </p>
-      )}
+      <article className="story-block">
+        <div className="story-label">
+          GM · {pending ? "实时书写" : latestTurn ? `第 ${latestTurn.turn_number} 回合` : "等待开始"}
+        </div>
+        {displayedNarrative ? (
+          <StoryMarkdown
+            characters={characters}
+            className="mt-3"
+            content={displayedNarrative}
+            onCharacterClick={onCharacterClick}
+            showCaret={pending && Boolean(liveNarrative)}
+          />
+        ) : (
+          <p className="mt-4 text-sm leading-6 text-[color:var(--muted)]">
+            {pending ? "正在等待剧情正文..." : "还没有回合。输入行动开始第一回合。"}
+          </p>
+        )}
+      </article>
+
+      {!pending && settlement ? (
+        <TurnSettlementCard settlement={settlement} />
+      ) : null}
 
       {actionOptions.length > 0 ? (
-        <section className="mt-5 border-t border-[color:var(--border)] pt-4">
-          <h3 className="text-sm font-semibold">建议行动</h3>
-          <div className="mt-3 grid gap-2">
+        <section className="story-block">
+          <div className="story-label">建议行动</div>
+          <div className="story-choice-grid">
             {actionOptions.map((option) => (
-              <p className="text-sm leading-6" key={option.key}>
-                <span className="font-semibold">{option.key}. </span>
-                {option.label}
-              </p>
+              <button
+                aria-label={`选择建议行动 ${option.key}：${option.label}`}
+                className="story-choice-button"
+                disabled={pending}
+                key={option.key}
+                onClick={() => onSelectAction(option)}
+                type="button"
+              >
+                <span className="story-choice-key">{option.key}</span>
+                <span className="story-choice-copy">{option.label}</span>
+              </button>
             ))}
           </div>
         </section>
+      ) : null}
+    </div>
+  );
+}
+
+function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) {
+  return (
+    <article className="turn-settlement-card">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="story-label">本回合变化</div>
+          <h3 className="mt-1 font-black">结算摘要</h3>
+        </div>
+        <span className="app-pill">
+          {settlement.hasChanges ? `${settlement.sections.length} 类变化` : "暂无结构化结算"}
+        </span>
+      </div>
+
+      <ul className="turn-settlement-summary">
+        {(settlement.summary.length > 0
+          ? settlement.summary
+          : ["本回合暂无可结构化结算。"]).map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+
+      {settlement.hasChanges ? (
+        <details className="turn-settlement-details">
+          <summary>查看详细变更</summary>
+          <div className="turn-settlement-section-grid">
+            {settlement.sections.map((section) => (
+              <section className="turn-settlement-section" key={section.key}>
+                <h4>{section.label}</h4>
+                <ul>
+                  {section.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </details>
       ) : null}
     </article>
   );
 }
 
-function createInitialTurnProcess(
-  gameId: string,
-  id: string,
-  status: TurnJobRead["status"]
-): TurnJobRead {
-  return {
-    id,
-    game_id: gameId,
-    status,
-    turn: null,
-    turn_id: null,
-    model_used: null,
-    error_message: null,
-    reasoning_content: "",
-    content_buffer: "",
-    narrative_buffer: "",
-    progress_message: "任务已创建，等待 DeepSeek Pro 开始书写剧情。",
-    stream_started_at: null,
-    last_event_at: null
-  };
+function GenerationDetails({
+  narrativeLength,
+  process,
+  reasoningLength
+}: {
+  narrativeLength: number;
+  process: StoryProcessJob;
+  reasoningLength: number;
+}) {
+  return (
+    <details className="generation-detail-panel">
+      <summary>生成详情</summary>
+      <dl className="generation-detail-grid">
+        <div>
+          <dt>当前阶段</dt>
+          <dd>
+            {process.stage_label || process.stage || "准备中"} · {process.stage_index || 1}/
+            {process.stage_total || 1}
+          </dd>
+        </div>
+        <div>
+          <dt>阶段开始</dt>
+          <dd>{formatDateTime(process.stage_started_at)}</dd>
+        </div>
+        <div>
+          <dt>最近更新</dt>
+          <dd>{formatDateTime(process.last_event_at)}</dd>
+        </div>
+        <div>
+          <dt>当前模型</dt>
+          <dd>{process.model_used || "等待模型返回"}</dd>
+        </div>
+        <div>
+          <dt>SSE 状态</dt>
+          <dd>{formatStreamStatus(process)}</dd>
+        </div>
+        <div>
+          <dt>已接收</dt>
+          <dd>
+            思考 {reasoningLength} 字 · 剧情 {narrativeLength} 字
+          </dd>
+        </div>
+      </dl>
+    </details>
+  );
 }
 
-function buildJobProgressMessage(
-  job: StoryProcessJob,
-  label: string,
-  elapsedMs: number
-): string {
-  const statusText = job.status === "running" ? "运行中" : "排队中";
-  const seconds = Math.round(elapsedMs / 1000);
-  const base = job.progress_message || `${label}${statusText}`;
-  return `${base}（${statusText}，已等待 ${seconds} 秒，最近更新：${formatLastEvent(
-    job.last_event_at
-  )}）`;
+function TurnStageProgress({ process }: { process: StoryProcessJob }) {
+  const [now, setNow] = useState(() => Date.now());
+  const stageTotal = Math.max(process.stage_total || 8, 1);
+  const stageIndex = Math.min(Math.max(process.stage_index || 1, 1), stageTotal);
+  const stagePercent = Math.min(100, Math.max(6, (stageIndex / stageTotal) * 100));
+  const stageLabel = process.stage_label || "准备上下文";
+  const isActive = process.status === "pending" || process.status === "running";
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [isActive, process.stage_started_at]);
+
+  return (
+    <div className="turn-stage-progress">
+      <div className="turn-stage-progress-meta">
+        <span>
+          {stageIndex}/{stageTotal} · {stageLabel}
+        </span>
+        <span>{formatStageElapsed(process.stage_started_at, now)}</span>
+      </div>
+      <div
+        aria-label={`回合生成进度：${stageLabel}`}
+        aria-valuemax={stageTotal}
+        aria-valuemin={1}
+        aria-valuenow={stageIndex}
+        className="turn-stage-progress-track"
+        role="progressbar"
+      >
+        <div
+          className="turn-stage-progress-fill"
+          style={{ width: `${stagePercent}%` }}
+        />
+      </div>
+    </div>
+  );
 }
 
-function formatLastEvent(value: string | null): string {
+function formatDateTime(value: string | null): string {
   if (!value) {
     return "暂无";
   }
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
     return "未知";
   }
-  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 2) {
-    return "刚刚";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(date);
+}
+
+function formatStreamStatus(process: StoryProcessJob): string {
+  if (process.status === "completed") {
+    return "已完成";
   }
+  if (process.status === "failed") {
+    return "已失败";
+  }
+  if (!process.last_event_at) {
+    return "等待首个实时事件";
+  }
+  const lastEventAt = new Date(process.last_event_at).getTime();
+  if (Number.isNaN(lastEventAt)) {
+    return "状态未知";
+  }
+  const seconds = Math.max(0, Math.round((Date.now() - lastEventAt) / 1000));
+  if (seconds <= 10) {
+    return "实时接收中";
+  }
+  if (seconds <= 45) {
+    return "等待下一段输出";
+  }
+  return "可能正在等待模型或已切换轮询";
+}
+
+function formatStageElapsed(value: string | null, now: number): string {
+  if (!value) {
+    return "等待中";
+  }
+  const startedAt = new Date(value).getTime();
+  if (Number.isNaN(startedAt)) {
+    return "计时未知";
+  }
+  const seconds = Math.max(0, Math.round((now - startedAt) / 1000));
   if (seconds < 60) {
-    return `${seconds} 秒前`;
+    return `已等待 ${seconds} 秒`;
   }
   const minutes = Math.floor(seconds / 60);
-  return `${minutes} 分钟前`;
+  const remainingSeconds = seconds % 60;
+  return `已等待 ${minutes} 分 ${remainingSeconds} 秒`;
+}
+
+function findCharacterByName(characters: CharacterRead[], name: string) {
+  const normalized = normalizeName(name);
+  return characters.find((character) => {
+    if (normalizeName(character.name) === normalized) {
+      return true;
+    }
+    return character.aliases.some((alias) => normalizeName(alias) === normalized);
+  });
+}
+
+function normalizeName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function inferPresentCharacterNames(
+  characters: CharacterRead[],
+  stateV2: StateV2,
+  latestTurn: TurnRead | null
+) {
+  const narrative = [latestTurn?.player_input, latestTurn?.gm_output].filter(Boolean).join("\n");
+  const mentionedCharacters = characters
+    .filter((character) => character.is_visible && narrative.includes(character.name))
+    .map((character) => character.name);
+  return uniqueNames([
+    stateV2.protagonist_sheet.name,
+    ...stateV2.party,
+    ...mentionedCharacters
+  ]).slice(0, 6);
+}
+
+function uniqueNames(values: string[]) {
+  return values.filter(Boolean).filter((value, index, list) => {
+    const normalized = normalizeName(value);
+    return list.findIndex((item) => normalizeName(item) === normalized) === index;
+  });
 }

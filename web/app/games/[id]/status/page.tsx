@@ -82,7 +82,7 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
         gameId={game.id}
         primaryAction={
           <Link className="app-button app-button-primary w-full sm:w-fit" href={`/games/${game.id}/play`}>
-            继续游戏
+            继续冒险
           </Link>
         }
         subtitle={protagonist.identity || game.description || "当前档案尚未记录主角身份。"}
@@ -127,9 +127,9 @@ function CharacterPanel({ stateV2, xpPercent }: { stateV2: StateV2; xpPercent: n
   );
 
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel surface-panel-strong">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">主角</h2>
+        <h2 className="surface-title">主角</h2>
         <span className="app-pill">Lv.{protagonist.level}</span>
       </div>
       <div className="mt-4">
@@ -163,9 +163,9 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
   const scene = stateV2.active_scene;
 
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel surface-panel-strong">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">当前局面</h2>
+        <h2 className="surface-title">当前局面</h2>
         <span className="app-pill">第 {scene.turn} 回合</span>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -189,9 +189,9 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
 
 function SkillsPanel({ skills }: { skills: SkillState[] }) {
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">技能熟练度</h2>
+        <h2 className="surface-title">技能熟练度</h2>
         <span className="app-pill">{skills.length} 项</span>
       </div>
       <div className="mt-4 grid gap-3">
@@ -199,7 +199,7 @@ function SkillsPanel({ skills }: { skills: SkillState[] }) {
           <EmptyText>尚未记录技能。技能会在剧情中实际使用后出现。</EmptyText>
         ) : (
           skills.map((skill) => (
-            <article className="rounded border border-[color:var(--border)] p-3" key={skill.name}>
+            <article className="archive-card archive-card-green" key={skill.name}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="break-words text-sm font-semibold">{skill.name}</h3>
@@ -224,9 +224,9 @@ function SkillsPanel({ skills }: { skills: SkillState[] }) {
 
 function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">当前状态</h2>
+        <h2 className="surface-title">当前状态</h2>
         <span className="app-pill">{conditions.length} 项</span>
       </div>
       <div className="mt-4 grid gap-2">
@@ -234,7 +234,7 @@ function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
           <EmptyText>没有持续状态。</EmptyText>
         ) : (
           conditions.map((condition) => (
-            <article className="rounded border border-[color:var(--border)] p-3" key={condition.name}>
+            <article className="archive-card" key={condition.name}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="font-semibold">{condition.name}</h3>
                 <span className="app-pill">{condition.severity}</span>
@@ -254,14 +254,14 @@ function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
 
 function AbilitiesPanel({ abilities }: { abilities: AbilityState[] }) {
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">能力</h2>
+        <h2 className="surface-title">能力</h2>
         <span className="app-pill">{abilities.length} 项</span>
       </div>
       <div className="mt-4 grid gap-3">
         {abilities.map((ability) => (
-          <article className="rounded border border-[color:var(--border)] p-3" key={ability.name}>
+          <article className="archive-card archive-card-accent" key={ability.name}>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-semibold">{ability.name}</h3>
               <span className="app-pill">Lv.{ability.level}</span>
@@ -283,9 +283,9 @@ function AbilitiesPanel({ abilities }: { abilities: AbilityState[] }) {
 
 function RelationshipsPanel({ relationships }: { relationships: RelationshipTrack[] }) {
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">NPC 关系</h2>
+        <h2 className="surface-title">NPC 关系</h2>
         <span className="app-pill">{relationships.length} 人</span>
       </div>
       <div className="mt-4 grid gap-3 xl:grid-cols-2">
@@ -305,7 +305,7 @@ function RelationshipCard({ relationship }: { relationship: RelationshipTrack })
   const hasQuantifiedAxis = relationshipAxes.some(({ key }) => relationship[key] !== null);
 
   return (
-    <article className="rounded border border-[color:var(--border)] p-3">
+    <article className="archive-card archive-card-green">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-semibold">{relationship.npc}</h3>
         {relationship.stage ? <span className="app-pill">{relationship.stage}</span> : null}
@@ -337,9 +337,9 @@ function RelationshipCard({ relationship }: { relationship: RelationshipTrack })
 function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
   return (
     <section className="grid gap-4 xl:grid-cols-2">
-      <section className="app-card app-card-pad">
+      <section className="surface-panel">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">任务</h2>
+          <h2 className="surface-title">任务</h2>
           <span className="app-pill">{stateV2.quest_log.active.length} 个进行中</span>
         </div>
         <div className="mt-4 grid gap-3">
@@ -347,7 +347,7 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
             <EmptyText>暂无进行中的任务。</EmptyText>
           ) : (
             stateV2.quest_log.active.map((quest) => (
-              <article className="rounded border border-[color:var(--border)] p-3" key={quest.name}>
+              <article className="archive-card archive-card-accent" key={quest.name}>
                 <h3 className="font-semibold">{quest.name}</h3>
                 <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                   {quest.objective || quest.status}
@@ -358,9 +358,9 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
         </div>
       </section>
 
-      <section className="app-card app-card-pad">
+      <section className="surface-panel">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">未解线索</h2>
+          <h2 className="surface-title">未解线索</h2>
           <span className="app-pill">{stateV2.open_threads.active.length} 条</span>
         </div>
         <div className="mt-4 grid gap-3">
@@ -369,7 +369,7 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
           ) : (
             stateV2.open_threads.active.map((thread) => (
               <article
-                className="rounded border border-[color:var(--border)] p-3"
+                className="archive-card"
                 key={`${thread.title}-${thread.source}`}
               >
                 <h3 className="font-semibold">{thread.title}</h3>
@@ -388,9 +388,9 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
 
 function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
   return (
-    <section className="app-card app-card-pad">
+    <section className="surface-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">已知 NPC</h2>
+        <h2 className="surface-title">已知 NPC</h2>
         <span className="app-pill">{stateV2.npc_registry.length} 人</span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -398,7 +398,7 @@ function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
           <EmptyText>暂无已登记 NPC。</EmptyText>
         ) : (
           stateV2.npc_registry.map((npc) => (
-            <article className="rounded border border-[color:var(--border)] p-3" key={npc.id || npc.name}>
+            <article className="archive-card" key={npc.id || npc.name}>
               <h3 className="font-semibold">{npc.name}</h3>
               <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
                 {[npc.identity, npc.status, npc.location, npc.relationship || npc.attitude]
@@ -415,9 +415,9 @@ function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
 
 function Metric({ label, value }: { label: string; value: number | string }) {
   return (
-    <article className="app-card p-3 sm:p-4">
-      <p className="text-xs text-[color:var(--muted)] sm:text-sm">{label}</p>
-      <p className="mt-1 break-words text-2xl font-semibold sm:mt-2 sm:text-3xl">{value}</p>
+    <article className="metric-tile">
+      <p className="metric-tile-label">{label}</p>
+      <p className="metric-tile-value">{value}</p>
     </article>
   );
 }

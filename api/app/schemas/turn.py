@@ -77,5 +77,10 @@ class TurnJobRead(BaseModel):
     content_buffer: str = ""
     narrative_buffer: str = ""
     progress_message: str | None = None
+    stage: str | None = None
+    stage_label: str | None = None
+    stage_index: int = 0
+    stage_total: int = 8
+    stage_started_at: datetime | None = None
     stream_started_at: datetime | None = None
     last_event_at: datetime | None = None
