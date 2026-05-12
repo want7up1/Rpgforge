@@ -53,22 +53,9 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
             {character.identity || "身份未公开"}
           </p>
 
+          <InfoBlock label="身份介绍" value={character.identity} />
           <InfoBlock label="公开介绍" value={character.description} />
           <InfoBlock label="外貌描述" value={character.appearance} />
-          <InfoBlock label="立绘参考词" value={character.portrait_prompt} />
-
-          {character.aliases.length > 0 ? (
-            <div className="mt-4">
-              <h3 className="text-sm font-semibold">别名</h3>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {character.aliases.map((alias) => (
-                  <span className="app-pill" key={alias}>
-                    {alias}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
       </article>
     </div>

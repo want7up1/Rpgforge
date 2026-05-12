@@ -21,10 +21,12 @@ The API is served by FastAPI. In Docker, browser requests should go through the 
 
 - `POST /api/generator/chat`
 - `POST /api/generator/chat-jobs`
+- `GET /api/generator/chat-jobs/active`
 - `GET /api/generator/chat-jobs/{job_id}`
 - `GET /api/generator/chat-jobs/{job_id}/events`
 - `POST /api/generator/finalize`
 - `POST /api/generator/finalize-jobs`
+- `GET /api/generator/finalize-jobs/active`
 - `GET /api/generator/finalize-jobs/{job_id}`
 - `GET /api/generator/finalize-jobs/{job_id}/events`
 - `POST /api/generator/create-game`
@@ -36,6 +38,7 @@ The job endpoints are preferred for browser clients. Event endpoints use server-
 - `GET /api/games/{game_id}/turns`
 - `POST /api/games/{game_id}/turns`
 - `POST /api/games/{game_id}/turns/jobs`
+- `GET /api/games/{game_id}/turns/jobs/active`
 - `GET /api/games/{game_id}/turns/jobs/{job_id}`
 - `GET /api/games/{game_id}/turns/jobs/{job_id}/events`
 - `GET /api/games/{game_id}/turns/{turn_id}`
@@ -65,4 +68,5 @@ Turn jobs expose incremental narrative progress so the play page can update whil
 - `GET /api/settings/deepseek`
 - `PATCH /api/settings/deepseek`
 
-When `SETTINGS_ADMIN_TOKEN` is set, saving settings requires the token.
+When `SETTINGS_ADMIN_TOKEN` is set, saving settings requires the token. In production mode,
+saving settings is rejected if the token is missing.

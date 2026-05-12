@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RPGForge AI Dungeon-inspired Preview</title>
+    <style>
+      :root {
+        --bg: #111312;
+        --surface: #191d1b;
+        --surface-2: #222823;
+        --surface-3: #2b342e;
+        --text: #f3eee4;
+        --muted: #b9b1a3;
+        --faint: #837b70;
+        --line: rgba(243, 238, 228, 0.13);
+        --accent: #2f7a60;
+        --accent-2: #52a47f;
+        --gold: #d9b36f;
+        --danger: #ba5e50;
+        --paper: #f7f0e2;
+        --paper-text: #211f1b;
+        --paper-muted: #6d6254;
+        --radius: 8px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        min-height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "PingFang SC", "Microsoft YaHei", sans-serif;
+        line-height: 1.5;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 18% 0%, rgba(82, 164, 127, 0.16), transparent 28rem),
+          linear-gradient(180deg, #151816 0%, #101211 44%, #0c0f0e 100%);
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: 260px minmax(0, 1fr) 320px;
+        min-height: 100vh;
+      }
+
+      .sidebar,
+      .inspector {
+        border-color: var(--line);
+        background: rgba(25, 29, 27, 0.86);
+        backdrop-filter: blur(16px);
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+        padding: 18px;
+      }
+
+      .inspector {
+        border-left: 1px solid var(--line);
+        padding: 18px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 22px;
+        font-weight: 850;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border: 1px solid rgba(217, 179, 111, 0.45);
+        border-radius: 7px;
+        background: rgba(217, 179, 111, 0.12);
+        color: var(--gold);
+        font-size: 14px;
+      }
+
+      .sidebar-section {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 22px;
+      }
+
+      .section-title {
+        color: var(--faint);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .nav-button,
+      .mode-button,
+      .icon-button,
+      .choice-button,
+      .primary-button {
+        min-height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(243, 238, 228, 0.055);
+        color: var(--text);
+        padding: 8px 11px;
+      }
+
+      .nav-button {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: space-between;
+        text-align: left;
+      }
+
+      .nav-button.active,
+      .mode-button.active {
+        border-color: rgba(82, 164, 127, 0.48);
+        background: rgba(47, 122, 96, 0.24);
+      }
+
+      .save-card {
+        display: grid;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(243, 238, 228, 0.045);
+        padding: 12px;
+      }
+
+      .save-card strong {
+        font-size: 15px;
+      }
+
+      .save-card small,
+      .muted {
+        color: var(--muted);
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        min-width: 0;
+      }
+
+      .topbar {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(17, 19, 18, 0.78);
+        padding: 14px 20px;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(16px);
+      }
+
+      .adventure-title {
+        min-width: 0;
+      }
+
+      .adventure-title h1 {
+        overflow: hidden;
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .adventure-title p {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .top-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .story-scroll {
+        overflow: auto;
+        padding: 24px 20px 28px;
+      }
+
+      .story-column {
+        width: min(760px, 100%);
+        margin: 0 auto;
+      }
+
+      .story-block {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+
+      .story-block.player {
+        border-left: 3px solid var(--accent-2);
+        padding-left: 14px;
+      }
+
+      .story-block.ai {
+        border-left: 3px solid rgba(217, 179, 111, 0.8);
+        padding-left: 14px;
+      }
+
+      .story-label {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        color: var(--faint);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .story-content {
+        color: var(--text);
+        font-family: Georgia, "Songti SC", "SimSun", serif;
+        font-size: 19px;
+        line-height: 2.08;
+      }
+
+      .story-content p {
+        margin: 0 0 16px;
+      }
+
+      .story-content strong {
+        color: var(--gold);
+        font-weight: 850;
+      }
+
+      .suggestions {
+        display: grid;
+        gap: 9px;
+        margin: 20px 0 4px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(243, 238, 228, 0.04);
+        padding: 14px;
+      }
+
+      .suggestions h2 {
+        margin: 0 0 4px;
+        font-size: 15px;
+      }
+
+      .suggestion-row {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .suggestion-row strong {
+        color: var(--text);
+      }
+
+      .composer {
+        border-top: 1px solid var(--line);
+        background: rgba(17, 19, 18, 0.92);
+        padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+        position: sticky;
+        bottom: 0;
+        z-index: 12;
+        backdrop-filter: blur(18px);
+      }
+
+      .composer-inner {
+        display: grid;
+        width: min(860px, 100%);
+        margin: 0 auto;
+        gap: 10px;
+      }
+
+      .mode-row,
+      .choice-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .mode-button {
+        min-height: 34px;
+        padding: 6px 10px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .choice-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(130px, 1fr);
+      }
+
+      .choice-button {
+        font-weight: 850;
+      }
+
+      .primary-button {
+        border-color: rgba(82, 164, 127, 0.52);
+        background: linear-gradient(180deg, #377b62, #235240);
+        color: white;
+        font-weight: 800;
+      }
+
+      .input-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+
+      .input-row textarea {
+        min-height: 48px;
+        max-height: 140px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(243, 238, 228, 0.07);
+        color: var(--text);
+        padding: 12px;
+        outline: none;
+      }
+
+      .input-row textarea:focus {
+        border-color: rgba(82, 164, 127, 0.7);
+      }
+
+      .inspector-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      .inspector h2,
+      .panel h3 {
+        margin: 0;
+      }
+
+      .panel {
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: rgba(243, 238, 228, 0.045);
+        margin-bottom: 12px;
+        padding: 13px;
+      }
+
+      .stat-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .stat {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(0, 0, 0, 0.12);
+        padding: 10px;
+      }
+
+      .stat small {
+        display: block;
+        color: var(--faint);
+        font-weight: 700;
+      }
+
+      .stat strong {
+        font-size: 20px;
+      }
+
+      .progress {
+        height: 7px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(243, 238, 228, 0.09);
+      }
+
+      .progress span {
+        display: block;
+        width: 78%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--accent-2), var(--gold));
+      }
+
+      .character-mini {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+      }
+
+      .avatar {
+        display: grid;
+        width: 52px;
+        height: 68px;
+        place-items: center;
+        border: 1px solid rgba(217, 179, 111, 0.26);
+        border-radius: 6px;
+        background: linear-gradient(180deg, rgba(217, 179, 111, 0.18), rgba(47, 122, 96, 0.12));
+        color: var(--gold);
+        font-weight: 900;
+      }
+
+      .tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .tag {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+
+      .mobile-tabs {
+        display: none;
+      }
+
+      @media (max-width: 1120px) {
+        .app {
+          grid-template-columns: 220px minmax(0, 1fr);
+        }
+
+        .inspector {
+          display: none;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .app {
+          display: block;
+          padding-bottom: 0;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .mobile-tabs {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+          border-bottom: 1px solid var(--line);
+          background: rgba(17, 19, 18, 0.94);
+          padding: 10px;
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          backdrop-filter: blur(16px);
+        }
+
+        .mobile-tabs button {
+          min-width: 0;
+          min-height: 38px;
+          border: 1px solid var(--line);
+          border-radius: 6px;
+          background: rgba(243, 238, 228, 0.06);
+          color: var(--text);
+          font-weight: 750;
+        }
+
+        .topbar {
+          position: static;
+          align-items: flex-start;
+          padding: 14px 12px;
+        }
+
+        .top-actions {
+          display: none;
+        }
+
+        .story-scroll {
+          padding: 18px 12px 20px;
+        }
+
+        .story-content {
+          font-size: 18px;
+          line-height: 2;
+        }
+
+        .choice-row {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .primary-button {
+          grid-column: 1 / -1;
+        }
+
+        .input-row {
+          grid-template-columns: 1fr;
+        }
+
+        .input-row .primary-button {
+          min-height: 44px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mobile-tabs" aria-label="移动端主导航">
+      <button>冒险</button>
+      <button>资料</button>
+      <button>角色</button>
+      <button>状态</button>
+    </div>
+
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">RF</span>
+          <span>RPGForge</span>
+        </div>
+
+        <section class="sidebar-section">
+          <div class="section-title">Adventures</div>
+          <button class="nav-button active">
+            <span>曙光之末</span>
+            <span>7</span>
+          </button>
+          <button class="nav-button">
+            <span>雁回镇旧案</span>
+            <span>草稿</span>
+          </button>
+          <button class="primary-button">开始新冒险</button>
+        </section>
+
+        <section class="sidebar-section">
+          <div class="section-title">Adventure Tools</div>
+          <button class="nav-button">世界资料 <span>8</span></button>
+          <button class="nav-button">旅程记忆 <span>8</span></button>
+          <button class="nav-button">角色档案 <span>4</span></button>
+          <button class="nav-button">状态面板 <span>Lv.1</span></button>
+        </section>
+
+        <section class="sidebar-section">
+          <div class="section-title">Current Save</div>
+          <div class="save-card">
+            <strong>第 7 回合</strong>
+            <small>市第三人民医院三楼休息室</small>
+            <small>尸群正在逼近，冷库恢复供电。</small>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="adventure-title">
+            <h1>曙光之末</h1>
+            <p>第 7 回合 · 市第三人民医院三楼休息室 · 傍晚</p>
+          </div>
+          <div class="top-actions">
+            <button class="icon-button">撤销</button>
+            <button class="icon-button">重试</button>
+            <button class="icon-button">继续</button>
+            <button class="icon-button">主题</button>
+          </div>
+        </header>
+
+        <section class="story-scroll">
+          <div class="story-column">
+            <article class="story-block player">
+              <div class="story-label">Action · 自由行动</div>
+              <div class="story-content">
+                <p>你让苏婉清留在休息室反锁房门，自己前往地下室重启医院供电。</p>
+              </div>
+            </article>
+
+            <article class="story-block ai">
+              <div class="story-label">GM · DeepSeek Pro · streamed</div>
+              <div class="story-content">
+                <p>
+                  <strong>林辰</strong>将<strong>破晓</strong>的微光压低，转身握住
+                  <strong>苏婉清</strong>的手腕，将一支肾上腺素注射器轻轻拍进她掌心。
+                </p>
+                <p>
+                  “反锁房门，只给我留暗号。”他声音压得极低，“如果我遇到麻烦，
+                  就用这根注射器敲水管，三长两短。”
+                </p>
+                <p>
+                  备用楼梯藏在医院西翼最深处。消防门虚掩，推开时刮出一阵铁锈味的冷风。
+                  越往下，空气越湿，踩到第三段台阶时，积水突然没过鞋底。
+                </p>
+                <p>
+                  地下室铁门半开，柴油发电机沉默如巨兽。就在灯管重新亮起时，
+                  冷藏室门后传来极其微弱的撞击，像冻僵的手指在叩门。
+                </p>
+                <p>
+                  他沿原路返回三楼，门锁咔嗒一声打开。<strong>苏婉清</strong>听见远处发电机的低鸣，
+                  眼中迸出希望：“你做到了？”
+                </p>
+              </div>
+            </article>
+
+            <section class="suggestions">
+              <h2>建议行动</h2>
+              <div class="suggestion-row">
+                <strong>A</strong>
+                <span>从药房正门进入，趁尸群尚未突破铁门快速清理堵门丧尸。</span>
+              </div>
+              <div class="suggestion-row">
+                <strong>B</strong>
+                <span>从污物电梯井潜入药房，避开正面威胁但承担污染风险。</span>
+              </div>
+              <div class="suggestion-row">
+                <strong>C</strong>
+                <span>返回地下室调查锁住的冷藏室，寻找晨星公司留下的线索。</span>
+              </div>
+              <div class="suggestion-row">
+                <strong>D</strong>
+                <span>让苏婉清警戒，自己独自取药，以最快速度完成清单。</span>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <footer class="composer">
+          <div class="composer-inner">
+            <div class="mode-row" aria-label="输入模式">
+              <button class="mode-button active">行动</button>
+              <button class="mode-button">对话</button>
+              <button class="mode-button">叙述</button>
+              <button class="mode-button">继续</button>
+            </div>
+            <div class="choice-row" aria-label="建议行动按钮">
+              <button class="choice-button">A</button>
+              <button class="choice-button">B</button>
+              <button class="choice-button">C</button>
+              <button class="choice-button">D</button>
+              <button class="primary-button">自由行动</button>
+            </div>
+            <div class="input-row">
+              <textarea placeholder="输入你的行动。例：我带苏婉清从污物电梯井潜入药房。"></textarea>
+              <button class="primary-button">发送</button>
+            </div>
+          </div>
+        </footer>
+      </main>
+
+      <aside class="inspector">
+        <div class="inspector-header">
+          <h2>冒险资料</h2>
+          <button class="icon-button">设置</button>
+        </div>
+
+        <section class="panel">
+          <h3>状态</h3>
+          <div class="stat-grid">
+            <div class="stat">
+              <small>等级</small>
+              <strong>Lv.1</strong>
+            </div>
+            <div class="stat">
+              <small>经验</small>
+              <strong>78/100</strong>
+            </div>
+          </div>
+          <div class="progress"><span></span></div>
+          <p class="muted">状态稳定 · 光之力储备 85 · 当前压力：楼梯间铁门即将失守。</p>
+        </section>
+
+        <section class="panel">
+          <h3>角色</h3>
+          <div class="character-mini">
+            <div class="avatar">林</div>
+            <div>
+              <strong>林辰</strong>
+              <div class="muted">主角 · 光元素异能觉醒者</div>
+            </div>
+          </div>
+          <div class="character-mini">
+            <div class="avatar">苏</div>
+            <div>
+              <strong>苏婉清</strong>
+              <div class="muted">同伴 · 信任 22</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>世界资料</h3>
+          <div class="tag-row">
+            <span class="tag">晨星公司</span>
+            <span class="tag">T 病毒变种</span>
+            <span class="tag">启明素</span>
+            <span class="tag">市第三人民医院</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h3>旅程记忆</h3>
+          <p class="muted">
+            林辰与苏婉清暂居三楼休息室。地下室发电机已重启，B2 冷库钥匙已获得，
+            药房路线尚未决定。
+          </p>
+        </section>
+      </aside>
+    </div>
+  </body>
+</html>

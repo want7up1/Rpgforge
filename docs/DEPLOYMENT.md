@@ -23,6 +23,13 @@ View logs:
 docker compose logs -f web api worker
 ```
 
+After changes to backend, worker, web, or Docker-related files, rebuild the affected runtime
+services explicitly:
+
+```bash
+docker compose up -d --build api worker web
+```
+
 ## Port Layout
 
 By default:
@@ -41,7 +48,8 @@ For Nginx, Caddy, Cloudflare Tunnel, or similar tools:
 - Keep long-lived HTTP connections enabled for server-sent events.
 - Increase request and response timeouts for long AI generation jobs.
 - Use HTTPS.
-- Consider access control if the instance contains private game data.
+- Require authentication at the reverse proxy for public deployments.
+- Set `SETTINGS_ADMIN_TOKEN`; production saves are blocked when it is missing.
 
 ## Data Volumes
 
@@ -51,14 +59,15 @@ Docker volumes:
 - `audio_data`: reserved for optional audio output.
 - `portrait_data`: uploaded character portraits.
 
-These volumes may contain private user data. Do not publish or commit them.
+These volumes may contain private user data. The database may also contain plaintext runtime
+DeepSeek API keys saved from the settings page. Do not publish or commit these volumes.
 
 ## Updating
 
 After code changes:
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build api worker web
 ```
 
 The API container runs Alembic migrations on startup.

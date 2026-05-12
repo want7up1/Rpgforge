@@ -17,26 +17,26 @@ const taskRouteRows: {
 }[] = [
   {
     key: "generator_interview",
-    label: "规则访谈",
-    description: "理解游戏想法、确认核心需求和剧本锚点。",
+    label: "冒险设定确认",
+    description: "理解冒险想法、确认核心需求和剧本锚点。",
     defaultSlot: "pro"
   },
   {
     key: "generator_finalize",
-    label: "完整配置入口",
-    description: "负责完整配置生成任务的入口与兼容路由。",
+    label: "冒险世界入口",
+    description: "负责冒险世界生成任务的入口与兼容路由。",
     defaultSlot: "pro"
   },
   {
     key: "generator_finalize_outline",
-    label: "配置导演总纲",
+    label: "世界导演总纲",
     description: "先锁定剧本承诺、专有名词和分块生成锚点。",
     defaultSlot: "pro"
   },
   {
     key: "generator_finalize_characters",
     label: "角色档案生成",
-    description: "生成主角、关键 NPC、关系定位和立绘提示词。",
+    description: "生成主角、关键 NPC、关系定位、公开介绍和外貌描述。",
     defaultSlot: "pro"
   },
   {
@@ -219,7 +219,8 @@ export default function SettingsPage() {
                 </label>
               ) : (
                 <div className="app-alert">
-                  当前未配置 SETTINGS_ADMIN_TOKEN，外网可访问时建议立即在 .env 中设置。
+                  当前未配置 SETTINGS_ADMIN_TOKEN。生产环境会禁止保存设置；外网部署必须配置强 Token
+                  并放在认证反代后。
                 </div>
               )}
 

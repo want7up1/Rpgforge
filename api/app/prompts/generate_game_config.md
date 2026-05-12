@@ -7,7 +7,7 @@
 4. 世界书条目必须能支持长期一致性，不要只有泛泛描述。核心主角、当前同伴、重要地点、关键规则要有明确 keywords 和 trigger_words。
 5. 初始状态必须包含 current_turn、time、location、protagonist、inventory、quests、npcs、factions、variables、known_facts、hidden_facts、open_threads。
 6. modes 至少包含主线模式、调查模式、社交模式、探索模式。题材需要时可加入战斗、潜行等模式。
-7. system_prompt 必须明确 GM 每回合输出玩家可见剧情，并给出 A/B/C/D 四个具体行动选项。
+7. system_prompt 必须明确 GM 每回合输出玩家可见剧情，并给出 A/B/C/D 四个具体行动选项；不要自定义 Markdown 格式规则，必须遵守 RPGForge 剧情 Markdown 契约。
 8. 不要把 GM 幕后真相写进 public_info 或玩家可见初始 known_facts。
 9. worldview、script_outline、initial_state 必须是 JSON object，不允许输出纯字符串。
 10. lore_entries、modes、voice_profiles 必须是 JSON array，不允许输出纯字符串。
@@ -18,7 +18,8 @@
 15. initial_state 应尽量包含 progression、skills、abilities、conditions、relationships，用于角色状态页和长期数值追踪。
 16. 不要为了填满字段而硬造能力；如果题材或初始剧情没有明确能力、技能、状态或关系，就使用空数组。
 17. 如果有核心 NPC 或同伴，relationships 应给出初始关系轴：trust、affection、respect、fear、loyalty、conflict，取值 0-100；不要写玩家未知的幕后真相。
-18. characters 必须列出玩家初始可见的主角、核心 NPC、当前同伴。每个角色要写 appearance 和 portrait_prompt，方便用户手动生成并上传立绘；不要把隐藏身份、幕后真相或 gm_secret 写进角色公开档案。
+18. characters 必须列出玩家初始可见的主角、核心 NPC、当前同伴；aliases 必须使用空数组，portrait_prompt 必须使用空字符串。
+19. characters.appearance 必须详细，写清玩家可见的外貌、体态、服装、气质、关键视觉符号和能力发动时的可见特征；不要把隐藏身份、幕后真相或 gm_secret 写进角色公开档案。
 
 必须只输出 JSON，不要输出 Markdown，不要解释。
 
@@ -27,7 +28,7 @@
   "title": "游戏标题",
   "genre": "类型",
   "description": "一句话简介",
-  "system_prompt": "本局 GM 规则和叙事规则",
+  "system_prompt": "本局 GM 题材、基调和叙事规则；必须遵守 RPGForge 剧情 Markdown 契约",
   "worldview": {
     "summary": "",
     "tone": "",
@@ -74,12 +75,12 @@
   "characters": [
     {
       "name": "角色姓名",
-      "aliases": ["可公开别名"],
+      "aliases": [],
       "role": "protagonist|npc|companion|other",
       "identity": "玩家可见身份",
       "description": "玩家初始可见介绍",
-      "appearance": "玩家可见外貌、气质、服装、关键视觉符号",
-      "portrait_prompt": "用于手动生成立绘的公开提示词，不包含隐藏真相",
+      "appearance": "详细的玩家可见外貌、体态、服装、气质、关键视觉符号和能力发动时的可见特征",
+      "portrait_prompt": "",
       "visibility": "visible"
     }
   ],

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -87,6 +87,11 @@ class TurnJob(Base):
     content_buffer: Mapped[str] = mapped_column(Text, nullable=False, default="")
     narrative_buffer: Mapped[str] = mapped_column(Text, nullable=False, default="")
     progress_message: Mapped[str | None] = mapped_column(Text)
+    stage: Mapped[str | None] = mapped_column(String(64))
+    stage_label: Mapped[str | None] = mapped_column(Text)
+    stage_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stage_total: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    stage_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stream_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

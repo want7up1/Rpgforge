@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.game import Game
 from app.models.state_delta import StateDelta
 from app.models.turn import Turn
+from app.services.game_activity import touch_game
 from app.services.state_applier import apply_state_delta
 
 AUTO_APPLY_STATUSES = {"pending", "edited"}
@@ -40,6 +41,7 @@ def apply_pending_state_deltas(db: Session, game: Game) -> bool:
         db.add(delta)
 
     db.add(game.state)
+    touch_game(db, game.id)
     db.commit()
     db.refresh(game.state)
     return True

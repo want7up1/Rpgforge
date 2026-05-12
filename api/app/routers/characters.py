@@ -17,6 +17,7 @@ from app.models.character import Character
 from app.models.game import Game
 from app.schemas.character import CharacterRead, CharacterSyncResponse, CharacterUpdate
 from app.services.characters import character_portrait_url, sync_characters_from_game
+from app.services.game_activity import touch_game
 
 router = APIRouter(prefix="/api/games/{game_id}/characters", tags=["characters"])
 DB_DEPENDENCY = Depends(get_db)
@@ -88,6 +89,9 @@ def list_characters(game_id: UUID, db: Session = DB_DEPENDENCY) -> list[Characte
 def sync_characters(game_id: UUID, db: Session = DB_DEPENDENCY) -> CharacterSyncResponse:
     game = get_game_or_404(db, game_id)
     created, updated, characters = sync_characters_from_game(db, game)
+    if created or updated:
+        touch_game(db, game_id)
+        db.commit()
     ordered = sorted_characters(characters)
     return CharacterSyncResponse(
         total=len(ordered),
@@ -132,6 +136,7 @@ def update_character(
         character.is_visible = False
 
     db.add(character)
+    touch_game(db, game_id)
     try:
         db.commit()
     except IntegrityError as exc:
@@ -179,6 +184,7 @@ async def upload_portrait(
     character.portrait_original_filename = file.filename
     character.portrait_uploaded_at = datetime.now(UTC)
     db.add(character)
+    touch_game(db, game_id)
     db.commit()
     db.refresh(character)
     return character_payload(game_id, character)
@@ -198,6 +204,7 @@ def delete_portrait(
     character.portrait_original_filename = None
     character.portrait_uploaded_at = None
     db.add(character)
+    touch_game(db, game_id)
     db.commit()
     db.refresh(character)
     return character_payload(game_id, character)

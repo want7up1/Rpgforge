@@ -7,8 +7,10 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
 import { JsonBlock } from "@/components/JsonBlock";
+import { buildContractView, type ContractView } from "@/lib/gameExperience";
 import {
   getContextDiagnostic,
+  getGame,
   getGameMemory,
   getTurns,
   rebuildGameSummaries,
@@ -16,6 +18,7 @@ import {
 } from "@/lib/api";
 import type {
   ContextDiagnosticRead,
+  GameDetail,
   GameMemoryRead,
   LoreDiagnosticRead,
   LoreEntryMemoryRead,
@@ -27,6 +30,7 @@ type LoadState =
   | { status: "loading" }
   | {
       status: "ready";
+      game: GameDetail;
       memory: GameMemoryRead;
       turns: TurnRead[];
       diagnostic: ContextDiagnosticRead | null;
@@ -46,14 +50,18 @@ export default function GameMemoryPage() {
 
     async function load() {
       try {
-        const [memory, turns] = await Promise.all([getGameMemory(params.id), getTurns(params.id)]);
+        const [memory, turns, game] = await Promise.all([
+          getGameMemory(params.id),
+          getTurns(params.id),
+          getGame(params.id)
+        ]);
         const latestTurn = turns[turns.length - 1];
         const diagnostic = latestTurn
           ? await getContextDiagnostic(params.id, latestTurn.id)
           : null;
         if (!controller.signal.aborted) {
           setSelectedTurnId(latestTurn?.id ?? "");
-          setState({ status: "ready", memory, turns, diagnostic });
+          setState({ status: "ready", game, memory, turns, diagnostic });
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
@@ -71,10 +79,14 @@ export default function GameMemoryPage() {
   }, [params.id]);
 
   async function refreshMemory() {
-    const [memory, turns] = await Promise.all([getGameMemory(params.id), getTurns(params.id)]);
+    const [memory, turns, game] = await Promise.all([
+      getGameMemory(params.id),
+      getTurns(params.id),
+      getGame(params.id)
+    ]);
     const turnId = selectedTurnId || turns[turns.length - 1]?.id || "";
     const diagnostic = turnId ? await getContextDiagnostic(params.id, turnId) : null;
-    setState({ status: "ready", memory, turns, diagnostic });
+    setState({ status: "ready", game, memory, turns, diagnostic });
     setSelectedTurnId(turnId);
   }
 
@@ -150,6 +162,7 @@ export default function GameMemoryPage() {
           actionStatus={actionStatus}
           busyAction={busyAction}
           diagnostic={state.diagnostic}
+          game={state.game}
           memory={state.memory}
           onRebuildSummaries={handleRebuildSummaries}
           onReindexLore={handleReindexLore}
@@ -167,6 +180,7 @@ function MemoryView({
   actionStatus,
   busyAction,
   diagnostic,
+  game,
   memory,
   onRebuildSummaries,
   onReindexLore,
@@ -178,6 +192,7 @@ function MemoryView({
   actionStatus: string | null;
   busyAction: "summaries" | "lore" | null;
   diagnostic: ContextDiagnosticRead | null;
+  game: GameDetail;
   memory: GameMemoryRead;
   onRebuildSummaries: () => void;
   onReindexLore: () => void;
@@ -186,6 +201,7 @@ function MemoryView({
   turns: TurnRead[];
 }) {
   const summaryBuckets = useMemo(() => bucketSummaries(memory.summaries), [memory.summaries]);
+  const contract = useMemo(() => buildContractView(game), [game]);
   const embeddedLoreCount = memory.lore_entries.filter((entry) => entry.embedding_configured).length;
 
   return (
@@ -199,7 +215,7 @@ function MemoryView({
             className="app-button app-button-primary w-full sm:w-fit"
             href={`/games/${memory.game.id}/play`}
           >
-            继续游戏
+            继续冒险
           </Link>
         }
         subtitle={
@@ -217,11 +233,12 @@ function MemoryView({
         <Metric label="摘要" value={memory.summaries.length} />
       </section>
 
+      <ContractSection contract={contract} />
       <SummarySection buckets={summaryBuckets} />
       <LoreSection entries={memory.lore_entries} />
 
-      <details className="app-card app-card-pad">
-        <summary className="cursor-pointer text-lg font-semibold">高级维护与诊断</summary>
+      <details className="surface-panel">
+        <summary className="cursor-pointer surface-title">高级维护与诊断</summary>
         <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <MaintenancePanel
             actionError={actionError}
@@ -244,11 +261,50 @@ function MemoryView({
   );
 }
 
+function ContractSection({ contract }: { contract: ContractView }) {
+  return (
+    <section className="surface-panel surface-panel-strong">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="surface-title">核心设定</h2>
+          <p className="surface-subtle mt-1">
+            这些内容来自创建时的世界与导演约束，用来检查剧情是否仍贴合最初方向。
+          </p>
+        </div>
+        <span className="app-pill">只读</span>
+      </div>
+
+      {!contract.hasContent ? (
+        <p className="mt-4 rounded border border-dashed border-[color:var(--border)] p-3 text-sm text-[color:var(--muted)]">
+          当前存档没有可展示的核心设定锁定信息。
+        </p>
+      ) : (
+        <div className="contract-grid mt-4">
+          {contract.sections.map((section) => (
+            <article className="contract-card" key={section.key}>
+              <h3>{section.label}</h3>
+              {section.items.length > 0 ? (
+                <ul>
+                  {section.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>未记录。</p>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: number | string }) {
   return (
-    <article className="app-card p-3 sm:p-4">
-      <p className="text-xs text-[color:var(--muted)] sm:text-sm">{label}</p>
-      <p className="mt-1 break-words text-2xl font-semibold sm:mt-2 sm:text-3xl">{value}</p>
+    <article className="metric-tile">
+      <p className="metric-tile-label">{label}</p>
+      <p className="metric-tile-value">{value}</p>
     </article>
   );
 }
@@ -271,9 +327,9 @@ function MaintenancePanel({
   onReindexLore: () => void;
 }) {
   return (
-    <section className="rounded border border-[color:var(--border)] p-4">
-      <h2 className="text-lg font-semibold">维护</h2>
-      <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
+    <section className="archive-card">
+      <h2 className="surface-title">维护</h2>
+      <p className="surface-subtle mt-1">
         摘要和向量会影响下一次剧情生成时注入的上下文。正常游戏时不需要频繁操作。
       </p>
       <p className="app-status mt-3">世界资料索引：{embeddedLoreCount}/{loreCount}</p>
@@ -303,8 +359,8 @@ function MaintenancePanel({
 
 function SummarySection({ buckets }: { buckets: Record<string, SummaryRead[]> }) {
   return (
-    <section className="app-card app-card-pad">
-      <h2 className="text-lg font-semibold">上下文记忆</h2>
+    <section className="surface-panel surface-panel-strong">
+      <h2 className="surface-title">上下文记忆</h2>
       <div className="mt-4 grid gap-4">
         <SummaryGroup label="长期记忆" summaries={buckets.long_term ?? []} />
         <SummaryGroup label="章节记忆" summaries={buckets.chapter ?? []} />
@@ -344,7 +400,7 @@ function SummaryCards({ summaries }: { summaries: SummaryRead[] }) {
   return (
     <div className="grid gap-3">
       {summaries.map((summary) => (
-        <article className="rounded border border-[color:var(--border)] p-3" key={summary.id}>
+        <article className="archive-card archive-card-green" key={summary.id}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-[color:var(--muted)]">
               {formatSummaryRange(summary)}
@@ -384,7 +440,7 @@ function DiagnosticSection({
   turns: TurnRead[];
 }) {
   return (
-    <section className="rounded border border-[color:var(--border)] p-4">
+    <section className="archive-card">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
         <h2 className="text-lg font-semibold">上下文诊断</h2>
         <select
@@ -454,7 +510,7 @@ function LoreDiagnosticList({
       ) : (
         <div className="mt-2 grid gap-2">
           {entries.map((entry) => (
-            <article className="rounded border border-[color:var(--border)] p-3" key={entry.id}>
+          <article className="archive-card" key={entry.id}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h4 className="font-semibold">{entry.title}</h4>
                 <span className="text-xs text-[color:var(--muted)]">
@@ -477,15 +533,15 @@ function LoreDiagnosticList({
 
 function LoreSection({ entries }: { entries: LoreEntryMemoryRead[] }) {
   return (
-    <section className="app-card app-card-pad">
-      <h2 className="text-lg font-semibold">世界资料</h2>
+    <section className="surface-panel">
+      <h2 className="surface-title">世界资料</h2>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {entries.length === 0 ? (
           <p className="text-sm text-[color:var(--muted)]">暂无世界资料。</p>
         ) : (
           entries.map((entry) => (
             <article
-              className="app-long-card rounded border border-[color:var(--border)] p-4"
+              className="archive-card archive-card-accent app-long-card"
               key={entry.id}
             >
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

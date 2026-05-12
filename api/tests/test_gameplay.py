@@ -1,6 +1,7 @@
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -12,7 +13,7 @@ from app.models.state_delta import StateDelta
 from app.models.summary import Summary
 from app.models.turn import Turn
 from app.schemas.generator import GeneratedGameConfig, GeneratedLoreEntry, GeneratedMode
-from app.schemas.turn import TurnCreate
+from app.schemas.turn import GMRuntimeOutput, TurnCreate
 from app.services.deepseek_client import ChatCompletionResult, ChatCompletionStreamChunk
 from app.services.game_creator import create_game_from_config
 from app.services.gameplay import GameplayService
@@ -607,10 +608,10 @@ def test_gameplay_service_streams_turn(db_session) -> None:
 
 
 def test_turn_job_lifecycle(reset_database, monkeypatch) -> None:
-    async def fake_run_turn_job(job_id):
+    def fake_enqueue_turn_job(job_id):
         del job_id
 
-    monkeypatch.setattr("app.routers.gameplay.run_turn_job", fake_run_turn_job)
+    monkeypatch.setattr("app.routers.gameplay.enqueue_turn_job", fake_enqueue_turn_job)
     client = TestClient(app)
     create_response = client.post(
         "/api/generator/create-game",
@@ -636,43 +637,84 @@ def test_turn_job_lifecycle(reset_database, monkeypatch) -> None:
     assert body["reasoning_content"] == ""
     assert body["narrative_buffer"] == ""
 
+    active_response = client.get(f"/api/games/{game_id}/turns/jobs/active")
+    assert active_response.status_code == 200
+    assert active_response.json()["id"] == payload["id"]
+
 
 def test_turn_job_persists_stream_progress(db_session, monkeypatch) -> None:
     game = create_game_from_config(db_session, build_generated_config())
 
     class StreamingGameplayService:
-        async def run_turn_stream(
+        async def load_turn_runtime_context(
             self,
             db,
             loaded_game,
             payload,
+            on_progress=None,
+        ):
+            del db
+            if on_progress:
+                await on_progress("正在检索相关世界书与压缩摘要。")
+            return SimpleNamespace(
+                game=loaded_game,
+                player_input=payload.player_input,
+                selected_mode=None,
+                recent_turns=[],
+                related_lore=[],
+                summaries={},
+            )
+
+        async def generate_turn_runtime_output(
+            self,
+            context,
             on_update=None,
             on_progress=None,
-            extract_state=True,
         ):
-            del loaded_game, on_progress, extract_state
+            del context
+            if on_progress:
+                await on_progress("剧情导演决策已完成，正在调用 GM 书写剧情。")
             if on_update:
                 await on_update(
                     "判断自由行动并铺设线索。",
                     '{"narrative":"义庄门槛内侧的泥痕尚未干透。"',
                     "deepseek-v4-pro-test",
                 )
+            return (
+                GMRuntimeOutput(
+                    narrative="义庄门槛内侧的泥痕尚未干透。",
+                    visible_clues=["泥痕通向后院"],
+                    action_options=[
+                        {"key": "A", "label": "沿着泥痕追到后院"},
+                        {"key": "B", "label": "检查其他脚印"},
+                        {"key": "C", "label": "询问守庄老仆"},
+                        {"key": "D", "label": "先关上义庄大门"},
+                    ],
+                ),
+                "deepseek-v4-pro-test",
+            )
 
+        def persist_runtime_turn(
+            self,
+            db,
+            *,
+            game_id,
+            player_input,
+            runtime_output,
+            model_used,
+        ):
             turn = Turn(
-                game_id=game.id,
+                game_id=game_id,
                 turn_number=1,
-                player_input=payload.player_input,
-                gm_output="义庄门槛内侧的泥痕尚未干透。",
-                visible_summary="泥痕通向后院",
+                player_input=player_input,
+                gm_output=runtime_output.narrative,
+                visible_summary="\n".join(runtime_output.visible_clues),
                 hidden_summary=None,
                 state_delta_json={},
                 action_options_json=[
-                    {"key": "A", "label": "沿着泥痕追到后院"},
-                    {"key": "B", "label": "检查其他脚印"},
-                    {"key": "C", "label": "询问守庄老仆"},
-                    {"key": "D", "label": "先关上义庄大门"},
+                    option.model_dump() for option in runtime_output.action_options
                 ],
-                model_used="deepseek-v4-pro-test",
+                model_used=model_used,
             )
             db.add(turn)
             db.commit()
@@ -681,6 +723,7 @@ def test_turn_job_persists_stream_progress(db_session, monkeypatch) -> None:
 
         async def _create_state_delta(self, db, loaded_game, turn) -> None:
             del db, loaded_game, turn
+            return True
 
     job = TurnJob(
         game_id=game.id,
@@ -702,6 +745,9 @@ def test_turn_job_persists_stream_progress(db_session, monkeypatch) -> None:
     assert saved.reasoning_content == "判断自由行动并铺设线索。"
     assert saved.content_buffer == '{"narrative":"义庄门槛内侧的泥痕尚未干透。"'
     assert saved.narrative_buffer == "义庄门槛内侧的泥痕尚未干透。"
+    assert saved.stage == "completed"
+    assert saved.stage_index == 8
+    assert saved.stage_total == 8
     assert saved.error_message is None
 
 
@@ -738,6 +784,11 @@ def test_turn_job_events_returns_terminal_snapshot(db_session) -> None:
         content_buffer='{"narrative":"义庄门槛内侧的泥痕尚未干透。"}',
         narrative_buffer=turn.gm_output,
         progress_message="剧情已生成，状态变更已写入。",
+        stage="completed",
+        stage_label="完成",
+        stage_index=8,
+        stage_total=8,
+        stage_started_at=now,
         stream_started_at=now,
         last_event_at=now,
         completed_at=now,
@@ -754,6 +805,7 @@ def test_turn_job_events_returns_terminal_snapshot(db_session) -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: snapshot" in body
     assert '"terminal": true' in body
+    assert '"stage_index": 8' in body
     assert "义庄门槛内侧的泥痕尚未干透" in body
 
 

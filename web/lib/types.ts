@@ -188,6 +188,11 @@ export type TurnJobRead = {
   content_buffer: string;
   narrative_buffer: string;
   progress_message: string | null;
+  stage: string | null;
+  stage_label: string | null;
+  stage_index: number;
+  stage_total: number;
+  stage_started_at: string | null;
   stream_started_at: string | null;
   last_event_at: string | null;
 };
@@ -201,6 +206,11 @@ export type TurnJobStreamEvent = {
   status?: TurnJobStatus;
   model_used?: string | null;
   progress_message?: string | null;
+  stage?: string | null;
+  stage_label?: string | null;
+  stage_index?: number;
+  stage_total?: number;
+  stage_started_at?: string | null;
   reasoning_delta?: string;
   content_delta?: string;
   reset_buffers?: boolean;

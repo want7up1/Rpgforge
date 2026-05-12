@@ -177,7 +177,10 @@ class GeneratedGameConfig(BaseModel):
     def fill_system_prompt(cls, value: Any) -> str:
         if isinstance(value, str) and value.strip():
             return value
-        return "你是本局 GM。每回合输出玩家可见剧情，并给出 A/B/C/D 四个具体行动选项。"
+        return (
+            "你是本局 GM。每回合输出玩家可见剧情，并给出 A/B/C/D 四个具体行动选项；"
+            "输出格式必须遵守 RPGForge 剧情 Markdown 契约。"
+        )
 
     @field_validator("worldview", "script_outline", "initial_state", mode="before")
     @classmethod

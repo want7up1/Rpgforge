@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.models.character import Character
 from app.models.game import Game
 from app.models.generator_job import TurnJob
+from app.models.turn import Turn
 from app.schemas.game import (
     ContextDiagnosticRead,
     GameCreate,
@@ -24,6 +25,7 @@ from app.schemas.game import (
 )
 from app.services.context_compressor import ContextCompressor
 from app.services.context_diagnostics import ContextDiagnosticService
+from app.services.game_activity import touch_game
 from app.services.game_creator import build_manual_generated_config, create_game_from_config
 from app.services.lore_retriever import LoreRetriever
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
@@ -32,26 +34,46 @@ router = APIRouter(prefix="/api/games", tags=["games"])
 DB_DEPENDENCY = Depends(get_db)
 
 
-def game_detail_query(game_id: UUID):
+def game_detail_query(game_id: UUID, *, include_turns: bool = False):
+    options = [
+        selectinload(Game.config),
+        selectinload(Game.state),
+        selectinload(Game.lore_entries),
+        selectinload(Game.modes),
+        selectinload(Game.summaries),
+    ]
+    if include_turns:
+        options.append(selectinload(Game.turns))
     return (
         select(Game)
-        .options(
-            selectinload(Game.config),
-            selectinload(Game.state),
-            selectinload(Game.lore_entries),
-            selectinload(Game.modes),
-            selectinload(Game.summaries),
-            selectinload(Game.turns),
-        )
+        .options(*options)
         .where(Game.id == game_id)
     )
 
 
-def get_game_or_404(db: Session, game_id: UUID) -> Game:
-    game = db.scalars(game_detail_query(game_id)).first()
+def get_game_or_404(db: Session, game_id: UUID, *, include_turns: bool = False) -> Game:
+    game = db.scalars(game_detail_query(game_id, include_turns=include_turns)).first()
     if game is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found.")
     return game
+
+
+def game_detail_response(game: Game) -> GameDetail:
+    return GameDetail(
+        id=game.id,
+        title=game.title,
+        genre=game.genre,
+        description=game.description,
+        status=game.status,
+        created_at=game.created_at,
+        updated_at=game.updated_at,
+        config=game.config,
+        state=game.state,
+        lore_entries=list(game.lore_entries),
+        modes=list(game.modes),
+        summaries=list(game.summaries),
+        turns=[],
+    )
 
 
 @router.get("", response_model=list[GameListItem])
@@ -60,18 +82,18 @@ def list_games(db: Session = DB_DEPENDENCY) -> list[Game]:
 
 
 @router.post("", response_model=GameDetail, status_code=status.HTTP_201_CREATED)
-def create_game(payload: GameCreate, db: Session = DB_DEPENDENCY) -> Game:
+def create_game(payload: GameCreate, db: Session = DB_DEPENDENCY) -> GameDetail:
     config = build_manual_generated_config(payload.title, payload.genre, payload.description)
     game = create_game_from_config(db, config)
-    return get_game_or_404(db, game.id)
+    return game_detail_response(get_game_or_404(db, game.id))
 
 
 @router.get("/{game_id}", response_model=GameDetail)
-def get_game(game_id: UUID, db: Session = DB_DEPENDENCY) -> Game:
+def get_game(game_id: UUID, db: Session = DB_DEPENDENCY) -> GameDetail:
     game = get_game_or_404(db, game_id)
     if apply_pending_state_deltas(db, game):
         game = get_game_or_404(db, game_id)
-    return game
+    return game_detail_response(game)
 
 
 @router.delete("/{game_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -99,10 +121,11 @@ def get_game_memory(game_id: UUID, db: Session = DB_DEPENDENCY) -> dict:
     game = get_game_or_404(db, game_id)
     if apply_pending_state_deltas(db, game):
         game = get_game_or_404(db, game_id)
+    turn_count = db.scalar(select(func.count(Turn.id)).where(Turn.game_id == game_id)) or 0
     return {
         "game": GameListItem.model_validate(game),
         "current_turn": game.state.current_turn if game.state else 0,
-        "turn_count": len(game.turns),
+        "turn_count": turn_count,
         "lore_entries": [_lore_memory_payload(entry) for entry in game.lore_entries],
         "summaries": [SummaryRead.model_validate(summary) for summary in game.summaries],
     }
@@ -122,6 +145,9 @@ def get_context_diagnostic(
 def reindex_game_lore(game_id: UUID, db: Session = DB_DEPENDENCY) -> LoreReindexResponse:
     game = get_game_or_404(db, game_id)
     updated = LoreRetriever().rebuild_lore_embeddings(db, game.lore_entries)
+    if updated:
+        touch_game(db, game_id)
+        db.commit()
     return LoreReindexResponse(total=len(game.lore_entries), updated=updated)
 
 
@@ -132,6 +158,8 @@ def rebuild_game_summaries(
 ) -> SummaryRebuildResponse:
     game = get_game_or_404(db, game_id)
     summaries = ContextCompressor().rebuild_from_history(db, game)
+    touch_game(db, game_id)
+    db.commit()
     return SummaryRebuildResponse(
         total=len(summaries),
         summaries=[SummaryRead.model_validate(summary) for summary in summaries],

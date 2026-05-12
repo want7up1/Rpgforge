@@ -16,6 +16,7 @@ type TextBlock =
   | { type: "heading"; level: number; text: string }
   | { type: "quote"; text: string }
   | { type: "list"; ordered: boolean; items: string[] }
+  | { type: "plain"; text: string }
   | { type: "paragraph"; text: string };
 
 type CharacterMatch = {
@@ -56,11 +57,25 @@ function parseBlocks(content: string): TextBlock[] {
 
 function parseBlock(chunk: string): TextBlock {
   const lines = chunk.split("\n").map((line) => line.trimEnd());
-  const heading = lines.length === 1 ? lines[0].match(/^(#{1,4})\s+(.+)$/) : null;
+  if (isFencedCodeBlock(lines)) {
+    return {
+      type: "plain",
+      text: lines
+        .filter((line) => !line.trimStart().startsWith("```"))
+        .join("\n")
+        .trim()
+    };
+  }
+
+  if (isMarkdownTable(lines)) {
+    return { type: "plain", text: lines.join("\n") };
+  }
+
+  const heading = lines.length === 1 ? lines[0].match(/^(#{3,4})\s+(.+)$/) : null;
   if (heading) {
     return {
       type: "heading",
-      level: Math.min(4, Math.max(3, heading[1].length + 1)),
+      level: heading[1].length,
       text: heading[2].trim()
     };
   }
@@ -82,6 +97,26 @@ function parseBlock(chunk: string): TextBlock {
   }
 
   return { type: "paragraph", text: lines.join("\n") };
+}
+
+function isFencedCodeBlock(lines: string[]): boolean {
+  if (lines.length < 2) {
+    return false;
+  }
+  return (
+    lines[0].trimStart().startsWith("```") &&
+    lines[lines.length - 1].trimStart().startsWith("```")
+  );
+}
+
+function isMarkdownTable(lines: string[]): boolean {
+  if (lines.length < 2) {
+    return false;
+  }
+  const hasPipeRows = lines.every((line) => line.includes("|"));
+  const tableDividerPattern = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+  const hasDivider = lines.some((line) => tableDividerPattern.test(line));
+  return hasPipeRows && hasDivider;
 }
 
 function renderBlock(
@@ -124,6 +159,14 @@ function renderBlock(
     );
   }
 
+  if (block.type === "plain") {
+    return (
+      <p className="story-plain-text" key={index}>
+        <PlainLines text={block.text} />
+      </p>
+    );
+  }
+
   return (
     <p key={index}>
       <InlineLines
@@ -133,6 +176,14 @@ function renderBlock(
       />
     </p>
   );
+}
+
+function PlainLines({ text }: { text: string }) {
+  return text.split("\n").map((line, index, lines) => (
+    <FragmentWithBreak key={index} showBreak={index < lines.length - 1}>
+      {line}
+    </FragmentWithBreak>
+  ));
 }
 
 function InlineLines({
@@ -172,7 +223,7 @@ function renderInline(
   onCharacterClick?: (character: CharacterRead) => void
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
-  const pattern = /(\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
+  const pattern = /(`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
   let cursor = 0;
   let match: RegExpExecArray | null;
 
@@ -190,14 +241,20 @@ function renderInline(
 
     if (match[2]) {
       nodes.push(
-        <strong key={`${match.index}-strong`}>
-          {renderCharacterText(match[2], match.index, matchers, onCharacterClick)}
-        </strong>
+        <code className="story-inline-code" key={`${match.index}-code`}>
+          {match[2]}
+        </code>
       );
     } else if (match[3]) {
       nodes.push(
-        <em key={`${match.index}-em`}>
+        <strong key={`${match.index}-strong`}>
           {renderCharacterText(match[3], match.index, matchers, onCharacterClick)}
+        </strong>
+      );
+    } else if (match[4]) {
+      nodes.push(
+        <em key={`${match.index}-em`}>
+          {renderCharacterText(match[4], match.index, matchers, onCharacterClick)}
         </em>
       );
     }

@@ -38,16 +38,16 @@ export function GamePageHeader({
   title,
 }: GamePageHeaderProps) {
   return (
-    <section className="app-card app-card-pad">
+    <section className="game-page-hero">
       <div className="grid gap-4">
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
           <div className="min-w-0">
-            <p className="text-sm font-medium text-[color:var(--muted)]">{eyebrow}</p>
-            <h1 className="mt-1 break-words text-2xl font-semibold sm:text-3xl">
+            <p className="game-page-eyebrow">{eyebrow}</p>
+            <h1 className="game-page-title">
               {title}
             </h1>
             {subtitle ? (
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
+              <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--muted)]">
                 {subtitle}
               </p>
             ) : null}
@@ -60,7 +60,7 @@ export function GamePageHeader({
           ) : null}
         </div>
 
-        <div className="grid gap-2 border-t border-[color:var(--border)] pt-3 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
+        <div className="game-page-nav-row">
           <div className="game-nav-back">
             <BackButton fallbackHref={backFallbackHref ?? `/games/${gameId}`} label="返回" />
           </div>

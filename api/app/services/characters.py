@@ -85,11 +85,11 @@ def extract_profiles_from_config(config: GeneratedGameConfig) -> list[CharacterP
             CharacterProfile(
                 name=clean_text(item.name),
                 role=normalize_role(item.role),
-                aliases=clean_aliases(item.aliases),
+                aliases=[],
                 identity=clean_text(item.identity),
                 description=clean_text(item.description),
                 appearance=clean_text(item.appearance),
-                portrait_prompt=clean_text(item.portrait_prompt),
+                portrait_prompt="",
                 visibility=normalize_visibility(item.visibility),
                 source="generated",
             )
@@ -188,14 +188,7 @@ def extract_profiles_from_lore(entries: list[GeneratedLoreEntry]) -> list[Charac
             CharacterProfile(
                 name=name,
                 role=role,
-                aliases=clean_aliases([*entry.keywords, *entry.trigger_words]),
                 description=clean_text(entry.public_info),
-                portrait_prompt=build_portrait_prompt(
-                    name=name,
-                    identity="",
-                    description=clean_text(entry.public_info),
-                    appearance="",
-                ),
                 source="lore",
             )
         )
@@ -217,22 +210,14 @@ def profile_from_mapping(data: dict[str, Any], name: str, role: str) -> Characte
         or data.get("visual")
         or data.get("visual_description")
     )
-    portrait_prompt = clean_text(data.get("portrait_prompt") or data.get("portrait_reference"))
-    if not portrait_prompt:
-        portrait_prompt = build_portrait_prompt(
-            name=name,
-            identity=identity_value,
-            description=description,
-            appearance=appearance,
-        )
     return CharacterProfile(
         name=name,
         role=role,
-        aliases=clean_aliases(data.get("aliases") or data.get("alias") or []),
+        aliases=[],
         identity=identity_value,
         description=description,
         appearance=appearance,
-        portrait_prompt=portrait_prompt,
+        portrait_prompt="",
         visibility=normalize_visibility(data.get("visibility")),
         source="state",
     )

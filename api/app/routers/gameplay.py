@@ -2,7 +2,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from app.models.turn import Turn
 from app.schemas.turn import TurnCreate, TurnJobCreateResponse, TurnJobRead, TurnRead
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
 from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
-from app.services.turn_jobs import run_turn_job
+from app.services.job_queue import enqueue_turn_job
 from app.services.turn_stream_events import format_sse_event, turn_stream_event_broker
 
 router = APIRouter(prefix="/api/games/{game_id}/turns", tags=["gameplay"])
@@ -64,6 +64,11 @@ def read_turn_job_or_404(db: Session, game_id: UUID, job_id: UUID) -> TurnJobRea
         content_buffer=job.content_buffer,
         narrative_buffer=job.narrative_buffer,
         progress_message=job.progress_message,
+        stage=job.stage,
+        stage_label=job.stage_label,
+        stage_index=job.stage_index,
+        stage_total=job.stage_total,
+        stage_started_at=job.stage_started_at,
         stream_started_at=job.stream_started_at,
         last_event_at=job.last_event_at,
     )
@@ -111,7 +116,6 @@ async def create_turn(
 async def create_turn_job(
     game_id: UUID,
     payload: TurnCreate,
-    background_tasks: BackgroundTasks,
     db: Session = DB_DEPENDENCY,
 ) -> TurnJobCreateResponse:
     get_game_or_404_for_gameplay(db, game_id)
@@ -123,8 +127,36 @@ async def create_turn_job(
     db.add(job)
     db.commit()
     db.refresh(job)
-    background_tasks.add_task(run_turn_job, job.id)
+    try:
+        enqueue_turn_job(job.id)
+    except Exception as exc:
+        now = datetime.now(UTC)
+        job.status = "failed"
+        job.error_message = f"任务队列不可用：{exc}"
+        job.progress_message = "任务队列不可用，请检查 Redis/RQ worker。"
+        job.completed_at = now
+        job.last_event_at = now
+        db.add(job)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="任务队列不可用，请检查 Redis/RQ worker。",
+        ) from exc
     return TurnJobCreateResponse(id=job.id, status=job.status)
+
+
+@router.get("/jobs/active", response_model=TurnJobRead | None)
+def get_active_turn_job(game_id: UUID, db: Session = DB_DEPENDENCY) -> TurnJobRead | None:
+    get_game_or_404_for_gameplay(db, game_id)
+    job = db.scalars(
+        select(TurnJob)
+        .where(TurnJob.game_id == game_id, TurnJob.status.in_(("pending", "running")))
+        .order_by(TurnJob.created_at.desc())
+        .limit(1)
+    ).first()
+    if job is None:
+        return None
+    return read_turn_job_or_404(db, game_id, job.id)
 
 
 @router.get("/jobs/{job_id}", response_model=TurnJobRead)

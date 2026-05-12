@@ -19,6 +19,11 @@ def verify_settings_token(
     x_settings_admin_token: str | None = Header(default=None),
 ) -> None:
     expected = settings.settings_admin_token.strip()
+    if not expected and settings.app_env.lower() in {"production", "prod"}:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="生产环境未配置 SETTINGS_ADMIN_TOKEN，禁止从前端保存模型/API 设置。",
+        )
     if expected and x_settings_admin_token != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
