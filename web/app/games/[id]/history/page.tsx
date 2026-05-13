@@ -191,7 +191,7 @@ export default function HistoryPage() {
                     {viewMode !== "story" ? (
                       <div className="archive-card archive-card-green text-sm leading-6">
                         <div className="font-semibold">玩家行动</div>
-                        <p className="mt-1 whitespace-pre-wrap text-[color:var(--muted)]">
+                        <p className="app-wrap-text mt-1 whitespace-pre-wrap text-[color:var(--muted)]">
                           {turn.player_input}
                         </p>
                       </div>
@@ -285,7 +285,7 @@ function ChapterTimeline({
                   {chapter.turns.map((turn) => (
                     <article className="archive-card archive-card-green text-sm" key={turn.id}>
                       <div className="font-semibold">第 {turn.turn_number} 回合</div>
-                      <p className="mt-1 whitespace-pre-wrap text-[color:var(--muted)]">
+                      <p className="app-wrap-text mt-1 whitespace-pre-wrap text-[color:var(--muted)]">
                         {turn.visible_summary || turn.player_input}
                       </p>
                     </article>

@@ -1,11 +1,40 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CharacterRole = Literal["protagonist", "npc", "companion", "other"]
 CharacterVisibility = Literal["visible", "hidden"]
+
+
+STORY_PROFILE_KEYS = (
+    "dramatic_function",
+    "desire",
+    "fear",
+    "leverage",
+    "relationship_arc",
+    "public_limit",
+)
+
+
+class CharacterStoryProfile(BaseModel):
+    dramatic_function: str = ""
+    desire: str = ""
+    fear: str = ""
+    leverage: str = ""
+    relationship_arc: str = ""
+    public_limit: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_story_profile(cls, value: Any) -> dict[str, str]:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            key: str(value.get(key) or "").strip()
+            for key in STORY_PROFILE_KEYS
+        }
 
 
 class CharacterBase(BaseModel):
@@ -15,6 +44,7 @@ class CharacterBase(BaseModel):
     identity: str | None = None
     description: str | None = None
     appearance: str | None = None
+    story_profile: CharacterStoryProfile = Field(default_factory=CharacterStoryProfile)
     portrait_prompt: str | None = None
     visibility: CharacterVisibility = "visible"
     is_visible: bool = True
@@ -36,6 +66,7 @@ class CharacterUpdate(BaseModel):
     identity: str | None = None
     description: str | None = None
     appearance: str | None = None
+    story_profile: CharacterStoryProfile | None = None
     portrait_prompt: str | None = None
     visibility: CharacterVisibility | None = None
     is_visible: bool | None = None
@@ -56,7 +87,9 @@ class CharacterRead(CharacterBase):
     id: UUID
     game_id: UUID
     portrait_url: str | None = None
+    portrait_thumb_url: str | None = None
     portrait_mime_type: str | None = None
+    portrait_thumb_mime_type: str | None = None
     portrait_original_filename: str | None = None
     portrait_uploaded_at: datetime | None = None
     source: str

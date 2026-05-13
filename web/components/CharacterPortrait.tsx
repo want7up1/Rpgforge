@@ -10,8 +10,9 @@ type CharacterPortraitProps = {
 };
 
 export function CharacterPortrait({ character, className = "" }: CharacterPortraitProps) {
-  const portraitUrl = character.portrait_url
-    ? `${character.portrait_url}?v=${encodeURIComponent(character.portrait_uploaded_at ?? "")}`
+  const portraitSource = character.portrait_thumb_url || character.portrait_url;
+  const portraitUrl = portraitSource
+    ? `${portraitSource}?v=${encodeURIComponent(character.portrait_uploaded_at ?? "")}`
     : null;
 
   if (portraitUrl) {
@@ -29,9 +30,9 @@ export function CharacterPortrait({ character, className = "" }: CharacterPortra
 
   return (
     <div
-      className={`grid aspect-[3/4] w-full max-w-full self-start place-items-center rounded-md border border-[color:var(--border)] bg-[color:var(--soft-panel)] ${className}`}
+      className={`character-portrait-placeholder grid aspect-[3/4] w-full max-w-full self-start place-items-center rounded-md border border-[color:var(--border)] bg-[color:var(--soft-panel)] ${className}`}
     >
-      <div className="grid h-16 w-16 place-items-center rounded-full border border-[color:var(--border)] bg-[color:var(--panel)] text-xl font-semibold text-[color:var(--accent-strong)]">
+      <div className="character-portrait-initials">
         {character.name.slice(0, 2)}
       </div>
     </div>

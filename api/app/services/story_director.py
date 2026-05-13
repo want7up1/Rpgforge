@@ -16,6 +16,7 @@ from app.services.model_router import ModelRouter
 from app.services.prompt_builder import PromptBuilder
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import state_v2_view
+from app.services.story_blueprint import build_story_blueprint
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class StoryDirector:
                 "description": game.description,
             },
             "campaign_contract": PromptBuilder._campaign_contract_payload(config),
+            "story_blueprint": build_story_blueprint(config),
             "worldview": config.worldview if config else {},
             "script_outline": config.script_outline if config else {},
             "selected_mode": self._mode_payload(selected_mode),
@@ -156,11 +158,39 @@ class StoryDirector:
         selected_mode: Mode | None,
     ) -> StoryDirectorDecision:
         contract = PromptBuilder._campaign_contract_payload(game.config)
+        blueprint = build_story_blueprint(game.config)
+        current_act = blueprint.get("current_act") if isinstance(blueprint, dict) else {}
+        if not isinstance(current_act, dict):
+            current_act = {}
         return StoryDirectorDecision(
             player_intent=player_input,
-            current_act=str(contract.get("current_act") or ""),
-            scene_objective=str(contract.get("premise") or ""),
+            current_act=str(
+                contract.get("current_act")
+                or current_act.get("id")
+                or current_act.get("name")
+                or ""
+            ),
+            scene_objective=str(
+                current_act.get("objective")
+                or current_act.get("dramatic_question")
+                or contract.get("main_goal")
+                or contract.get("premise")
+                or ""
+            ),
             mode_recommendation=selected_mode.name if selected_mode else "",
-            pacing_limit="保持当前幕节奏，不提前引入未铺垫的大型势力、Boss 或终局真相。",
+            allowed_reveals=_string_list(current_act.get("allowed_reveals")),
+            forbidden_reveals=_string_list(current_act.get("forbidden_reveals")),
+            pacing_limit=str(
+                current_act.get("escalation_limit")
+                or "保持当前幕节奏，不提前引入未铺垫的大型势力、Boss 或终局真相。"
+            ),
             gm_instruction="先回应玩家本次行动的直接结果，再推进当前幕目标。",
         )
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item or "").strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []

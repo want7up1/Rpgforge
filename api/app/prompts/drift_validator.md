@@ -7,6 +7,7 @@
 4. 如果出现以下情况，severity 至少为 major：跳过玩家行动直接结果、提前揭露 forbidden_reveals、引入未铺垫的大型势力/新 Boss/终局真相、改变 NPC/地点/物品状态且与 current_state_v2 冲突。
 5. 如果问题可以接受但需要后续注意，approved=true，severity=minor，并在 issues 中说明。
 6. 如果 approved=false，rewrite_instruction 必须给出简短、可执行的重写要求。
+7. story_blueprint 是判断当前幕、允许揭露、禁止揭露、线索阶梯和压力时钟的主要依据；不要只按文本风格判断偏离。
 
 输出结构：
 {

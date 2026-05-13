@@ -15,6 +15,7 @@ from app.services.context_compressor import ContextCompressor
 from app.services.lore_retriever import LoreRetrievalResult, LoreRetriever
 from app.services.mode_matcher import select_mode
 from app.services.prompt_builder import PromptBuilder
+from app.services.story_blueprint import build_story_blueprint
 
 
 class ContextDiagnosticService:
@@ -55,6 +56,8 @@ class ContextDiagnosticService:
             selected_mode=ModeRead.model_validate(selected_mode) if selected_mode else None,
             recent_turn_numbers=[recent_turn.turn_number for recent_turn in recent_turns],
             memory_summaries=summaries,
+            campaign_contract=PromptBuilder._campaign_contract_payload(game.config),
+            story_blueprint=build_story_blueprint(game.config),
             always_on_lore=[self._lore_payload(entry) for entry in always_on_lore],
             related_lore=[self._retrieval_payload(result) for result in related_lore],
         )

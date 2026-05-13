@@ -3,8 +3,11 @@ import type {
   GameMemoryRead,
   GameStateRead,
   GameListItem,
+  GameConfigUpdate,
+  GameSettingVersionRead,
   ActionOption,
   CharacterRead,
+  CharacterListScope,
   CharacterSyncResponse,
   CharacterUpdate,
   ContextDiagnosticRead,
@@ -19,7 +22,13 @@ import type {
   GeneratorJobStreamEvent,
   GeneratorMessage,
   StateDeltaRead,
+  LoreEntryCreate,
   LoreReindexResponse,
+  LoreEntryRead,
+  LoreEntryUpdate,
+  ModeCreate,
+  ModeRead,
+  ModeUpdate,
   SummaryRebuildResponse,
   TurnJobCreateResponse,
   TurnJobStreamEvent,
@@ -130,6 +139,22 @@ function formatApiErrorDetail(detail: unknown): string {
   return String(detail);
 }
 
+function filenameFromContentDisposition(header: string | null): string {
+  if (!header) {
+    return "RPGForge-剧本.md";
+  }
+  const encodedMatch = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encodedMatch?.[1]) {
+    try {
+      return decodeURIComponent(encodedMatch[1]);
+    } catch {
+      return encodedMatch[1];
+    }
+  }
+  const plainMatch = /filename="?([^";]+)"?/i.exec(header);
+  return plainMatch?.[1] || "RPGForge-剧本.md";
+}
+
 export async function getGames(): Promise<GameListItem[]> {
   return requestJson<GameListItem[]>("/api/games");
 }
@@ -142,8 +167,111 @@ export async function deleteGame(gameId: string): Promise<void> {
   return requestVoid(`/api/games/${gameId}`, { method: "DELETE" });
 }
 
+export async function getGameScriptExport(
+  gameId: string
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/games/${encodeURIComponent(gameId)}/script-export`,
+    {
+      headers: {
+        Accept: "text/markdown"
+      },
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as ApiErrorBody;
+      if (body.detail) {
+        message = formatApiErrorDetail(body.detail);
+      }
+    } catch {
+      // Keep the HTTP fallback.
+    }
+    throw new Error(message);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition"))
+  };
+}
+
 export async function getGameMemory(gameId: string): Promise<GameMemoryRead> {
   return requestJson<GameMemoryRead>(`/api/games/${gameId}/memory`);
+}
+
+export async function updateGameConfig(
+  gameId: string,
+  payload: GameConfigUpdate
+): Promise<GameDetail> {
+  return requestJson<GameDetail>(`/api/games/${gameId}/config`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function createLoreEntry(
+  gameId: string,
+  payload: LoreEntryCreate
+): Promise<LoreEntryRead> {
+  return requestJson<LoreEntryRead>(`/api/games/${gameId}/memory/lore`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateLoreEntry(
+  gameId: string,
+  loreId: string,
+  payload: LoreEntryUpdate
+): Promise<LoreEntryRead> {
+  return requestJson<LoreEntryRead>(`/api/games/${gameId}/memory/lore/${loreId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function archiveLoreEntry(
+  gameId: string,
+  loreId: string
+): Promise<LoreEntryRead> {
+  return requestJson<LoreEntryRead>(`/api/games/${gameId}/memory/lore/${loreId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function createMode(gameId: string, payload: ModeCreate): Promise<ModeRead> {
+  return requestJson<ModeRead>(`/api/games/${gameId}/modes`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateMode(
+  gameId: string,
+  modeId: string,
+  payload: ModeUpdate
+): Promise<ModeRead> {
+  return requestJson<ModeRead>(`/api/games/${gameId}/modes/${modeId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getSettingVersions(gameId: string): Promise<GameSettingVersionRead[]> {
+  return requestJson<GameSettingVersionRead[]>(`/api/games/${gameId}/setting-versions`);
+}
+
+export async function restoreSettingVersion(
+  gameId: string,
+  versionId: string
+): Promise<GameDetail> {
+  return requestJson<GameDetail>(`/api/games/${gameId}/setting-versions/${versionId}/restore`, {
+    method: "POST"
+  });
 }
 
 export async function getContextDiagnostic(
@@ -173,8 +301,12 @@ export async function getGameState(gameId: string): Promise<GameStateRead> {
   return requestJson<GameStateRead>(`/api/games/${gameId}/state`);
 }
 
-export async function getCharacters(gameId: string): Promise<CharacterRead[]> {
-  return requestJson<CharacterRead[]>(`/api/games/${gameId}/characters`);
+export async function getCharacters(
+  gameId: string,
+  scope: CharacterListScope = "director"
+): Promise<CharacterRead[]> {
+  const query = scope === "director" ? "" : `?scope=${scope}`;
+  return requestJson<CharacterRead[]>(`/api/games/${gameId}/characters${query}`);
 }
 
 export async function syncCharacters(gameId: string): Promise<CharacterSyncResponse> {

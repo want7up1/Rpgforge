@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useRef, type KeyboardEvent } from "react";
+
+import type { CharacterRuntimeView } from "@/lib/characters";
 import type { CharacterRead } from "@/lib/types";
 
 import { CharacterPortrait } from "@/components/CharacterPortrait";
@@ -14,11 +17,57 @@ const roleLabels: Record<CharacterRead["role"], string> = {
 type CharacterModalProps = {
   character: CharacterRead | null;
   onClose: () => void;
+  runtimeView?: CharacterRuntimeView | null;
 };
 
-export function CharacterModal({ character, onClose }: CharacterModalProps) {
+export function CharacterModal({ character, onClose, runtimeView = null }: CharacterModalProps) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!character) {
+      return;
+    }
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [character, onClose]);
+
   if (!character) {
     return null;
+  }
+
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Tab") {
+      return;
+    }
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable || focusable.length === 0) {
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   return (
@@ -33,10 +82,16 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
         onClick={onClose}
         type="button"
       />
-      <article className="relative grid max-h-[92vh] w-full max-w-3xl overflow-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)] p-4 shadow-xl sm:grid-cols-[minmax(12rem,0.42fr)_minmax(0,0.58fr)] sm:gap-5 sm:p-5">
+      <article
+        className="relative grid max-h-[92vh] w-full max-w-3xl overflow-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)] p-4 shadow-xl sm:grid-cols-[minmax(12rem,0.42fr)_minmax(0,0.58fr)] sm:gap-5 sm:p-5"
+        onKeyDown={handleDialogKeyDown}
+        ref={dialogRef}
+      >
         <button
+          aria-label="关闭角色档案"
           className="app-button absolute right-3 top-3 h-9 w-9 px-0"
           onClick={onClose}
+          ref={closeButtonRef}
           type="button"
         >
           ×
@@ -49,13 +104,11 @@ export function CharacterModal({ character, onClose }: CharacterModalProps) {
             <h2 className="break-words text-xl font-semibold">{character.name}</h2>
             <span className="app-pill">{roleLabels[character.role]}</span>
           </div>
-          <p className="mt-1 text-sm text-[color:var(--muted)]">
-            {character.identity || "身份未公开"}
-          </p>
 
           <InfoBlock label="身份介绍" value={character.identity} />
           <InfoBlock label="公开介绍" value={character.description} />
           <InfoBlock label="外貌描述" value={character.appearance} />
+          {runtimeView ? <RuntimeBlock runtimeView={runtimeView} /> : null}
         </div>
       </article>
     </div>
@@ -66,9 +119,42 @@ function InfoBlock({ label, value }: { label: string; value: string | null }) {
   return (
     <section className="mt-4">
       <h3 className="text-sm font-semibold">{label}</h3>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
+      <p className="app-wrap-text mt-2 whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
         {value || "暂无。"}
       </p>
+    </section>
+  );
+}
+
+function RuntimeBlock({ runtimeView }: { runtimeView: CharacterRuntimeView }) {
+  const facts = [
+    runtimeView.location ? `位置：${runtimeView.location}` : "",
+    runtimeView.status ? `状态：${runtimeView.status}` : "",
+    runtimeView.stage ? `关系阶段：${runtimeView.stage}` : "",
+    runtimeView.relationship ? `关系：${runtimeView.relationship}` : "",
+    runtimeView.attitude ? `态度：${runtimeView.attitude}` : "",
+    runtimeView.recent ? `最近互动：${runtimeView.recent}` : ""
+  ].filter(Boolean);
+
+  return (
+    <section className="mt-4">
+      <h3 className="text-sm font-semibold">当前关系状态</h3>
+      {facts.length > 0 ? (
+        <ul className="app-wrap-text mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
+          {facts.map((fact) => (
+            <li key={fact}>{fact}</li>
+          ))}
+        </ul>
+      ) : null}
+      {runtimeView.axes.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {runtimeView.axes.map((axis) => (
+            <span className="app-pill" key={axis.key}>
+              {axis.label} {axis.value}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

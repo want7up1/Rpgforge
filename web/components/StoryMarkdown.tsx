@@ -2,6 +2,12 @@
 
 import type { ReactNode } from "react";
 
+import {
+  buildCharacterMatchers,
+  findCharacterTextMatch,
+  nextPotentialCharacterMatchIndex,
+  type CharacterMatch
+} from "@/lib/characters";
 import type { CharacterRead } from "@/lib/types";
 
 type StoryMarkdownProps = {
@@ -18,11 +24,6 @@ type TextBlock =
   | { type: "list"; ordered: boolean; items: string[] }
   | { type: "plain"; text: string }
   | { type: "paragraph"; text: string };
-
-type CharacterMatch = {
-  label: string;
-  character: CharacterRead;
-};
 
 export function StoryMarkdown({
   characters = [],
@@ -43,7 +44,7 @@ export function StoryMarkdown({
 }
 
 function parseBlocks(content: string): TextBlock[] {
-  const normalized = content.replace(/\r\n/g, "\n").trim();
+  const normalized = isolateHeadingBlocks(content.replace(/\r\n/g, "\n").trim());
   if (!normalized) {
     return [];
   }
@@ -53,6 +54,39 @@ function parseBlocks(content: string): TextBlock[] {
     .map((chunk) => chunk.trim())
     .filter(Boolean)
     .map(parseBlock);
+}
+
+function isolateHeadingBlocks(content: string): string {
+  const lines = content.split("\n");
+  const isolated: string[] = [];
+  let inFence = false;
+
+  for (const line of lines) {
+    const trimmedStart = line.trimStart();
+    const isFence = trimmedStart.startsWith("```");
+    const isHeading = !inFence && /^(#{3,4})\s+.+$/.test(trimmedStart);
+
+    if (isHeading) {
+      pushBlankLine(isolated);
+      isolated.push(trimmedStart);
+      pushBlankLine(isolated);
+      continue;
+    }
+
+    isolated.push(line);
+
+    if (isFence) {
+      inFence = !inFence;
+    }
+  }
+
+  return isolated.join("\n").trim();
+}
+
+function pushBlankLine(lines: string[]) {
+  if (lines.length > 0 && lines[lines.length - 1] !== "") {
+    lines.push("");
+  }
 }
 
 function parseBlock(chunk: string): TextBlock {
@@ -282,9 +316,9 @@ function renderCharacterText(
   const nodes: ReactNode[] = [];
   let cursor = 0;
   while (cursor < text.length) {
-    const match = findCharacterMatch(text, cursor, matchers);
+    const match = findCharacterTextMatch(text, cursor, matchers);
     if (!match) {
-      const nextIndex = nextPotentialMatchIndex(text, cursor + 1, matchers);
+      const nextIndex = nextPotentialCharacterMatchIndex(text, cursor + 1, matchers);
       const end = nextIndex === -1 ? text.length : nextIndex;
       nodes.push(text.slice(cursor, end));
       cursor = end;
@@ -304,65 +338,4 @@ function renderCharacterText(
     cursor += match.label.length;
   }
   return nodes;
-}
-
-function buildCharacterMatchers(characters: CharacterRead[]): CharacterMatch[] {
-  const matches: CharacterMatch[] = [];
-  const seen = new Set<string>();
-  for (const character of characters) {
-    if (!character.is_visible) {
-      continue;
-    }
-    for (const rawLabel of [character.name, ...character.aliases]) {
-      const label = rawLabel.trim();
-      if (!label || label.length < 2 || seen.has(label)) {
-        continue;
-      }
-      seen.add(label);
-      matches.push({ label, character });
-    }
-  }
-  return matches.sort((a, b) => b.label.length - a.label.length);
-}
-
-function findCharacterMatch(
-  text: string,
-  index: number,
-  matchers: CharacterMatch[]
-): CharacterMatch | null {
-  for (const matcher of matchers) {
-    if (!text.startsWith(matcher.label, index)) {
-      continue;
-    }
-    if (!hasAsciiBoundary(text, index, matcher.label.length)) {
-      continue;
-    }
-    return matcher;
-  }
-  return null;
-}
-
-function nextPotentialMatchIndex(
-  text: string,
-  startIndex: number,
-  matchers: CharacterMatch[]
-): number {
-  let nextIndex = -1;
-  for (const matcher of matchers) {
-    const found = text.indexOf(matcher.label, startIndex);
-    if (found !== -1 && (nextIndex === -1 || found < nextIndex)) {
-      nextIndex = found;
-    }
-  }
-  return nextIndex;
-}
-
-function hasAsciiBoundary(text: string, index: number, length: number): boolean {
-  const before = text[index - 1] ?? "";
-  const after = text[index + length] ?? "";
-  return !isAsciiWord(before) && !isAsciiWord(after);
-}
-
-function isAsciiWord(value: string): boolean {
-  return /^[A-Za-z0-9_]$/.test(value);
 }

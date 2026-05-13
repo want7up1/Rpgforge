@@ -19,6 +19,13 @@ export type GameConfigRead = {
   updated_at: string;
 };
 
+export type StoryBlueprintPayload = Record<string, unknown>;
+
+export type AdvancedConfigJsonDraft = {
+  worldview_json: Record<string, unknown>;
+  script_outline_json: Record<string, unknown>;
+};
+
 export type LoreEntryRead = {
   id: string;
   game_id: string;
@@ -33,6 +40,8 @@ export type LoreEntryRead = {
   gm_secret: string | null;
   content: string;
   usage_note: string | null;
+  is_active: boolean;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -51,6 +60,89 @@ export type ModeRead = {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+};
+
+export type WorldviewUpdate = {
+  summary?: string | null;
+  tone?: string | null;
+  genre?: string | null;
+  key_npcs?: string[] | null;
+  factions?: string[] | null;
+  conflicts?: string[] | null;
+};
+
+export type ContractUpdate = {
+  premise?: string | null;
+  player_fantasy?: string | null;
+  central_question?: string | null;
+  emotional_arc?: string | null;
+  main_goal?: string | null;
+  current_act?: string | null;
+  narrative_style?: string | null;
+  tone?: string | null;
+  pacing?: string | null;
+  narrative_focus?: string | null;
+  canon_terms?: string[] | null;
+  key_npcs?: string[] | null;
+  key_conflicts?: string[] | null;
+  forbidden_drift?: string[] | null;
+  forbidden_reveals?: string[] | null;
+  must_preserve?: string[] | null;
+  must_not_become?: string[] | null;
+  guardrails?: string[] | null;
+  act_plan?: string[] | null;
+};
+
+export type GameConfigUpdate = {
+  title?: string | null;
+  genre?: string | null;
+  description?: string | null;
+  system_prompt?: string | null;
+  generation_notes?: string | null;
+  worldview?: WorldviewUpdate | null;
+  worldview_json?: Record<string, unknown> | null;
+  script_outline_json?: Record<string, unknown> | null;
+  campaign_contract?: ContractUpdate | null;
+  director_contract?: ContractUpdate | null;
+  story_contract?: ContractUpdate | null;
+};
+
+export type LoreEntryCreate = {
+  title: string;
+  type?: string | null;
+  keywords?: string[];
+  trigger_words?: string[];
+  priority?: string | null;
+  always_on?: boolean;
+  visibility?: string | null;
+  public_info?: string | null;
+  gm_secret?: string | null;
+  content: string;
+  usage_note?: string | null;
+};
+
+export type LoreEntryUpdate = Partial<LoreEntryCreate> & {
+  is_active?: boolean;
+};
+
+export type ModeCreate = {
+  name: string;
+  triggers?: string[];
+  injection: string;
+  priority?: string | null;
+  enabled?: boolean;
+};
+
+export type ModeUpdate = Partial<ModeCreate>;
+
+export type GameSettingVersionRead = {
+  id: string;
+  game_id: string;
+  scope: "config" | "lore" | "mode" | string;
+  entity_id: string | null;
+  action: string;
+  snapshot_json: Record<string, unknown>;
+  created_at: string;
 };
 
 export type GameStateRead = {
@@ -76,6 +168,16 @@ export type SummaryRead = {
 };
 
 export type CharacterRole = "protagonist" | "npc" | "companion" | "other";
+export type CharacterListScope = "director" | "public";
+
+export type CharacterStoryProfile = {
+  dramatic_function: string;
+  desire: string;
+  fear: string;
+  leverage: string;
+  relationship_arc: string;
+  public_limit: string;
+};
 
 export type CharacterRead = {
   id: string;
@@ -86,9 +188,12 @@ export type CharacterRead = {
   identity: string | null;
   description: string | null;
   appearance: string | null;
+  story_profile: CharacterStoryProfile;
   portrait_prompt: string | null;
   portrait_url: string | null;
+  portrait_thumb_url: string | null;
   portrait_mime_type: string | null;
+  portrait_thumb_mime_type: string | null;
   portrait_original_filename: string | null;
   portrait_uploaded_at: string | null;
   visibility: "visible" | "hidden";
@@ -105,6 +210,7 @@ export type CharacterUpdate = {
   identity?: string | null;
   description?: string | null;
   appearance?: string | null;
+  story_profile?: CharacterStoryProfile;
   portrait_prompt?: string | null;
   visibility?: "visible" | "hidden";
   is_visible?: boolean;
@@ -170,6 +276,12 @@ export type TurnRead = {
 };
 
 export type TurnJobStatus = "pending" | "running" | "completed" | "failed";
+export type TurnJobMaintenanceStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
 
 export type TurnJobCreateResponse = {
   id: string;
@@ -193,6 +305,12 @@ export type TurnJobRead = {
   stage_index: number;
   stage_total: number;
   stage_started_at: string | null;
+  maintenance_status: TurnJobMaintenanceStatus;
+  maintenance_stage: string | null;
+  maintenance_message: string | null;
+  maintenance_error: string | null;
+  maintenance_started_at: string | null;
+  maintenance_completed_at: string | null;
   stream_started_at: string | null;
   last_event_at: string | null;
 };
@@ -252,6 +370,8 @@ export type ContextDiagnosticRead = {
   selected_mode: ModeRead | null;
   recent_turn_numbers: number[];
   memory_summaries: Record<string, unknown>;
+  campaign_contract: Record<string, unknown>;
+  story_blueprint: StoryBlueprintPayload;
   always_on_lore: LoreDiagnosticRead[];
   related_lore: LoreDiagnosticRead[];
 };
@@ -277,6 +397,16 @@ export type SummaryRebuildResponse = {
 export type GeneratorMessage = {
   role: "user" | "assistant";
   content: string;
+};
+
+export type ConfirmedRequirements = {
+  story_background: string;
+  core_premise: string;
+  must_include: string[];
+  forbidden_content: string[];
+  playstyle_preferences: string[];
+  tone_preferences: string[];
+  raw_user_input: string;
 };
 
 export type GeneratorChatResponse = {

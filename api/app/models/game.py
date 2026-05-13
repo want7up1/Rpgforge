@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.character import Character
     from app.models.lore import LoreEntry
     from app.models.mode import Mode
+    from app.models.setting_version import GameSettingVersion
     from app.models.state import GameState
     from app.models.state_delta import StateDelta
     from app.models.summary import Summary
@@ -73,6 +74,11 @@ class Game(Base):
         back_populates="game",
         cascade="all, delete-orphan",
         order_by="Summary.range_end_turn",
+    )
+    setting_versions: Mapped[list[GameSettingVersion]] = relationship(
+        back_populates="game",
+        cascade="all, delete-orphan",
+        order_by="GameSettingVersion.created_at.desc()",
     )
     state_deltas: Mapped[list[StateDelta]] = relationship(
         back_populates="game",

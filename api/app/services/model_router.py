@@ -30,14 +30,21 @@ class ModelRouter:
         *,
         json_mode: bool = True,
         max_tokens: int | None = 4096,
+        reasoning_effort: Literal["high", "max"] | None = "high",
+        respect_route: bool = True,
     ) -> ChatCompletionResult:
         effective_settings = get_effective_deepseek_settings(self.settings)
         return await self.client.chat_completion(
-            model=self._select_model(effective_settings, task_type, "flash"),
+            model=self._select_model(
+                effective_settings,
+                task_type,
+                "flash",
+                respect_route=respect_route,
+            ),
             messages=messages,
             json_mode=json_mode,
             thinking="enabled",
-            reasoning_effort="high",
+            reasoning_effort=reasoning_effort,
             max_tokens=max_tokens,
         )
 
@@ -48,14 +55,21 @@ class ModelRouter:
         *,
         json_mode: bool = True,
         max_tokens: int | None = 4096,
+        reasoning_effort: Literal["high", "max"] | None = "high",
+        respect_route: bool = True,
     ) -> AsyncIterator[ChatCompletionStreamChunk]:
         effective_settings = get_effective_deepseek_settings(self.settings)
         async for chunk in self.client.chat_completion_stream(
-            model=self._select_model(effective_settings, task_type, "flash"),
+            model=self._select_model(
+                effective_settings,
+                task_type,
+                "flash",
+                respect_route=respect_route,
+            ),
             messages=messages,
             json_mode=json_mode,
             thinking="enabled",
-            reasoning_effort="high",
+            reasoning_effort=reasoning_effort,
             max_tokens=max_tokens,
         ):
             yield chunk
@@ -104,8 +118,14 @@ class ModelRouter:
         effective_settings: EffectiveDeepSeekSettings,
         task_type: str,
         fallback_slot: ModelSlot,
+        *,
+        respect_route: bool = True,
     ) -> str:
-        slot = effective_settings.task_model_routes.get(task_type, fallback_slot)
+        slot = (
+            effective_settings.task_model_routes.get(task_type, fallback_slot)
+            if respect_route
+            else fallback_slot
+        )
         return (
             effective_settings.pro_model
             if slot == "pro"

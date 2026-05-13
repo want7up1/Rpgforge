@@ -175,6 +175,15 @@ class GameplayService:
                 messages,
                 on_update=on_update,
             )
+        if not self._should_run_drift_validation(
+            game=context.game,
+            recent_turns=context.recent_turns,
+            director_decision=director_decision,
+            runtime_output=runtime_output,
+        ):
+            if on_progress:
+                await on_progress("偏离风险较低，跳过深度校验。")
+            return runtime_output, model_used
         if on_progress:
             await on_progress("正在校验剧情是否偏离剧本锚点。")
         runtime_output, model_used = await self._validate_and_maybe_rewrite(
@@ -191,6 +200,59 @@ class GameplayService:
             on_progress=on_progress,
         )
         return runtime_output, model_used
+
+    def _should_run_drift_validation(
+        self,
+        *,
+        game: Game,
+        recent_turns: list[Turn],
+        director_decision: StoryDirectorDecision,
+        runtime_output: GMRuntimeOutput,
+    ) -> bool:
+        next_turn_number = (recent_turns[-1].turn_number + 1) if recent_turns else 1
+        if next_turn_number == 1 or next_turn_number % 3 == 0:
+            return True
+
+        output_text = "\n".join(
+            [
+                runtime_output.narrative,
+                "\n".join(runtime_output.visible_clues),
+                "\n".join(option.label for option in runtime_output.action_options),
+            ]
+        )
+        normalized_output = output_text.lower()
+        high_risk_terms = (
+            "终局",
+            "最终真相",
+            "全部真相",
+            "幕后黑手",
+            "幕后组织",
+            "真正身份",
+            "新组织",
+            "新势力",
+            "boss",
+            "新 boss",
+            "世界级危机",
+            "秘密基地",
+            "核心秘密",
+            "神明",
+            "灭世",
+        )
+        if any(term in normalized_output for term in high_risk_terms):
+            return True
+
+        for reveal in director_decision.forbidden_reveals:
+            reveal_text = reveal.strip()
+            if len(reveal_text) >= 4 and reveal_text in output_text:
+                return True
+
+        contract = PromptBuilder._campaign_contract_payload(game.config)
+        for forbidden in contract.get("forbidden_drift") or []:
+            forbidden_text = str(forbidden).strip()
+            if len(forbidden_text) >= 4 and forbidden_text in output_text:
+                return True
+
+        return False
 
     def persist_runtime_turn(
         self,

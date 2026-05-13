@@ -7,6 +7,7 @@ import type { TurnJobRead, TurnJobStreamEvent } from "@/lib/types";
 
 const turnPollIntervalMs = 1500;
 const turnMaxPolls = 560;
+const turnMaintenanceMaxPolls = 120;
 const turnStreamConnectTimeoutMs = 6000;
 const turnStreamErrorFallbackMs = 4000;
 
@@ -24,6 +25,12 @@ export type StoryProcessJob = Pick<
   | "stage_index"
   | "stage_total"
   | "stage_started_at"
+  | "maintenance_status"
+  | "maintenance_stage"
+  | "maintenance_message"
+  | "maintenance_error"
+  | "maintenance_started_at"
+  | "maintenance_completed_at"
   | "stream_started_at"
   | "last_event_at"
 >;
@@ -48,8 +55,14 @@ export function createInitialTurnProcess(
     stage: "prepare_context",
     stage_label: "准备上下文",
     stage_index: 1,
-    stage_total: 8,
+    stage_total: 7,
     stage_started_at: null,
+    maintenance_status: "pending",
+    maintenance_stage: "state_extract",
+    maintenance_message: "等待回合生成完成后执行状态维护。",
+    maintenance_error: null,
+    maintenance_started_at: null,
+    maintenance_completed_at: null,
     stream_started_at: null,
     last_event_at: null
   };
@@ -256,6 +269,44 @@ export function formatLastEvent(value: string | null): string {
   return `${minutes} 分钟前`;
 }
 
+export function isTurnMaintenanceActive(job: StoryProcessJob | TurnJobRead | null): boolean {
+  return (
+    job?.status === "completed" &&
+    (job.maintenance_status === "pending" || job.maintenance_status === "running") &&
+    job.maintenance_stage === "state_extract"
+  );
+}
+
+export function isTurnBackgroundMaintenanceActive(
+  job: StoryProcessJob | TurnJobRead | null
+): boolean {
+  return (
+    job?.status === "completed" &&
+    job.maintenance_status === "running" &&
+    job.maintenance_stage === "memory_summary"
+  );
+}
+
+export async function waitForTurnMaintenance(
+  gameId: string,
+  jobId: string,
+  onProgress: (message: string) => void,
+  onSnapshot: (job: TurnJobRead) => void
+) {
+  for (let attempt = 0; attempt < turnMaintenanceMaxPolls; attempt += 1) {
+    await sleep(turnPollIntervalMs);
+    const job = await getTurnJob(gameId, jobId);
+    onSnapshot(job);
+    if (!isTurnMaintenanceActive(job)) {
+      return job;
+    }
+    onProgress(buildMaintenanceProgressMessage(job, (attempt + 1) * turnPollIntervalMs));
+  }
+  throw new Error(
+    `状态提取已等待 14 分钟，任务仍未完成。任务 ID：${jobId}。请稍后刷新或联系我查看任务状态。`
+  );
+}
+
 async function waitForTurnJob(
   gameId: string,
   jobId: string,
@@ -314,6 +365,28 @@ function buildJobProgressMessage(
   return `${base}（${statusText}，已等待 ${seconds} 秒，最近更新：${formatLastEvent(
     job.last_event_at
   )}）`;
+}
+
+function buildMaintenanceProgressMessage(job: StoryProcessJob, elapsedMs: number): string {
+  const seconds = Math.round(elapsedMs / 1000);
+  const stageLabel = formatMaintenanceStage(job.maintenance_stage);
+  const base = job.maintenance_message || `正在进行${stageLabel}`;
+  return `${base}（${stageLabel}，已等待 ${seconds} 秒，最近更新：${formatLastEvent(
+    job.last_event_at
+  )}）`;
+}
+
+export function formatMaintenanceStage(stage: string | null): string {
+  if (stage === "state_extract") {
+    return "状态提取";
+  }
+  if (stage === "memory_summary") {
+    return "记忆摘要";
+  }
+  if (stage === "completed") {
+    return "维护完成";
+  }
+  return "状态维护";
 }
 
 function sleep(ms: number) {

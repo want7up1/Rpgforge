@@ -16,7 +16,9 @@ from app.services.deepseek_client import DeepSeekError
 from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
+from app.services.prompt_builder import PromptBuilder
 from app.services.prompt_loader import load_prompt_template
+from app.services.story_blueprint import build_story_blueprint
 
 logger = logging.getLogger(__name__)
 
@@ -294,6 +296,8 @@ class ContextCompressor:
                 "genre": game.genre,
                 "description": game.description,
             },
+            "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
+            "story_blueprint": build_story_blueprint(game.config),
             "current_state": game.state.state_json if game.state else {},
             "previous_summaries": existing_summaries,
             "turn": {
@@ -315,6 +319,8 @@ class ContextCompressor:
             ],
             json_mode=True,
             max_tokens=3000,
+            reasoning_effort="high",
+            respect_route=False,
         )
         parsed = parse_json_object(result.content)
         output = ContextCompressionOutput.model_validate(parsed)

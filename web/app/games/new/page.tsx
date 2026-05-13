@@ -15,6 +15,11 @@ import {
   getActiveGeneratorFinalizeJob,
 } from "@/lib/api";
 import {
+  buildGeneratedConfigBlueprint,
+  normalizeConfirmedRequirements,
+  type StoryBlueprintView
+} from "@/lib/gameExperience";
+import {
   createInitialChatProcess,
   createInitialFinalizeProcess,
   formatLastEvent,
@@ -23,6 +28,7 @@ import {
   type StreamProcessJob
 } from "@/lib/generatorJobStream";
 import type {
+  ConfirmedRequirements,
   GeneratedGameConfig,
   GeneratorChatJobRead,
   GeneratorChatResponse,
@@ -30,7 +36,8 @@ import type {
   GeneratorMessage,
 } from "@/lib/types";
 
-const sampleIdea = "黑暗武侠，主角是失忆镖师，地点是雁回镇义庄。";
+const sampleIdea =
+  "黑暗武侠，故事发生在雁回镇义庄。主角是失忆镖师，必须出现雨夜义庄、红伞女人和失踪镖队。不要变成修仙飞升，也不要太快揭露主角身世。";
 export default function NewGamePage() {
   const router = useRouter();
   const [idea, setIdea] = useState(sampleIdea);
@@ -241,6 +248,8 @@ export default function NewGamePage() {
   }
 
   const canFinalize = lastReply?.stage === "ready_to_generate";
+  const confirmedBrief = normalizeConfirmedRequirements(confirmed, idea);
+  const generatedBlueprint = generatedConfig ? buildGeneratedConfigBlueprint(generatedConfig) : null;
 
   return (
     <AppShell>
@@ -253,7 +262,7 @@ export default function NewGamePage() {
             <p className="game-page-eyebrow">Adventure Forge</p>
             <h1 className="game-page-title">创建冒险</h1>
             <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--muted)]">
-              先确认冒险方向，再生成世界资料、角色、状态、剧情导演和初始剧情。
+              写一段故事背景、核心设定、禁止点和必须出现的内容；AI 会抽取创作简报，再补全世界资料、角色、状态和剧情导演。
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3 lg:min-w-96">
@@ -278,6 +287,9 @@ export default function NewGamePage() {
                 onChange={(event) => setIdea(event.target.value)}
                 value={idea}
               />
+              <span className="surface-subtle">
+                可以自由描述：故事背景、核心设定、必须看到的桥段或人物、绝对不要出现的方向，以及偏调查/战斗/社交等玩法偏好。
+              </span>
             </label>
             <div className="grid gap-2 sm:flex sm:flex-wrap">
               <button
@@ -321,7 +333,7 @@ export default function NewGamePage() {
             <div className="mt-3 grid gap-3">
               {history.length === 0 ? (
                 <p className="surface-panel surface-subtle">
-                  暂无记录。输入冒险想法后，系统会先确认题材、主角、核心冲突和玩法边界。
+                  暂无记录。输入冒险想法后，系统会先抽取故事背景、核心设定、必须出现内容和禁止点。
                 </p>
               ) : (
                 history.map((message, index) => (
@@ -371,9 +383,7 @@ export default function NewGamePage() {
 
           <details className="surface-panel" open={Boolean(lastReply)}>
             <summary className="cursor-pointer surface-title">已确认设定</summary>
-            <div className="mt-3">
-              <JsonBlock data={confirmed} />
-            </div>
+            <BriefSummary className="mt-3" brief={confirmedBrief} />
             {lastReply ? (
               <div className="archive-card mt-4 text-sm leading-6">
                 <div className="flex flex-wrap items-center gap-2">
@@ -417,7 +427,15 @@ export default function NewGamePage() {
                     {generatedConfig.modes.length} 个
                   </p>
                 </div>
-                <JsonBlock data={generatedConfig} />
+                {generatedBlueprint ? (
+                  <BlueprintPreview blueprint={generatedBlueprint} />
+                ) : null}
+                <details className="archive-card">
+                  <summary className="cursor-pointer font-semibold">高级：完整 JSON</summary>
+                  <div className="mt-3">
+                    <JsonBlock data={generatedConfig} />
+                  </div>
+                </details>
                 <button
                   className="app-button app-button-primary"
                   disabled={pendingAction !== null}
@@ -458,6 +476,68 @@ export default function NewGamePage() {
         </aside>
       </div>
     </AppShell>
+  );
+}
+
+function BriefSummary({
+  brief,
+  className = ""
+}: {
+  brief: ConfirmedRequirements;
+  className?: string;
+}) {
+  return (
+    <div className={`grid gap-3 ${className}`}>
+      <SummaryCard label="故事背景" values={[brief.story_background]} />
+      <SummaryCard label="核心设定" values={[brief.core_premise]} />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <SummaryCard label="必须出现" values={brief.must_include} />
+        <SummaryCard label="禁止点" values={brief.forbidden_content} />
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <SummaryCard label="玩法偏好" values={brief.playstyle_preferences} />
+        <SummaryCard label="风格偏好" values={brief.tone_preferences} />
+      </div>
+    </div>
+  );
+}
+
+function BlueprintPreview({ blueprint }: { blueprint: StoryBlueprintView }) {
+  return (
+    <section className="archive-card grid gap-3 text-sm">
+      <div>
+        <h3 className="font-semibold">生成摘要</h3>
+        <p className="mt-2 leading-6 text-[color:var(--muted)]">
+          {blueprint.description || "暂无简介。"}
+        </p>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <SummaryCard label="核心悬念" values={[blueprint.centralQuestion]} />
+        <SummaryCard label="开局舞台" values={[blueprint.openingStage]} />
+        <SummaryCard label="当前幕" values={[blueprint.currentAct]} />
+        <SummaryCard label="当前幕目标" values={[blueprint.currentActGoal]} />
+        <SummaryCard label="必须保留" values={blueprint.mustPreserve} />
+        <SummaryCard label="禁止变成" values={blueprint.mustNotBecome} />
+      </div>
+    </section>
+  );
+}
+
+function SummaryCard({ label, values }: { label: string; values: string[] }) {
+  const cleanValues = values.map((value) => value.trim()).filter(Boolean);
+  return (
+    <article className="rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3">
+      <h3 className="text-sm font-semibold">{label}</h3>
+      {cleanValues.length === 0 ? (
+        <p className="mt-2 text-sm text-[color:var(--muted)]">未明确，生成时由 AI 补全。</p>
+      ) : (
+        <ul className="mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
+          {cleanValues.map((value) => (
+            <li key={value}>{value}</li>
+          ))}
+        </ul>
+      )}
+    </article>
   );
 }
 
@@ -526,7 +606,7 @@ function StreamProcessPanel({
         <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
           思考过程
         </summary>
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
+        <pre className="app-wrap-text max-h-64 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
           {reasoning || "尚未收到思考过程。"}
         </pre>
       </details>
@@ -537,7 +617,7 @@ function StreamProcessPanel({
         <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
           {contentLabel}
         </summary>
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
+        <pre className="app-wrap-text max-h-72 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
           {content || "尚未收到正文内容。"}
         </pre>
       </details>

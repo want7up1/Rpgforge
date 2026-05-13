@@ -39,7 +39,7 @@ export function GamePageHeader({
 }: GamePageHeaderProps) {
   return (
     <section className="game-page-hero">
-      <div className="grid gap-4">
+      <div className="grid min-w-0 gap-4">
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
           <div className="min-w-0">
             <p className="game-page-eyebrow">{eyebrow}</p>
@@ -53,7 +53,7 @@ export function GamePageHeader({
             ) : null}
           </div>
           {meta || primaryAction ? (
-            <div className="grid gap-2 sm:justify-items-end">
+            <div className="grid min-w-0 gap-2 sm:justify-items-end">
               {meta}
               {primaryAction}
             </div>
@@ -64,7 +64,7 @@ export function GamePageHeader({
           <div className="game-nav-back">
             <BackButton fallbackHref={backFallbackHref ?? `/games/${gameId}`} label="返回" />
           </div>
-          <nav aria-label="游戏内导航" className="game-nav lg:justify-end">
+          <nav aria-label="游戏内导航" className="game-nav">
             {gameNavItems.map((item) => (
               <Link
                 aria-current={active === item.key ? "page" : undefined}

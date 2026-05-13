@@ -40,7 +40,7 @@ export function AppShell({ children, variant = "default" }: AppShellProps) {
             <span className="brand-mark-small">RF</span>
             <span>RPGForge</span>
           </Link>
-          <nav className="app-actions md:justify-end">
+          <nav className="site-nav md:justify-end">
             <Link className="app-button" href="/games">
               冒险
             </Link>

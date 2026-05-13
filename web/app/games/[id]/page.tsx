@@ -7,7 +7,9 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
 import { JsonBlock } from "@/components/JsonBlock";
-import { deleteGame, getGame } from "@/lib/api";
+import { deleteGame, getGame, getGameScriptExport } from "@/lib/api";
+import { downloadBlob } from "@/lib/downloads";
+import { buildGameBlueprint, type StoryBlueprintView } from "@/lib/gameExperience";
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
 import type { GameDetail } from "@/lib/types";
 
@@ -65,9 +67,29 @@ function GameDetailView({ game }: { game: GameDetail }) {
   const chapterSummary = latestSummary(game, "chapter");
   const featuredLore = game.lore_entries.slice(0, 6);
   const stateV2 = getStateV2FromGame(game);
+  const blueprint = buildGameBlueprint(game);
   const hasTurns = (game.state?.current_turn ?? 0) > 0;
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [exportingScript, setExportingScript] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  async function handleScriptExport() {
+    setExportingScript(true);
+    setExportStatus("正在生成剧本 Markdown...");
+    setExportError(null);
+    try {
+      const { blob, filename } = await getGameScriptExport(game.id);
+      downloadBlob(blob, filename);
+      setExportStatus("剧本 Markdown 已开始下载。");
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "导出剧本失败。");
+      setExportStatus(null);
+    } finally {
+      setExportingScript(false);
+    }
+  }
 
   async function handleDeleteGame() {
     const confirmedTitle = window.prompt(
@@ -101,9 +123,22 @@ function GameDetailView({ game }: { game: GameDetail }) {
         gameId={game.id}
         meta={<span className="app-pill">{game.status}</span>}
         primaryAction={
-          <Link className="app-button app-button-primary w-full sm:w-fit" href={`/games/${game.id}/play`}>
-            {hasTurns ? "继续冒险" : "开始冒险"}
-          </Link>
+          <div className="grid w-full gap-2 sm:flex sm:w-fit sm:flex-wrap sm:justify-end">
+            <button
+              className="app-button w-full sm:w-fit"
+              disabled={exportingScript}
+              onClick={handleScriptExport}
+              type="button"
+            >
+              {exportingScript ? "导出中..." : "导出剧本"}
+            </button>
+            <Link
+              className="app-button app-button-primary w-full sm:w-fit"
+              href={`/games/${game.id}/play`}
+            >
+              {hasTurns ? "继续冒险" : "开始冒险"}
+            </Link>
+          </div>
         }
         subtitle={
           <>
@@ -112,6 +147,8 @@ function GameDetailView({ game }: { game: GameDetail }) {
         }
         title={game.title}
       />
+      {exportStatus ? <p className="app-status">{exportStatus}</p> : null}
+      {exportError ? <p className="app-alert">{exportError}</p> : null}
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-4">
         <MetricCard label="等级" value={stateV2.protagonist_sheet.level} />
@@ -119,6 +156,8 @@ function GameDetailView({ game }: { game: GameDetail }) {
         <MetricCard label="世界资料" value={game.lore_entries.length} />
         <MetricCard label="记忆摘要" value={game.summaries.length} />
       </section>
+
+      <ScriptLockSection blueprint={blueprint} />
 
       <StatusSnapshot game={game} stateV2={stateV2} />
 
@@ -176,7 +215,7 @@ function GameDetailView({ game }: { game: GameDetail }) {
                     {entry.type || "unknown"} · {entry.priority || "medium"}
                   </span>
                 </div>
-                <p className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
+                <p className="app-wrap-text mt-3 max-h-40 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
                   {entry.content}
                 </p>
               </article>
@@ -232,6 +271,47 @@ function GameDetailView({ game }: { game: GameDetail }) {
         </div>
       </details>
     </div>
+  );
+}
+
+function ScriptLockSection({ blueprint }: { blueprint: StoryBlueprintView }) {
+  return (
+    <section className="surface-panel surface-panel-strong">
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
+        <div>
+          <h2 className="surface-title">剧本锁定</h2>
+          <p className="surface-subtle mt-1">
+            创建时固定的核心体验、悬念和禁止方向，会持续约束后续剧情。
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <BlueprintCard label="核心悬念" values={[blueprint.centralQuestion]} />
+        <BlueprintCard label="当前幕" values={[blueprint.currentAct, blueprint.currentActGoal]} />
+        <BlueprintCard label="开局舞台" values={[blueprint.openingStage]} />
+        <BlueprintCard label="必须保留" values={blueprint.mustPreserve} />
+        <BlueprintCard label="禁止变成" values={blueprint.mustNotBecome} />
+        <BlueprintCard label="压力时钟" values={blueprint.pressureClock} />
+      </div>
+    </section>
+  );
+}
+
+function BlueprintCard({ label, values }: { label: string; values: string[] }) {
+  const cleanValues = values.map((value) => value.trim()).filter(Boolean);
+  return (
+    <article className="archive-card">
+      <h3 className="text-sm font-semibold">{label}</h3>
+      {cleanValues.length === 0 ? (
+        <p className="mt-2 text-sm text-[color:var(--muted)]">未记录。</p>
+      ) : (
+        <ul className="mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
+          {cleanValues.slice(0, 4).map((value) => (
+            <li key={value}>{value}</li>
+          ))}
+        </ul>
+      )}
+    </article>
   );
 }
 
@@ -316,7 +396,7 @@ function SummaryPanel({
         <h3 className="font-semibold">{label}</h3>
         <span className="text-xs text-[color:var(--muted)]">{range}</span>
       </div>
-      <p className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
+      <p className="app-wrap-text mt-3 max-h-56 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
         {content || "暂无摘要。进行一回合后，系统会自动写入压缩记忆。"}
       </p>
     </article>
