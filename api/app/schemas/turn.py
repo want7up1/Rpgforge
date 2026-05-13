@@ -58,6 +58,7 @@ class TurnRead(BaseModel):
 
 
 TurnJobStatus = Literal["pending", "running", "completed", "failed"]
+TurnJobMaintenanceStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 
 
 class TurnJobCreateResponse(BaseModel):
@@ -80,7 +81,13 @@ class TurnJobRead(BaseModel):
     stage: str | None = None
     stage_label: str | None = None
     stage_index: int = 0
-    stage_total: int = 8
+    stage_total: int = 7
     stage_started_at: datetime | None = None
+    maintenance_status: TurnJobMaintenanceStatus = "completed"
+    maintenance_stage: str | None = None
+    maintenance_message: str | None = None
+    maintenance_error: str | None = None
+    maintenance_started_at: datetime | None = None
+    maintenance_completed_at: datetime | None = None
     stream_started_at: datetime | None = None
     last_event_at: datetime | None = None

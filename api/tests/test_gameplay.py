@@ -1,12 +1,15 @@
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from threading import Thread
+from time import sleep
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.config import settings
+from app.db.session import SessionLocal
 from app.main import app
 from app.models.generator_job import TurnJob
 from app.models.state_delta import StateDelta
@@ -20,6 +23,7 @@ from app.services.gameplay import GameplayService
 from app.services.lore_retriever import LoreRetriever
 from app.services.mode_matcher import select_mode
 from app.services.state_applier import apply_state_delta
+from app.services.story_director import StoryDirector
 from app.services.turn_jobs import extract_partial_json_string_field, run_turn_job
 
 
@@ -133,7 +137,61 @@ def build_generated_config() -> GeneratedGameConfig:
         description="失忆镖师追查义庄旧案。",
         system_prompt="你是 GM，每回合生成剧情和 A/B/C/D 行动选项。",
         worldview={"tone": "冷峻"},
-        script_outline={"title": "雁回镇旧案", "acts": []},
+        script_outline={
+            "title": "雁回镇旧案",
+            "user_brief": {
+                "story_background": "黑暗武侠，雁回镇义庄。",
+                "core_premise": "失忆镖师追查义庄旧案。",
+                "must_include": ["雨夜义庄"],
+                "forbidden_content": ["不要修仙"],
+                "playstyle_preferences": ["调查"],
+                "tone_preferences": ["冷峻"],
+                "raw_user_input": "黑暗武侠，主角是失忆镖师。",
+            },
+            "acts": [
+                {
+                    "id": "act_1",
+                    "name": "义庄夜雨",
+                    "objective": "找到旧案第一条线索。",
+                    "dramatic_question": "沈砚能否证明自己不是旧案帮凶？",
+                    "allowed_reveals": ["旧案仍有人遮掩"],
+                    "forbidden_reveals": ["账册真凶"],
+                }
+            ],
+            "campaign_contract": {
+                "premise": "失忆镖师追查义庄旧案。",
+                "player_fantasy": "失忆镖师以调查和江湖人情追查旧案。",
+                "central_question": "沈砚失忆前到底护送了什么？",
+                "main_goal": "查清义庄旧案。",
+                "must_preserve": ["雨夜义庄"],
+                "must_not_become": ["不要修仙"],
+                "forbidden_drift": ["不要修仙"],
+                "current_act": "act_1",
+            },
+            "truth_map": [
+                {
+                    "truth": "义庄账册记录旧案交易。",
+                    "public_mask": "义庄只是闹鬼。",
+                    "reveal_condition": "玩家找到缺页账册。",
+                }
+            ],
+            "clue_ladder": [
+                {
+                    "stage": "第一层",
+                    "clue": "棺木底部有湿泥。",
+                    "points_to": "义庄后门。",
+                    "do_not_reveal": "真凶身份。",
+                }
+            ],
+            "pressure_clock": [
+                {
+                    "name": "封案压力",
+                    "tick_condition": "玩家拖延调查。",
+                    "consequence": "官府封存尸格。",
+                    "visibility": "public",
+                }
+            ],
+        },
         generation_notes="test",
         lore_entries=[
             GeneratedLoreEntry(
@@ -313,7 +371,10 @@ def test_prompt_injects_related_lore_and_memory_summary(db_session) -> None:
     assert "义庄" in always_on_titles
     assert "黑伞客陆沉舟" in related_titles
     assert runtime_payload["memory_summaries"]["long_term"]["content"].startswith("长期记忆")
-    assert runtime_payload["campaign_contract"]["source"] == "derived_from_script_outline"
+    assert runtime_payload["campaign_contract"]["central_question"] == "沈砚失忆前到底护送了什么？"
+    assert runtime_payload["campaign_contract"]["must_preserve"] == ["雨夜义庄"]
+    assert runtime_payload["story_blueprint"]["current_act"]["id"] == "act_1"
+    assert runtime_payload["story_blueprint"]["current_act"]["forbidden_reveals"] == ["账册真凶"]
 
 
 def test_prompt_injects_explicit_campaign_contract(db_session) -> None:
@@ -340,6 +401,22 @@ def test_prompt_injects_explicit_campaign_contract(db_session) -> None:
     assert runtime_payload["campaign_contract"]["current_act"] == "act_1"
     assert "终局门派战争" in runtime_payload["campaign_contract"]["forbidden_drift"][0]
     assert runtime_payload["current_state_v2"]["version"] == 1
+
+
+def test_story_director_fallback_uses_story_blueprint_current_act(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+
+    decision = StoryDirector._fallback_decision(
+        game,
+        player_input="我检查义庄门槛。",
+        selected_mode=None,
+    )
+
+    assert decision.current_act == "act_1"
+    assert decision.scene_objective == "找到旧案第一条线索。"
+    assert decision.allowed_reveals == ["旧案仍有人遮掩"]
+    assert decision.forbidden_reveals == ["账册真凶"]
+    assert "当前幕节奏" in decision.pacing_limit
 
 
 def test_story_director_decision_is_injected_into_runtime_prompt(db_session) -> None:
@@ -580,6 +657,50 @@ def test_lore_retrieval_ignores_generic_content_matches(db_session) -> None:
     assert "银钥匙" in [result.entry.title for result in specific_results]
 
 
+def test_lore_retrieval_uses_story_blueprint_terms(db_session) -> None:
+    config = build_generated_config().model_copy(deep=True)
+    config.script_outline["clue_ladder"] = [
+        {
+            "stage": "第一层",
+            "clue": "月蚀密钥会在旧井边出现。",
+            "points_to": "旧井与封印仪式。",
+        }
+    ]
+    config.script_outline["pressure_clock"] = [
+        {
+            "name": "月蚀仪式",
+            "tick_condition": "拖延调查月蚀密钥。",
+            "consequence": "旧井封印松动。",
+        }
+    ]
+    config.lore_entries.append(
+        GeneratedLoreEntry(
+            title="月蚀密钥",
+            type="clue",
+            keywords=["月蚀密钥"],
+            trigger_words=["月蚀密钥"],
+            priority="high",
+            always_on=False,
+            visibility="mixed",
+            public_info="一枚只在月蚀前夜出现的旧钥匙。",
+            gm_secret="月蚀密钥指向旧井封印。",
+            content="月蚀密钥是当前线索阶梯的关键物证。",
+            usage_note="当前幕推进到旧井线索时注入，不能直接揭露封印真相。",
+        )
+    )
+    game = create_game_from_config(db_session, config)
+
+    results = LoreRetriever().retrieve(
+        db=db_session,
+        game=game,
+        player_input="我继续按当前线索调查。",
+        selected_mode=None,
+        recent_turns=[],
+    )
+
+    assert "月蚀密钥" in [result.entry.title for result in results]
+
+
 def test_gameplay_service_streams_turn(db_session) -> None:
     game = create_game_from_config(db_session, build_generated_config())
     service = GameplayService(router=FakeRouter())
@@ -640,6 +761,165 @@ def test_turn_job_lifecycle(reset_database, monkeypatch) -> None:
     active_response = client.get(f"/api/games/{game_id}/turns/jobs/active")
     assert active_response.status_code == 200
     assert active_response.json()["id"] == payload["id"]
+
+
+def test_active_turn_job_marks_timed_out_generation_failed(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="running",
+        request_json={"player_input": "我检查门槛。"},
+        progress_message="DeepSeek 正在书写剧情。",
+        stage="gm_runtime",
+        last_event_at=datetime.now(UTC) - timedelta(minutes=20),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    client = TestClient(app)
+    response = client.get(f"/api/games/{game.id}/turns/jobs/active")
+
+    assert response.status_code == 200
+    assert response.json() is None
+    db_session.expire_all()
+    saved = db_session.get(TurnJob, job.id)
+    assert saved is not None
+    assert saved.status == "failed"
+    assert saved.maintenance_status == "failed"
+    assert saved.completed_at is not None
+    assert "超时阈值" in (saved.error_message or "")
+
+
+def test_stale_turn_job_no_longer_blocks_new_turn_job(db_session, monkeypatch) -> None:
+    monkeypatch.setattr("app.routers.gameplay.enqueue_turn_job", lambda job_id: None)
+    game = create_game_from_config(db_session, build_generated_config())
+    stale_job = TurnJob(
+        game_id=game.id,
+        status="running",
+        request_json={"player_input": "我检查门槛。"},
+        progress_message="DeepSeek 正在书写剧情。",
+        stage="gm_runtime",
+        last_event_at=datetime.now(UTC) - timedelta(minutes=20),
+    )
+    db_session.add(stale_job)
+    db_session.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/games/{game.id}/turns/jobs",
+        json={"player_input": "我继续追查。"},
+    )
+
+    assert response.status_code == 202
+    db_session.expire_all()
+    saved_stale_job = db_session.get(TurnJob, stale_job.id)
+    assert saved_stale_job is not None
+    assert saved_stale_job.status == "failed"
+
+
+def test_turn_job_read_marks_rq_failed_generation_failed(db_session, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.job_queue._rq_job_status",
+        lambda connection, job_id: "failed",
+    )
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="running",
+        request_json={"player_input": "我检查门槛。"},
+        progress_message="DeepSeek 正在书写剧情。",
+        stage="gm_runtime",
+        last_event_at=datetime.now(UTC),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    client = TestClient(app)
+    response = client.get(f"/api/games/{game.id}/turns/jobs/{job.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "failed"
+    assert "failed" in payload["error_message"]
+    db_session.expire_all()
+    saved = db_session.get(TurnJob, job.id)
+    assert saved is not None
+    assert saved.status == "failed"
+
+
+def test_turn_job_events_returns_terminal_snapshot_for_stale_generation(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="running",
+        request_json={"player_input": "我检查门槛。"},
+        progress_message="DeepSeek 正在书写剧情。",
+        stage="gm_runtime",
+        last_event_at=datetime.now(UTC) - timedelta(minutes=20),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    client = TestClient(app)
+    with client.stream("GET", f"/api/games/{game.id}/turns/jobs/{job.id}/events") as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: snapshot" in body
+    assert '"terminal": true' in body
+    assert '"status": "failed"' in body
+
+
+def test_turn_job_rejects_new_turn_during_maintenance(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="completed",
+        request_json={"player_input": "我检查门槛。"},
+        maintenance_status="running",
+        maintenance_stage="state_extract",
+        maintenance_message="正在提取状态变更。",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/games/{game.id}/turns/jobs",
+        json={"player_input": "我继续追查。"},
+    )
+    active_response = client.get(f"/api/games/{game.id}/turns/jobs/active")
+
+    assert response.status_code == 409
+    assert "状态维护" in response.json()["detail"]
+    assert active_response.status_code == 200
+    assert active_response.json()["id"] == str(job.id)
+
+
+def test_turn_job_allows_new_turn_during_memory_summary(db_session, monkeypatch) -> None:
+    monkeypatch.setattr("app.routers.gameplay.enqueue_turn_job", lambda job_id: None)
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="completed",
+        request_json={"player_input": "我检查门槛。"},
+        maintenance_status="running",
+        maintenance_stage="memory_summary",
+        maintenance_message="正在批量维护记忆摘要。",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/games/{game.id}/turns/jobs",
+        json={"player_input": "我继续追查。"},
+    )
+    active_response = client.get(f"/api/games/{game.id}/turns/jobs/active")
+
+    assert response.status_code == 202
+    assert active_response.status_code == 200
+    assert active_response.json()["id"] == response.json()["id"]
 
 
 def test_turn_job_persists_stream_progress(db_session, monkeypatch) -> None:
@@ -734,6 +1014,10 @@ def test_turn_job_persists_stream_progress(db_session, monkeypatch) -> None:
     db_session.commit()
 
     monkeypatch.setattr("app.services.turn_jobs.GameplayService", StreamingGameplayService)
+    monkeypatch.setattr(
+        "app.services.turn_jobs._enqueue_turn_maintenance_job",
+        lambda job_id: None,
+    )
 
     import asyncio
 
@@ -746,8 +1030,10 @@ def test_turn_job_persists_stream_progress(db_session, monkeypatch) -> None:
     assert saved.content_buffer == '{"narrative":"义庄门槛内侧的泥痕尚未干透。"'
     assert saved.narrative_buffer == "义庄门槛内侧的泥痕尚未干透。"
     assert saved.stage == "completed"
-    assert saved.stage_index == 8
-    assert saved.stage_total == 8
+    assert saved.stage_index == 7
+    assert saved.stage_total == 7
+    assert saved.maintenance_status == "pending"
+    assert saved.maintenance_stage == "state_extract"
     assert saved.error_message is None
 
 
@@ -786,8 +1072,8 @@ def test_turn_job_events_returns_terminal_snapshot(db_session) -> None:
         progress_message="剧情已生成，状态变更已写入。",
         stage="completed",
         stage_label="完成",
-        stage_index=8,
-        stage_total=8,
+        stage_index=7,
+        stage_total=7,
         stage_started_at=now,
         stream_started_at=now,
         last_event_at=now,
@@ -805,7 +1091,81 @@ def test_turn_job_events_returns_terminal_snapshot(db_session) -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: snapshot" in body
     assert '"terminal": true' in body
-    assert '"stage_index": 8' in body
+    assert '"stage_index": 7' in body
+    assert "义庄门槛内侧的泥痕尚未干透" in body
+
+
+def test_turn_job_events_poll_db_snapshot_without_broker_event(db_session, monkeypatch) -> None:
+    monkeypatch.setattr("app.routers.gameplay.SSE_DB_SNAPSHOT_INTERVAL_SECONDS", 0.01)
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="pending",
+        request_json={"player_input": "我检查门槛。"},
+        progress_message="等待剧情生成。",
+        stage="prepare_context",
+        stage_label="准备上下文",
+        stage_index=1,
+        stage_total=7,
+        last_event_at=datetime.now(UTC),
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+
+    def complete_job_later() -> None:
+        sleep(0.05)
+        with SessionLocal() as db:
+            turn = Turn(
+                game_id=game.id,
+                turn_number=1,
+                player_input="我检查门槛。",
+                gm_output="义庄门槛内侧的泥痕尚未干透。",
+                visible_summary="泥痕通向后院",
+                hidden_summary=None,
+                state_delta_json={},
+                action_options_json=[
+                    {"key": "A", "label": "沿着泥痕追到后院"},
+                    {"key": "B", "label": "检查其他脚印"},
+                    {"key": "C", "label": "询问守庄老仆"},
+                    {"key": "D", "label": "先关上义庄大门"},
+                ],
+                model_used="deepseek-v4-pro-test",
+            )
+            db.add(turn)
+            db.flush()
+            saved = db.get(TurnJob, job.id)
+            assert saved is not None
+            now = datetime.now(UTC)
+            saved.status = "completed"
+            saved.turn_id = turn.id
+            saved.model_used = "deepseek-v4-pro-test"
+            saved.reasoning_content = "判断玩家行动。"
+            saved.content_buffer = '{"narrative":"义庄门槛内侧的泥痕尚未干透。"}'
+            saved.narrative_buffer = turn.gm_output
+            saved.progress_message = "剧情已生成，状态变更已写入。"
+            saved.stage = "completed"
+            saved.stage_label = "完成"
+            saved.stage_index = 7
+            saved.stage_total = 7
+            saved.last_event_at = now
+            saved.completed_at = now
+            db.add(saved)
+            db.commit()
+
+    updater = Thread(target=complete_job_later)
+    updater.start()
+    client = TestClient(app)
+    try:
+        with client.stream("GET", f"/api/games/{game.id}/turns/jobs/{job.id}/events") as response:
+            body = "".join(response.iter_text())
+    finally:
+        updater.join(timeout=1)
+
+    assert response.status_code == 200
+    assert "event: snapshot" in body
+    assert '"terminal": true' in body
+    assert '"stage_index": 7' in body
     assert "义庄门槛内侧的泥痕尚未干透" in body
 
 

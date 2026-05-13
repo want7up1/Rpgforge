@@ -90,8 +90,19 @@ class TurnJob(Base):
     stage: Mapped[str | None] = mapped_column(String(64))
     stage_label: Mapped[str | None] = mapped_column(Text)
     stage_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    stage_total: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    stage_total: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     stage_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    maintenance_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+    maintenance_stage: Mapped[str | None] = mapped_column(String(64))
+    maintenance_message: Mapped[str | None] = mapped_column(Text)
+    maintenance_error: Mapped[str | None] = mapped_column(Text)
+    maintenance_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    maintenance_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stream_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

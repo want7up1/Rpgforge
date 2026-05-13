@@ -140,6 +140,12 @@ class GeneratedCharacterProfile(BaseModel):
     appearance: str = ""
     portrait_prompt: str = ""
     visibility: str = "visible"
+    dramatic_function: str = ""
+    desire: str = ""
+    fear: str = ""
+    leverage: str = ""
+    relationship_arc: str = ""
+    public_limit: str = ""
 
     @field_validator("aliases", mode="before")
     @classmethod

@@ -239,7 +239,7 @@ function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
                 <h3 className="font-semibold">{condition.name}</h3>
                 <span className="app-pill">{condition.severity}</span>
               </div>
-              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+              <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
                 {condition.status}
                 {condition.duration ? ` · ${condition.duration}` : ""}
                 {condition.source ? ` · 来源：${condition.source}` : ""}
@@ -266,10 +266,10 @@ function AbilitiesPanel({ abilities }: { abilities: AbilityState[] }) {
               <h3 className="font-semibold">{ability.name}</h3>
               <span className="app-pill">Lv.{ability.level}</span>
             </div>
-            <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+            <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
               {ability.description || ability.status}
             </p>
-            <div className="mt-3 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-2">
+            <div className="app-wrap-text mt-3 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-2">
               {ability.resource_cost ? <span>消耗：{ability.resource_cost}</span> : null}
               {ability.cooldown ? <span>冷却：{ability.cooldown}</span> : null}
               {ability.usage_note ? <span className="sm:col-span-2">{ability.usage_note}</span> : null}
@@ -323,7 +323,7 @@ function RelationshipCard({ relationship }: { relationship: RelationshipTrack })
         </div>
       )}
       {relationship.recent_interaction ? (
-        <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">
+        <p className="app-wrap-text mt-3 text-sm leading-6 text-[color:var(--muted)]">
           {relationship.recent_interaction}
         </p>
       ) : null}
@@ -349,7 +349,7 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
             stateV2.quest_log.active.map((quest) => (
               <article className="archive-card archive-card-accent" key={quest.name}>
                 <h3 className="font-semibold">{quest.name}</h3>
-                <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
                   {quest.objective || quest.status}
                 </p>
               </article>
@@ -373,7 +373,7 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
                 key={`${thread.title}-${thread.source}`}
               >
                 <h3 className="font-semibold">{thread.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
                   {thread.status}
                   {thread.source ? ` · ${thread.source}` : ""}
                 </p>
@@ -400,7 +400,7 @@ function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
           stateV2.npc_registry.map((npc) => (
             <article className="archive-card" key={npc.id || npc.name}>
               <h3 className="font-semibold">{npc.name}</h3>
-              <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+              <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
                 {[npc.identity, npc.status, npc.location, npc.relationship || npc.attitude]
                   .filter(Boolean)
                   .join(" · ") || "暂无更多记录。"}
@@ -426,7 +426,7 @@ function CompactField({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3">
       <p className="text-xs text-[color:var(--muted)]">{label}</p>
-      <p className="mt-1 break-words text-sm font-medium leading-6">{value}</p>
+      <p className="app-wrap-text mt-1 text-sm font-medium leading-6">{value}</p>
     </div>
   );
 }
@@ -467,7 +467,7 @@ function RecentLog({ entries }: { entries: Record<string, unknown>[] }) {
       <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">最近变化</summary>
       <div className="grid gap-2 border-t border-[color:var(--border)] p-3">
         {entries.map((entry, index) => (
-          <p className="text-xs leading-5 text-[color:var(--muted)]" key={index}>
+          <p className="app-wrap-text text-xs leading-5 text-[color:var(--muted)]" key={index}>
             {formatLogEntry(entry)}
           </p>
         ))}
@@ -490,7 +490,7 @@ function PillList({ values }: { values: string[] }) {
 
 function EmptyText({ children }: { children: string }) {
   return (
-    <p className="rounded border border-dashed border-[color:var(--border)] p-3 text-sm leading-6 text-[color:var(--muted)]">
+    <p className="app-wrap-text rounded border border-dashed border-[color:var(--border)] p-3 text-sm leading-6 text-[color:var(--muted)]">
       {children}
     </p>
   );

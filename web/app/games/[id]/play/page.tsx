@@ -8,6 +8,13 @@ import { AppShell } from "@/components/AppShell";
 import { CharacterModal } from "@/components/CharacterModal";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { StoryMarkdown } from "@/components/StoryMarkdown";
+import {
+  buildCharacterRuntimeView,
+  findCharacterByName,
+  inferPresentCharacterNames,
+  normalizeCharacterName,
+  uniqueCharacterNames
+} from "@/lib/characters";
 import { buildTurnSettlement, type TurnSettlementView } from "@/lib/gameExperience";
 import {
   createTurnJob,
@@ -19,7 +26,11 @@ import {
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
 import {
   createInitialTurnProcess,
+  formatMaintenanceStage,
   formatLastEvent,
+  isTurnBackgroundMaintenanceActive,
+  isTurnMaintenanceActive,
+  waitForTurnMaintenance,
   waitForTurnJobWithStream,
   type StoryProcessJob
 } from "@/lib/turnJobStream";
@@ -60,6 +71,8 @@ export default function PlayPage() {
     () => (state.status === "ready" ? getStateV2FromGame(state.game) : null),
     [state]
   );
+  const maintenanceActive = isTurnMaintenanceActive(turnProcess);
+  const backgroundMaintenanceActive = isTurnBackgroundMaintenanceActive(turnProcess);
 
   const refreshAfterTurnJob = useCallback(async (gameId: string, completedJob: TurnJobRead) => {
     const turn = completedJob.turn;
@@ -91,8 +104,40 @@ export default function PlayPage() {
     }
   }, []);
 
+  const monitorTurnMaintenance = useCallback(async (job: TurnJobRead) => {
+    setTurnProcess(job);
+    setTurnProgress(job.maintenance_message || "上一回合状态维护中，请稍候...");
+    try {
+      const settledJob = await waitForTurnMaintenance(
+        params.id,
+        job.id,
+        setTurnProgress,
+        setTurnProcess
+      );
+      await refreshAfterTurnJob(params.id, settledJob);
+      setTurnProgress(settledJob.maintenance_message || "状态维护已完成。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "状态维护恢复失败。");
+      setTurnProgress("状态维护恢复失败，请刷新页面确认任务状态。");
+      setTurnProcess((current) =>
+        current?.id === job.id
+          ? {
+              ...current,
+              maintenance_status: "failed",
+              maintenance_message: "状态提取等待超时，已解除操作锁。",
+              maintenance_error: caught instanceof Error ? caught.message : "状态维护恢复失败。"
+            }
+          : current
+      );
+    }
+  }, [params.id, refreshAfterTurnJob]);
+
   const restoreActiveTurnJob = useCallback(async (activeJob: TurnJobRead) => {
     setError(null);
+    if (isTurnMaintenanceActive(activeJob)) {
+      void monitorTurnMaintenance(activeJob);
+      return;
+    }
     setPending(true);
     setTurnProcess(activeJob);
     setTurnProgress(activeJob.progress_message || "检测到未完成回合任务，正在恢复实时连接...");
@@ -106,13 +151,16 @@ export default function PlayPage() {
       );
       await refreshAfterTurnJob(params.id, completedJob);
       setTurnProgress(completedJob.progress_message || "剧情生成完成。");
+      if (isTurnMaintenanceActive(completedJob)) {
+        void monitorTurnMaintenance(completedJob);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "恢复回合任务失败。");
       setTurnProgress("回合恢复失败，已保留收到的过程信息。");
     } finally {
       setPending(false);
     }
-  }, [params.id, refreshAfterTurnJob]);
+  }, [monitorTurnMaintenance, params.id, refreshAfterTurnJob]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -122,7 +170,7 @@ export default function PlayPage() {
         const [game, turns, characters, activeJob] = await Promise.all([
           getGame(params.id),
           getTurns(params.id),
-          getCharacters(params.id),
+          getCharacters(params.id, "public"),
           getActiveTurnJob(params.id)
         ]);
         if (!controller.signal.aborted) {
@@ -147,7 +195,7 @@ export default function PlayPage() {
   }, [params.id, restoreActiveTurnJob]);
 
   async function submitTurn(payload: Parameters<typeof createTurnJob>[1]) {
-    if (state.status !== "ready" || pending) {
+    if (state.status !== "ready" || pending || maintenanceActive) {
       return;
     }
 
@@ -167,6 +215,9 @@ export default function PlayPage() {
       await refreshAfterTurnJob(state.game.id, completedJob);
       setInput("");
       setTurnProgress(completedJob.progress_message || "剧情生成完成。");
+      if (isTurnMaintenanceActive(completedJob)) {
+        void monitorTurnMaintenance(completedJob);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "提交回合失败。");
       setTurnProgress("回合生成失败，已保留收到的过程信息。");
@@ -268,11 +319,14 @@ export default function PlayPage() {
                     pending={pending}
                     process={turnProcess}
                     progress={turnProgress}
+                    maintenanceActive={maintenanceActive}
+                    backgroundMaintenanceActive={backgroundMaintenanceActive}
                   />
                   <AdventureComposer
                     actionMode={actionMode}
-                    disabled={pending}
+                    disabled={pending || maintenanceActive}
                     input={input}
+                    maintenanceActive={maintenanceActive}
                     onInputChange={setInput}
                     onModeChange={setActionMode}
                     onSubmit={handleSubmit}
@@ -291,6 +345,9 @@ export default function PlayPage() {
           <CharacterModal
             character={selectedCharacter}
             onClose={() => setSelectedCharacter(null)}
+            runtimeView={
+              selectedCharacter ? buildCharacterRuntimeView(selectedCharacter, stateV2) : null
+            }
           />
         </>
       )}
@@ -475,15 +532,16 @@ function PresentCharactersStrip({
   onCharacterClick: (character: CharacterRead) => void;
   stateV2: StateV2;
 }) {
-  const sourceNames = uniqueNames([
+  const narrative = [latestTurn?.player_input, latestTurn?.gm_output].filter(Boolean).join("\n");
+  const sourceNames = uniqueCharacterNames([
     ...stateV2.active_scene.present_npcs,
-    ...inferPresentCharacterNames(characters, stateV2, latestTurn)
+    ...inferPresentCharacterNames(characters, stateV2, narrative)
   ]);
   const present = sourceNames
     .map((name) => {
       const character = findCharacterByName(characters, name);
       const npcState = stateV2.npc_registry.find(
-        (npc) => normalizeName(npc.name) === normalizeName(name)
+        (npc) => normalizeCharacterName(npc.name) === normalizeCharacterName(name)
       );
       return {
         character,
@@ -494,7 +552,9 @@ function PresentCharactersStrip({
     })
     .filter((entry, index, list) =>
       Boolean(entry.name) &&
-      list.findIndex((item) => normalizeName(item.name) === normalizeName(entry.name)) === index
+      list.findIndex(
+        (item) => normalizeCharacterName(item.name) === normalizeCharacterName(entry.name)
+      ) === index
     );
 
   if (present.length === 0) {
@@ -544,6 +604,7 @@ function AdventureComposer({
   actionMode,
   disabled,
   input,
+  maintenanceActive,
   onInputChange,
   onModeChange,
   onSubmit,
@@ -552,6 +613,7 @@ function AdventureComposer({
   actionMode: ActionMode;
   disabled: boolean;
   input: string;
+  maintenanceActive: boolean;
   onInputChange: (value: string) => void;
   onModeChange: (mode: ActionMode) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -563,6 +625,14 @@ function AdventureComposer({
     { key: "story", label: "叙述" },
     { key: "continue", label: "继续" }
   ];
+  let submitLabel = "发送";
+  if (pending) {
+    submitLabel = "发送中...";
+  } else if (maintenanceActive) {
+    submitLabel = "整理中...";
+  } else if (actionMode === "continue") {
+    submitLabel = "继续";
+  }
 
   return (
     <footer className="adventure-composer">
@@ -601,7 +671,7 @@ function AdventureComposer({
             disabled={disabled || (actionMode !== "continue" && !input.trim())}
             type="submit"
           >
-            {pending ? "发送中..." : actionMode === "continue" ? "继续" : "发送"}
+            {submitLabel}
           </button>
         </div>
       </form>
@@ -623,16 +693,20 @@ function placeholderForMode(mode: ActionMode): string {
 }
 
 function StoryPanel({
+  backgroundMaintenanceActive,
   characters,
   latestTurn,
+  maintenanceActive,
   onCharacterClick,
   onSelectAction,
   pending,
   process,
   progress
 }: {
+  backgroundMaintenanceActive: boolean;
   characters: CharacterRead[];
   latestTurn: TurnRead | null;
+  maintenanceActive: boolean;
   onCharacterClick: (character: CharacterRead) => void;
   onSelectAction: (option: ActionOption) => void;
   pending: boolean;
@@ -642,7 +716,8 @@ function StoryPanel({
   const reasoning = process?.reasoning_content || "";
   const liveNarrative = process?.narrative_buffer || "";
   const displayedNarrative = pending ? liveNarrative : liveNarrative || latestTurn?.gm_output;
-  const hasLiveProcess = process !== null;
+  const hasLiveProcess =
+    process !== null && (pending || maintenanceActive || process.status === "failed");
   const actionOptions = pending ? [] : latestTurn?.action_options_json ?? [];
   const settlement = useMemo(
     () => (latestTurn ? buildTurnSettlement(latestTurn) : null),
@@ -654,18 +729,24 @@ function StoryPanel({
       {latestTurn && !pending ? (
         <article className="story-block story-block-player">
           <div className="story-label">你 · 第 {latestTurn.turn_number} 回合</div>
-          <p className="mt-2 whitespace-pre-wrap text-base leading-8">{latestTurn.player_input}</p>
+          <p className="app-wrap-text mt-2 whitespace-pre-wrap text-base leading-8">{latestTurn.player_input}</p>
         </article>
       ) : null}
 
       {hasLiveProcess ? (
         <article className="story-block">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="story-label">DeepSeek Pro · 剧情生成</div>
+            <div className="story-label">
+              {maintenanceActive ? "后台维护 · 状态提取" : "DeepSeek Pro · 剧情生成"}
+            </div>
             <span className="app-pill">{process.status}</span>
           </div>
           <div className="app-status text-xs">
-            <TurnStageProgress process={process} />
+            {maintenanceActive ? (
+              <MaintenanceStageProgress process={process} />
+            ) : (
+              <TurnStageProgress process={process} />
+            )}
             <div>{progress || process.progress_message || "等待 DeepSeek 返回剧情。"}</div>
             <div className="mt-1">
               最近更新：{formatLastEvent(process.last_event_at)} · 思考 {reasoning.length} 字 ·
@@ -674,6 +755,7 @@ function StoryPanel({
             </div>
           </div>
           <GenerationDetails
+            maintenanceActive={maintenanceActive}
             narrativeLength={liveNarrative.length}
             process={process}
             reasoningLength={reasoning.length}
@@ -682,7 +764,7 @@ function StoryPanel({
             <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
               思考过程
             </summary>
-            <pre className="max-h-56 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
+            <pre className="app-wrap-text max-h-56 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
               {reasoning || "尚未收到思考过程。"}
             </pre>
           </details>
@@ -712,6 +794,24 @@ function StoryPanel({
         <TurnSettlementCard settlement={settlement} />
       ) : null}
 
+      {maintenanceActive ? (
+        <section className="app-status">
+          <strong className="block text-[color:var(--foreground)]">上一回合状态提取中</strong>
+          <span className="mt-1 block">
+            {process?.maintenance_message || "正在整理状态变更，完成后才能继续下一回合。"}
+          </span>
+        </section>
+      ) : null}
+
+      {backgroundMaintenanceActive ? (
+        <section className="app-status">
+          <strong className="block text-[color:var(--foreground)]">记忆摘要后台维护中</strong>
+          <span className="mt-1 block">
+            {process?.maintenance_message || "正在更新长期记忆，不影响继续行动。"}
+          </span>
+        </section>
+      ) : null}
+
       {actionOptions.length > 0 ? (
         <section className="story-block">
           <div className="story-label">建议行动</div>
@@ -720,7 +820,7 @@ function StoryPanel({
               <button
                 aria-label={`选择建议行动 ${option.key}：${option.label}`}
                 className="story-choice-button"
-                disabled={pending}
+                disabled={pending || maintenanceActive}
                 key={option.key}
                 onClick={() => onSelectAction(option)}
                 type="button"
@@ -779,10 +879,12 @@ function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) 
 }
 
 function GenerationDetails({
+  maintenanceActive,
   narrativeLength,
   process,
   reasoningLength
 }: {
+  maintenanceActive: boolean;
   narrativeLength: number;
   process: StoryProcessJob;
   reasoningLength: number;
@@ -820,6 +922,18 @@ function GenerationDetails({
             思考 {reasoningLength} 字 · 剧情 {narrativeLength} 字
           </dd>
         </div>
+        <div>
+          <dt>状态维护</dt>
+          <dd>
+            {formatMaintenanceStage(process.maintenance_stage)} ·{" "}
+            {formatMaintenanceStatus(process)}
+            {maintenanceActive ? " · 阻止下一回合" : ""}
+          </dd>
+        </div>
+        <div>
+          <dt>维护信息</dt>
+          <dd>{process.maintenance_message || process.maintenance_error || "暂无"}</dd>
+        </div>
       </dl>
     </details>
   );
@@ -827,7 +941,7 @@ function GenerationDetails({
 
 function TurnStageProgress({ process }: { process: StoryProcessJob }) {
   const [now, setNow] = useState(() => Date.now());
-  const stageTotal = Math.max(process.stage_total || 8, 1);
+  const stageTotal = Math.max(process.stage_total || 7, 1);
   const stageIndex = Math.min(Math.max(process.stage_index || 1, 1), stageTotal);
   const stagePercent = Math.min(100, Math.max(6, (stageIndex / stageTotal) * 100));
   const stageLabel = process.stage_label || "准备上下文";
@@ -866,6 +980,35 @@ function TurnStageProgress({ process }: { process: StoryProcessJob }) {
   );
 }
 
+function MaintenanceStageProgress({ process }: { process: StoryProcessJob }) {
+  const [now, setNow] = useState(() => Date.now());
+  const stageLabel = formatMaintenanceStage(process.maintenance_stage);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [process.maintenance_started_at]);
+
+  return (
+    <div className="turn-stage-progress">
+      <div className="turn-stage-progress-meta">
+        <span>{stageLabel}</span>
+        <span>{formatStageElapsed(process.maintenance_started_at, now)}</span>
+      </div>
+      <div
+        aria-label={`后台维护进度：${stageLabel}`}
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={65}
+        className="turn-stage-progress-track"
+        role="progressbar"
+      >
+        <div className="turn-stage-progress-fill" style={{ width: "65%" }} />
+      </div>
+    </div>
+  );
+}
+
 function formatDateTime(value: string | null): string {
   if (!value) {
     return "暂无";
@@ -884,6 +1027,9 @@ function formatDateTime(value: string | null): string {
 }
 
 function formatStreamStatus(process: StoryProcessJob): string {
+  if (isTurnMaintenanceActive(process)) {
+    return "剧情已完成，正在轮询状态维护";
+  }
   if (process.status === "completed") {
     return "已完成";
   }
@@ -907,6 +1053,22 @@ function formatStreamStatus(process: StoryProcessJob): string {
   return "可能正在等待模型或已切换轮询";
 }
 
+function formatMaintenanceStatus(process: StoryProcessJob): string {
+  if (process.maintenance_status === "pending") {
+    return "等待中";
+  }
+  if (process.maintenance_status === "running") {
+    return "运行中";
+  }
+  if (process.maintenance_status === "skipped") {
+    return "已延后";
+  }
+  if (process.maintenance_status === "failed") {
+    return "失败";
+  }
+  return "完成";
+}
+
 function formatStageElapsed(value: string | null, now: number): string {
   if (!value) {
     return "等待中";
@@ -922,41 +1084,4 @@ function formatStageElapsed(value: string | null, now: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `已等待 ${minutes} 分 ${remainingSeconds} 秒`;
-}
-
-function findCharacterByName(characters: CharacterRead[], name: string) {
-  const normalized = normalizeName(name);
-  return characters.find((character) => {
-    if (normalizeName(character.name) === normalized) {
-      return true;
-    }
-    return character.aliases.some((alias) => normalizeName(alias) === normalized);
-  });
-}
-
-function normalizeName(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function inferPresentCharacterNames(
-  characters: CharacterRead[],
-  stateV2: StateV2,
-  latestTurn: TurnRead | null
-) {
-  const narrative = [latestTurn?.player_input, latestTurn?.gm_output].filter(Boolean).join("\n");
-  const mentionedCharacters = characters
-    .filter((character) => character.is_visible && narrative.includes(character.name))
-    .map((character) => character.name);
-  return uniqueNames([
-    stateV2.protagonist_sheet.name,
-    ...stateV2.party,
-    ...mentionedCharacters
-  ]).slice(0, 6);
-}
-
-function uniqueNames(values: string[]) {
-  return values.filter(Boolean).filter((value, index, list) => {
-    const normalized = normalizeName(value);
-    return list.findIndex((item) => normalizeName(item) === normalized) === index;
-  });
 }

@@ -26,7 +26,6 @@ TURN_JOB_STAGES: tuple[tuple[str, str], ...] = (
     ("gm_runtime", "剧情生成"),
     ("drift_validation", "偏离校验"),
     ("persist_turn", "写入回合"),
-    ("state_update", "状态更新"),
     ("completed", "完成"),
 )
 TURN_JOB_STAGE_LABELS = dict(TURN_JOB_STAGES)
@@ -228,46 +227,22 @@ async def run_turn_job(job_id: UUID) -> None:
         if job is None:
             return
         now = datetime.now(UTC)
-        job.turn_id = turn.id
-        job.model_used = turn.model_used
-        job.reasoning_content = stream_state["reasoning"]
-        job.content_buffer = stream_state["content"]
-        job.narrative_buffer = turn.gm_output
-        job.progress_message = "剧情已生成，正在调用 DeepSeek Flash 提取状态变更。"
-        _set_job_stage(job, "state_update", now)
-        stream_state["stage"] = "state_update"
-        stream_state["stage_started_at"] = job.stage_started_at
-        job.last_event_at = now
-        db.add(job)
-        db.commit()
-        db.refresh(job)
-        persisted_turn = db.get(Turn, turn.id)
-        _publish_turn_snapshot(job, persisted_turn, event_type="progress", terminal=False)
-
-    state_delta_written = False
-    try:
-        state_delta_written = await _extract_state_delta_after_completion(job_id, turn.id)
-    except Exception as exc:
-        # The turn itself is usable even if follow-up state maintenance fails.
-        logger.warning("State delta extraction failed after turn job %s: %s", job_id, exc)
-
-    with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
-            return
-        now = datetime.now(UTC)
         job.status = "completed"
         job.turn_id = turn.id
         job.model_used = turn.model_used
         job.reasoning_content = stream_state["reasoning"]
         job.content_buffer = stream_state["content"]
         job.narrative_buffer = turn.gm_output
-        job.progress_message = (
-            "剧情已生成，状态变更已写入。"
-            if state_delta_written
-            else "剧情已生成，但状态变更提取失败。"
-        )
+        job.progress_message = "剧情已生成，状态维护正在后台进行。"
+        job.maintenance_status = "pending"
+        job.maintenance_stage = "state_extract"
+        job.maintenance_message = "等待后台状态维护任务。"
+        job.maintenance_error = None
+        job.maintenance_started_at = None
+        job.maintenance_completed_at = None
         _set_job_stage(job, "completed", now)
+        stream_state["stage"] = "completed"
+        stream_state["stage_started_at"] = job.stage_started_at
         job.last_event_at = now
         job.completed_at = now
         db.add(job)
@@ -275,6 +250,17 @@ async def run_turn_job(job_id: UUID) -> None:
         db.refresh(job)
         persisted_turn = db.get(Turn, turn.id)
         _publish_turn_snapshot(job, persisted_turn, event_type="completed", terminal=True)
+
+    try:
+        _enqueue_turn_maintenance_job(job_id)
+    except Exception as exc:
+        logger.warning("Unable to enqueue turn maintenance job %s: %s", job_id, exc)
+        _mark_maintenance_failed(
+            job_id,
+            f"状态维护任务入队失败：{exc}",
+            stage="state_extract",
+        )
+
 
 
 def _mark_job_failed(job_id: UUID, message: str, stream_state: StreamState) -> None:
@@ -289,6 +275,10 @@ def _mark_job_failed(job_id: UUID, message: str, stream_state: StreamState) -> N
         job.content_buffer = stream_state["content"]
         job.narrative_buffer = stream_state["narrative"]
         job.progress_message = "剧情生成失败，已保留收到的流式内容。"
+        job.maintenance_status = "failed"
+        job.maintenance_message = "剧情生成失败，状态维护未执行。"
+        job.maintenance_error = message[:4000]
+        job.maintenance_completed_at = now
         _set_job_stage(job, stream_state["stage"], stream_state["stage_started_at"] or now)
         if stream_state["model"]:
             job.model_used = stream_state["model"]
@@ -298,6 +288,31 @@ def _mark_job_failed(job_id: UUID, message: str, stream_state: StreamState) -> N
         db.commit()
         db.refresh(job)
         _publish_turn_snapshot(job, None, event_type="failed", terminal=True)
+
+
+def _enqueue_turn_maintenance_job(job_id: UUID) -> None:
+    from app.services.job_queue import enqueue_turn_maintenance_job
+
+    enqueue_turn_maintenance_job(job_id)
+
+
+def _mark_maintenance_failed(job_id: UUID, message: str, *, stage: str) -> None:
+    with SessionLocal() as db:
+        job = db.get(TurnJob, job_id)
+        if job is None:
+            return
+        now = datetime.now(UTC)
+        job.maintenance_status = "failed"
+        job.maintenance_stage = stage
+        job.maintenance_message = "状态维护失败，下一回合仍可继续。"
+        job.maintenance_error = message[:4000]
+        job.maintenance_completed_at = now
+        job.last_event_at = now
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        turn = db.get(Turn, job.turn_id) if job.turn_id else None
+        _publish_turn_snapshot(job, turn, event_type="progress", terminal=False)
 
 
 def _update_stream_progress(
@@ -443,6 +458,12 @@ def _publish_turn_snapshot(
         stage_index=job.stage_index,
         stage_total=job.stage_total,
         stage_started_at=job.stage_started_at,
+        maintenance_status=job.maintenance_status,
+        maintenance_stage=job.maintenance_stage,
+        maintenance_message=job.maintenance_message,
+        maintenance_error=job.maintenance_error,
+        maintenance_started_at=job.maintenance_started_at,
+        maintenance_completed_at=job.maintenance_completed_at,
         stream_started_at=job.stream_started_at,
         last_event_at=job.last_event_at,
     )
@@ -456,33 +477,18 @@ def _publish_turn_snapshot(
     )
 
 
-async def _extract_state_delta_after_completion(job_id: UUID, turn_id: UUID) -> bool:
-    state_delta_written = False
+def publish_turn_job_snapshot(
+    job_id: UUID,
+    *,
+    event_type: str = "progress",
+    terminal: bool = False,
+) -> None:
     with SessionLocal() as db:
         job = db.get(TurnJob, job_id)
         if job is None:
-            return False
-        game = db.scalars(gameplay_game_query(job.game_id)).first()
-        if game is None:
-            return False
-        turn = db.get(Turn, turn_id)
-        if turn is None:
-            return False
-        state_delta_written = await GameplayService()._create_state_delta(db, game, turn)
-
-    with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
-            return state_delta_written
-        job.progress_message = (
-            "剧情已生成，状态变更已写入。"
-            if state_delta_written
-            else "剧情已生成，但状态变更提取失败。"
-        )
-        job.last_event_at = datetime.now(UTC)
-        db.add(job)
-        db.commit()
-    return state_delta_written
+            return
+        turn = db.get(Turn, job.turn_id) if job.turn_id else None
+        _publish_turn_snapshot(job, turn, event_type=event_type, terminal=terminal)
 
 
 def _set_stream_stage(stream_state: StreamState, stage: str) -> None:
@@ -511,8 +517,6 @@ def _turn_stage_event_payload(stage: str, stage_started_at: datetime | None) -> 
 
 
 def _infer_turn_stage(message: str, *, current_stage: str) -> str:
-    if "状态" in message or "提取状态" in message:
-        return "state_update"
     if "写入回合" in message or "GM 回复已完成" in message:
         return "persist_turn"
     if "偏离校验" in message or "校验" in message:

@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob
 from app.routers.games import game_detail_response, get_game_or_404
 from app.schemas.generator import (
@@ -36,6 +37,7 @@ SSE_HEADERS = {
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
 }
+SSE_DB_SNAPSHOT_INTERVAL_SECONDS = 1.5
 
 
 def generator_service() -> GameGeneratorService:
@@ -127,17 +129,15 @@ def get_chat_job(job_id: UUID, db: Session = DB_DEPENDENCY) -> GeneratorChatJobR
 async def stream_chat_job_events(
     job_id: UUID,
     request: Request,
-    db: Session = DB_DEPENDENCY,
 ) -> StreamingResponse:
     queue = generator_stream_event_broker.subscribe(job_id)
     try:
-        job = db.scalars(select(GeneratorChatJob).where(GeneratorChatJob.id == job_id)).first()
-        if job is None:
+        initial_job = _load_chat_job_snapshot(job_id)
+        if initial_job is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Chat job not found.",
             )
-        initial_job = _chat_job_read(job)
     except HTTPException:
         generator_stream_event_broker.unsubscribe(job_id, queue)
         raise
@@ -147,6 +147,7 @@ async def stream_chat_job_events(
         request=request,
         queue=queue,
         initial_job=initial_job,
+        load_job_snapshot=lambda: _load_chat_job_snapshot(job_id),
     )
 
 
@@ -231,19 +232,15 @@ def get_finalize_job(job_id: UUID, db: Session = DB_DEPENDENCY) -> GeneratorFina
 async def stream_finalize_job_events(
     job_id: UUID,
     request: Request,
-    db: Session = DB_DEPENDENCY,
 ) -> StreamingResponse:
     queue = generator_stream_event_broker.subscribe(job_id)
     try:
-        job = db.scalars(
-            select(GeneratorFinalizeJob).where(GeneratorFinalizeJob.id == job_id)
-        ).first()
-        if job is None:
+        initial_job = _load_finalize_job_snapshot(job_id)
+        if initial_job is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Finalize job not found.",
             )
-        initial_job = _finalize_job_read(job)
     except HTTPException:
         generator_stream_event_broker.unsubscribe(job_id, queue)
         raise
@@ -253,6 +250,7 @@ async def stream_finalize_job_events(
         request=request,
         queue=queue,
         initial_job=initial_job,
+        load_job_snapshot=lambda: _load_finalize_job_snapshot(job_id),
     )
 
 
@@ -309,14 +307,30 @@ def _finalize_job_read(job: GeneratorFinalizeJob) -> GeneratorFinalizeJobRead:
     )
 
 
+def _load_chat_job_snapshot(job_id: UUID) -> GeneratorChatJobRead | None:
+    with SessionLocal() as db:
+        job = db.scalars(select(GeneratorChatJob).where(GeneratorChatJob.id == job_id)).first()
+        return _chat_job_read(job) if job else None
+
+
+def _load_finalize_job_snapshot(job_id: UUID) -> GeneratorFinalizeJobRead | None:
+    with SessionLocal() as db:
+        job = db.scalars(
+            select(GeneratorFinalizeJob).where(GeneratorFinalizeJob.id == job_id)
+        ).first()
+        return _finalize_job_read(job) if job else None
+
+
 def _stream_generator_job_events(
     *,
     job_id: UUID,
     request: Request,
     queue: asyncio.Queue,
     initial_job: GeneratorChatJobRead | GeneratorFinalizeJobRead,
+    load_job_snapshot: Callable[[], GeneratorChatJobRead | GeneratorFinalizeJobRead | None],
 ) -> StreamingResponse:
     async def event_stream():
+        last_snapshot_signature = _generator_job_signature(initial_job)
         try:
             yield format_sse_event(
                 "snapshot",
@@ -340,8 +354,28 @@ def _stream_generator_job_events(
                 if await request.is_disconnected():
                     return
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=SSE_DB_SNAPSHOT_INTERVAL_SECONDS,
+                    )
                 except TimeoutError:
+                    fresh_job = load_job_snapshot()
+                    if fresh_job is None:
+                        return
+                    terminal = fresh_job.status in {"completed", "failed"}
+                    fresh_signature = _generator_job_signature(fresh_job)
+                    if terminal or fresh_signature != last_snapshot_signature:
+                        last_snapshot_signature = fresh_signature
+                        yield format_sse_event(
+                            "snapshot",
+                            {
+                                "type": "snapshot",
+                                "job": fresh_job,
+                                "terminal": terminal,
+                            },
+                        )
+                        if terminal:
+                            return
                     yield format_sse_event(
                         "heartbeat",
                         {
@@ -353,6 +387,9 @@ def _stream_generator_job_events(
                     continue
 
                 event_type = str(event.get("type", "message"))
+                event_job = event.get("job")
+                if event_job is not None:
+                    last_snapshot_signature = _generator_job_signature(event_job)
                 yield format_sse_event(event_type, event)
                 if event.get("terminal"):
                     return
@@ -363,4 +400,17 @@ def _stream_generator_job_events(
         event_stream(),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
+    )
+
+
+def _generator_job_signature(job: object) -> tuple[object, ...]:
+    return (
+        getattr(job, "status", None),
+        getattr(job, "model_used", None),
+        getattr(job, "error_message", None),
+        getattr(job, "progress_message", None),
+        getattr(job, "stream_started_at", None),
+        getattr(job, "last_event_at", None),
+        len(getattr(job, "reasoning_content", "") or ""),
+        len(getattr(job, "content_buffer", "") or ""),
     )

@@ -6,6 +6,8 @@
 3. chapter_summary 用于概括当前 10 回合章节进展，保留关键行动、线索、NPC 关系、地点变化和未解事项。
 4. long_term_summary 用于长期不可遗忘事实，保留身份、世界规则、重要 NPC 动机、关键物品、任务承诺、玩家已知事实、GM 幕后事实和未解伏笔。
 5. 摘要要短而密，不写文采，不复述完整剧情。
+6. story_blueprint 只作为剧本边界和线索/压力参照；不要把尚未揭露的真相地图写进 turn_visible_summary。
+7. 如果本回合推进了线索阶梯、压力时钟或当前幕目标，要在 hidden_summary、open_threads 或 hidden_facts 中保留系统需要记住的推进状态。
 
 必须只输出 JSON，不要输出 Markdown，不要解释。
 

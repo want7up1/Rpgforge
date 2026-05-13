@@ -1,4 +1,10 @@
-import type { GameDetail, SummaryRead, TurnRead } from "@/lib/types";
+import type {
+  ConfirmedRequirements,
+  GameDetail,
+  GeneratedGameConfig,
+  SummaryRead,
+  TurnRead
+} from "@/lib/types";
 
 export type TurnSettlementSection = {
   key: string;
@@ -33,6 +39,134 @@ export type ChapterView = {
   importantFacts: string[];
   turns: TurnRead[];
 };
+
+export type StoryBlueprintView = {
+  title: string;
+  description: string;
+  centralQuestion: string;
+  openingStage: string;
+  currentAct: string;
+  currentActGoal: string;
+  mustPreserve: string[];
+  mustNotBecome: string[];
+  pressureClock: string[];
+};
+
+export function normalizeConfirmedRequirements(
+  value: unknown,
+  rawUserInput = ""
+): ConfirmedRequirements {
+  const record = asRecord(value);
+  const storyBackground =
+    pickString(record, ["story_background", "background", "setting"]) ||
+    compactList([
+      pickString(record, ["genre"]),
+      pickString(record, ["world_style"])
+    ]).join("；");
+  const corePremise =
+    pickString(record, ["core_premise", "premise"]) ||
+    compactList([
+      pickString(record, ["player_fantasy"]),
+      pickString(record, ["protagonist_identity"]),
+      pickString(record, ["core_gameplay"])
+    ]).join("；");
+
+  return {
+    story_background: storyBackground,
+    core_premise: corePremise,
+    must_include: unique([
+      ...pickList(record, ["must_include"]),
+      ...pickList(record, ["must_hit_beats"]),
+      ...pickList(record, ["relationship_focus"])
+    ]),
+    forbidden_content: unique([
+      ...pickList(record, ["forbidden_content"]),
+      ...pickList(record, ["forbidden_elements"]),
+      ...pickList(record, ["forbidden_drift"])
+    ]),
+    playstyle_preferences: unique([
+      ...pickList(record, ["playstyle_preferences"]),
+      ...pickList(record, ["rule_complexity"]),
+      ...pickList(record, ["failure_cost"]),
+      ...pickList(record, ["core_gameplay"])
+    ]),
+    tone_preferences: unique([
+      ...pickList(record, ["tone_preferences"]),
+      ...pickList(record, ["world_style"]),
+      ...pickList(record, ["pacing_preference"])
+    ]),
+    raw_user_input: pickString(record, ["raw_user_input"]) || rawUserInput
+  };
+}
+
+export function buildGeneratedConfigBlueprint(config: GeneratedGameConfig): StoryBlueprintView {
+  return buildBlueprintFromParts({
+    title: config.title,
+    description: config.description ?? "",
+    worldview: asRecord(config.worldview),
+    script: asRecord(config.script_outline),
+    loreCount: config.lore_entries.length,
+    modeCount: config.modes.length
+  });
+}
+
+export function buildGameBlueprint(game: GameDetail): StoryBlueprintView {
+  return buildBlueprintFromParts({
+    title: game.title,
+    description: game.description ?? "",
+    worldview: asRecord(game.config?.worldview),
+    script: asRecord(game.config?.script_outline),
+    loreCount: game.lore_entries.length,
+    modeCount: game.modes.length
+  });
+}
+
+function buildBlueprintFromParts({
+  title,
+  description,
+  worldview,
+  script
+}: {
+  title: string;
+  description: string;
+  worldview: Record<string, unknown>;
+  script: Record<string, unknown>;
+  loreCount: number;
+  modeCount: number;
+}): StoryBlueprintView {
+  const campaign = asRecord(script.campaign_contract);
+  const acts = asList(script.acts);
+  const currentActId = pickString(campaign, ["current_act", "act", "stage", "phase"]);
+  const currentAct = findAct(acts, currentActId);
+  const firstAct = asRecord(acts[0]);
+
+  return {
+    title,
+    description,
+    centralQuestion:
+      pickString(campaign, ["central_question"]) ||
+      pickString(currentAct, ["dramatic_question"]),
+    openingStage: pickString(worldview, ["setting", "opening_stage", "summary"]),
+    currentAct: compactList([
+      pickString(campaign, ["current_act", "act", "stage", "phase"]),
+      pickString(currentAct, ["name", "title"])
+    ]).join(" · "),
+    currentActGoal:
+      pickString(currentAct, ["objective", "goal"]) ||
+      pickString(firstAct, ["objective", "goal"]) ||
+      pickString(campaign, ["main_goal", "premise"]),
+    mustPreserve: unique([
+      ...pickList(campaign, ["must_preserve"]),
+      ...pickList(asRecord(script.user_brief), ["must_include"])
+    ]),
+    mustNotBecome: unique([
+      ...pickList(campaign, ["must_not_become"]),
+      ...pickList(asRecord(script.user_brief), ["forbidden_content"]),
+      ...pickList(campaign, ["forbidden_drift"])
+    ]),
+    pressureClock: readableLines(script.pressure_clock).slice(0, 4)
+  };
+}
 
 export function buildTurnSettlement(turn: TurnRead): TurnSettlementView {
   const delta = asRecord(turn.state_delta_json);
@@ -81,16 +215,31 @@ export function buildContractView(game: GameDetail): ContractView {
   const campaignContract = asRecord(script.campaign_contract);
   const directorContract = asRecord(script.director_contract);
   const storyContract = asRecord(script.story_contract);
+  const userBrief = normalizeConfirmedRequirements(script.user_brief, game.description ?? "");
+  const acts = asList(script.acts);
+  const currentActId = pickString(campaignContract, ["current_act", "act", "stage", "phase"]);
+  const currentAct = findAct(acts, currentActId);
+  const firstAct = asRecord(acts[0]);
 
   const sections: ContractSectionView[] = [
     {
-      key: "tone",
-      label: "题材与基调",
+      key: "brief",
+      label: "故事种子",
       items: compactList([
+        userBrief.story_background,
+        userBrief.core_premise,
+        pickString(campaignContract, ["player_fantasy", "premise"]),
         game.genre,
-        game.description,
-        pickString(worldview, ["summary", "overview", "theme", "tone", "genre"]),
-        pickString(storyContract, ["tone", "mood", "genre"])
+        game.description
+      ])
+    },
+    {
+      key: "question",
+      label: "核心悬念",
+      items: compactList([
+        pickString(campaignContract, ["central_question"]),
+        pickString(currentAct, ["dramatic_question"]),
+        pickString(script, ["central_question"])
       ])
     },
     {
@@ -98,7 +247,10 @@ export function buildContractView(game: GameDetail): ContractView {
       label: "主线目标",
       items: compactList([
         pickString(campaignContract, ["main_goal", "core_goal", "objective", "goal", "campaign_goal"]),
-        pickString(script, ["main_goal", "core_goal", "objective"])
+        pickString(currentAct, ["objective", "goal"]),
+        pickString(firstAct, ["objective", "goal"]),
+        pickString(script, ["main_goal", "core_goal", "objective"]),
+        pickString(campaignContract, ["premise"])
       ])
     },
     {
@@ -106,14 +258,33 @@ export function buildContractView(game: GameDetail): ContractView {
       label: "当前幕",
       items: compactList([
         pickString(campaignContract, ["current_act", "act", "stage", "phase"]),
+        pickString(currentAct, ["name", "title"]),
+        pickString(currentAct, ["objective", "goal"]),
         pickString(directorContract, ["current_act", "act", "stage"])
       ])
     },
     {
-      key: "guardrails",
-      label: "禁止偏离点",
+      key: "must",
+      label: "必须保留",
       items: compactList([
-        ...pickList(campaignContract, ["forbidden_deviations", "forbidden_points", "avoid", "must_not"]),
+        ...pickList(campaignContract, ["must_preserve"]),
+        ...userBrief.must_include,
+        ...pickList(currentAct, ["must_hit_beats"])
+      ])
+    },
+    {
+      key: "guardrails",
+      label: "禁止变成",
+      items: compactList([
+        ...pickList(campaignContract, ["must_not_become"]),
+        ...userBrief.forbidden_content,
+        ...pickList(campaignContract, [
+          "forbidden_drift",
+          "forbidden_deviations",
+          "forbidden_points",
+          "avoid",
+          "must_not"
+        ]),
         ...pickList(directorContract, ["forbidden_deviations", "guardrails", "must_not", "avoid"]),
         ...pickList(storyContract, ["forbidden_deviations", "must_not", "avoid"])
       ])
@@ -122,25 +293,37 @@ export function buildContractView(game: GameDetail): ContractView {
       key: "style",
       label: "叙事风格",
       items: compactList([
+        pickString(worldview, ["tone", "mood"]),
+        ...userBrief.tone_preferences,
+        ...userBrief.playstyle_preferences,
         pickString(storyContract, ["narrative_style", "style", "voice", "pacing"]),
         pickString(directorContract, ["pacing", "narrative_focus", "style"]),
-        pickString(script, ["narrative_style", "style"])
+        pickString(script, ["narrative_style", "style"]),
+        ...pickList(campaignContract, ["tone_do"]),
+        ...pickList(campaignContract, ["tone_dont"]),
+        ...pickList(campaignContract, ["pacing_rules"])
       ])
     },
     {
       key: "conflict",
       label: "关键 NPC / 关键冲突",
       items: compactList([
-        ...pickList(campaignContract, ["key_npcs", "important_npcs", "key_conflicts", "main_conflict"]),
+        ...pickList(campaignContract, ["key_npcs", "important_npcs"]),
+        ...namesFromRelationshipArcs(pickList(campaignContract, ["relationship_arcs"])),
+        ...pickList(campaignContract, ["key_conflicts", "main_conflict"]),
         ...pickList(storyContract, ["key_npcs", "important_npcs", "key_conflicts"]),
-        ...pickList(worldview, ["key_npcs", "factions", "conflicts", "main_conflict"])
+        ...pickList(worldview, ["key_npcs", "factions", "conflicts", "core_conflicts", "main_conflict"])
       ])
     }
   ];
+  const normalizedSections = sections.map((section) => ({
+    ...section,
+    items: unique(compactList(section.items))
+  }));
 
   return {
-    hasContent: sections.some((section) => section.items.length > 0),
-    sections
+    hasContent: normalizedSections.some((section) => section.items.length > 0),
+    sections: normalizedSections
   };
 }
 
@@ -274,6 +457,31 @@ function pickList(record: Record<string, unknown>, keys: string[]): string[] {
   return [];
 }
 
+function asList(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function findAct(acts: unknown[], currentActId: string): Record<string, unknown> {
+  if (!currentActId) {
+    return asRecord(acts[0]);
+  }
+  return asRecord(
+    acts.find((item) => {
+      const act = asRecord(item);
+      return (
+        pickString(act, ["id", "key", "name", "title"]) === currentActId ||
+        pickString(act, ["id", "key"]) === currentActId
+      );
+    })
+  );
+}
+
+function namesFromRelationshipArcs(arcs: string[]): string[] {
+  return arcs
+    .map((arc) => arc.split(/[：:]/)[0]?.trim() ?? "")
+    .filter(Boolean);
+}
+
 function valueToList(value: unknown): string[] {
   if (value === null || value === undefined) {
     return [];
@@ -288,6 +496,29 @@ function valueToList(value: unknown): string[] {
   return Object.values(record)
     .flatMap(valueToList)
     .filter(Boolean);
+}
+
+function readableLines(value: unknown): string[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap(readableLines);
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return [String(value).trim()].filter(Boolean);
+  }
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) {
+    return [];
+  }
+  const title = pickString(record, ["name", "title", "stage", "truth", "clue"]);
+  const detail = compactList([
+    pickString(record, ["tick_condition", "condition"]),
+    pickString(record, ["consequence", "points_to", "reveal_condition", "do_not_reveal"]),
+    pickString(record, ["visibility"])
+  ]).join(" · ");
+  return [compactList([title, detail]).join("：") || compactRecord(record)];
 }
 
 function factsToList(value: Record<string, unknown>): string[] {

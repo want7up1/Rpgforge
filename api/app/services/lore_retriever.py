@@ -11,6 +11,7 @@ from app.models.game import Game
 from app.models.lore import LoreEntry
 from app.models.mode import Mode
 from app.models.turn import Turn
+from app.services.story_blueprint import story_blueprint_search_fragments
 from app.services.text_vectorizer import cosine_similarity, extract_terms, text_to_vector
 
 MAX_CONTENT_TERM_SCORE = 3.0
@@ -116,9 +117,14 @@ class LoreRetriever:
         anchor_terms = set(self._state_anchor_terms(game.state.state_json if game.state else {}))
         query_text_lower = query_text.lower()
         query_vector = text_to_vector(query_text)
-        entries = [entry for entry in game.lore_entries if not entry.always_on]
+        entries = [
+            entry
+            for entry in game.lore_entries
+            if not entry.always_on and getattr(entry, "is_active", True)
+        ]
 
-        self.ensure_lore_embeddings(db, game.lore_entries)
+        active_entries = [entry for entry in game.lore_entries if getattr(entry, "is_active", True)]
+        self.ensure_lore_embeddings(db, active_entries)
         vector_scores = self._pgvector_scores(db, game.id, query_vector, limit=max(limit * 4, 12))
 
         results: list[LoreRetrievalResult] = []
@@ -197,6 +203,7 @@ class LoreRetriever:
                 LoreEntry.game_id == game_id,
                 LoreEntry.embedding.is_not(None),
                 LoreEntry.always_on.is_(False),
+                LoreEntry.is_active.is_(True),
             )
             .order_by(distance.asc())
             .limit(limit)
@@ -220,6 +227,7 @@ class LoreRetriever:
             parts.extend([selected_mode.name, selected_mode.injection, *selected_mode.triggers])
         if game.state is not None:
             parts.extend(self._state_query_fragments(game.state.state_json))
+        parts.extend(story_blueprint_search_fragments(game.config))
         for turn in recent_turns[-3:]:
             parts.extend(
                 [

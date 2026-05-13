@@ -70,6 +70,11 @@ def build_manual_generated_config(
 
 
 def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
+    script_outline = dict(config.script_outline)
+    if config.characters and "_character_profiles" not in script_outline:
+        script_outline["_character_profiles"] = [
+            profile.model_dump(mode="json") for profile in config.characters
+        ]
     game = Game(
         title=config.title,
         genre=config.genre,
@@ -79,7 +84,7 @@ def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
     game.config = GameConfig(
         system_prompt=config.system_prompt,
         worldview=config.worldview,
-        script_outline=config.script_outline,
+        script_outline=script_outline,
         generation_notes=config.generation_notes,
     )
     game.state = GameState(

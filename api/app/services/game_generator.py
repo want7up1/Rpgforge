@@ -24,6 +24,8 @@ class ModelOutputValidationError(RuntimeError):
 
 StreamUpdateCallback = Callable[[str, str, str | None], Awaitable[None]]
 
+FINALIZE_OUTLINE_RETRIES = 1
+FINALIZE_OUTLINE_MAX_TOKENS = 12000
 FINALIZE_SECTION_RETRIES = 1
 FINALIZE_SECTION_CONCURRENCY = 4
 
@@ -66,6 +68,10 @@ class GameGeneratorService:
             reasoning_effort="high",
         )
         payload = parse_json_object(result.content)
+        payload["confirmed_requirements"] = _normalize_confirmed_requirements(
+            _mapping(payload.get("confirmed_requirements")),
+            request.user_input,
+        )
         payload["model_used"] = result.model
         try:
             return GeneratorChatResponse.model_validate(payload)
@@ -84,6 +90,10 @@ class GameGeneratorService:
             messages=messages,
             max_tokens=4096,
             on_update=on_update,
+        )
+        payload["confirmed_requirements"] = _normalize_confirmed_requirements(
+            _mapping(payload.get("confirmed_requirements")),
+            request.user_input,
         )
         payload["model_used"] = model_used
         try:
@@ -211,17 +221,29 @@ class GameGeneratorService:
         request: GeneratorFinalizeRequest,
         on_update: StreamUpdateCallback | None = None,
     ) -> tuple[dict[str, Any], str]:
-        messages = self._build_finalize_outline_messages(request)
-        try:
-            payload, model_used = await self._collect_streamed_json(
-                task_type="generator_finalize_outline",
-                messages=messages,
-                max_tokens=5000,
-                on_update=on_update,
+        base_messages = self._build_finalize_outline_messages(request)
+        last_error: Exception | None = None
+        for attempt in range(FINALIZE_OUTLINE_RETRIES + 1):
+            messages = (
+                base_messages
+                if attempt == 0
+                else self._build_finalize_outline_retry_messages(base_messages)
             )
-        except (ValueError, ModelOutputValidationError) as exc:
-            raise ModelOutputValidationError(f"导演总纲不是完整合法 JSON：{exc}") from exc
-        return dict(payload), model_used
+            try:
+                payload, model_used = await self._collect_streamed_json(
+                    task_type="generator_finalize_outline",
+                    messages=messages,
+                    max_tokens=FINALIZE_OUTLINE_MAX_TOKENS,
+                    on_update=on_update,
+                )
+                return dict(payload), model_used
+            except (ValueError, ModelOutputValidationError) as exc:
+                last_error = exc
+                if attempt < FINALIZE_OUTLINE_RETRIES:
+                    continue
+                break
+
+        raise ModelOutputValidationError(f"导演总纲不是完整合法 JSON：{last_error}") from last_error
 
     async def _generate_finalize_section(
         self,
@@ -259,12 +281,16 @@ class GameGeneratorService:
     ) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = [{"role": "system", "content": prompt}]
         if request.confirmed_requirements:
+            normalized_requirements = _normalize_confirmed_requirements(
+                request.confirmed_requirements,
+                request.user_input,
+            )
             messages.append(
                 {
                     "role": "system",
                     "content": (
                         "当前已确认需求："
-                        f"{json.dumps(request.confirmed_requirements, ensure_ascii=False)}"
+                        f"{json.dumps(normalized_requirements, ensure_ascii=False)}"
                     ),
                 }
             )
@@ -277,9 +303,13 @@ class GameGeneratorService:
     @staticmethod
     def _build_finalize_messages(request: GeneratorFinalizeRequest) -> list[dict[str, str]]:
         prompt = load_prompt_template("generate_game_config.md")
+        confirmed_requirements = _normalize_confirmed_requirements(
+            request.confirmed_requirements,
+            request.concept,
+        )
         user_payload = {
             "concept": request.concept,
-            "confirmed_requirements": request.confirmed_requirements,
+            "confirmed_requirements": confirmed_requirements,
             "history": [message.model_dump() for message in request.history],
         }
         return [
@@ -296,9 +326,13 @@ class GameGeneratorService:
     @staticmethod
     def _build_finalize_outline_messages(request: GeneratorFinalizeRequest) -> list[dict[str, str]]:
         prompt = load_prompt_template("generate_config_outline.md")
+        confirmed_requirements = _normalize_confirmed_requirements(
+            request.confirmed_requirements,
+            request.concept,
+        )
         user_payload = {
             "concept": request.concept,
-            "confirmed_requirements": request.confirmed_requirements,
+            "confirmed_requirements": confirmed_requirements,
             "history": [message.model_dump() for message in request.history],
         }
         return [
@@ -313,18 +347,39 @@ class GameGeneratorService:
         ]
 
     @staticmethod
+    def _build_finalize_outline_retry_messages(
+        messages: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        return [
+            *messages,
+            {
+                "role": "user",
+                "content": (
+                    "上一次导演总纲输出不是完整合法 JSON，可能在长字符串或嵌套结构中被截断。"
+                    "请重新生成完整 JSON object，保持原有剧情丰富度、字段完整度和设定细节，"
+                    "不要输出 Markdown，不要解释，不要省略 truth_map、clue_ladder、pressure_clock、"
+                    "acts 或 campaign_contract。"
+                ),
+            },
+        ]
+
+    @staticmethod
     def _build_finalize_section_messages(
         request: GeneratorFinalizeRequest,
         outline: dict[str, Any],
         spec: FinalizeSectionSpec,
     ) -> list[dict[str, str]]:
         prompt = load_prompt_template("generate_config_section.md")
+        confirmed_requirements = _normalize_confirmed_requirements(
+            request.confirmed_requirements,
+            request.concept,
+        )
         section_payload = {
             "target_section": spec.key,
             "outline_json": outline,
             "source_request": {
                 "concept": request.concept,
-                "confirmed_requirements": request.confirmed_requirements,
+                "confirmed_requirements": confirmed_requirements,
                 "history": [message.model_dump() for message in request.history[-8:]],
             },
         }
@@ -411,12 +466,29 @@ class GameGeneratorService:
         description = _string(outline.get("description")) or request.concept[:120]
         worldview = _mapping(outline.get("worldview"))
         script_outline = _mapping(outline.get("script_outline"))
+        user_brief = _final_user_brief(request, script_outline)
         script_outline.setdefault("title", title)
+        script_outline["user_brief"] = user_brief
         script_outline.setdefault("acts", [])
-        script_outline["campaign_contract"] = _campaign_contract(outline, script_outline)
+        script_outline["campaign_contract"] = _campaign_contract(
+            outline,
+            script_outline,
+            worldview,
+            user_brief,
+        )
 
         rules = _mapping(sections.get("rules"))
         characters = _list(sections.get("characters"))
+        lore_entries = _lore_entries(
+            _list(sections.get("lore_entries")),
+            title=title,
+            description=description,
+        )
+        script_outline["mechanics_contract"] = _mechanics_contract(
+            outline,
+            script_outline,
+            lore_entries,
+        )
         initial_state = _initial_state(
             title=title,
             description=description,
@@ -441,11 +513,7 @@ class GameGeneratorService:
             "script_outline": script_outline,
             "generation_notes": generation_notes,
             "characters": _characters(characters, initial_state),
-            "lore_entries": _lore_entries(
-                _list(sections.get("lore_entries")),
-                title=title,
-                description=description,
-            ),
+            "lore_entries": lore_entries,
             "modes": _modes(_list(sections.get("modes"))),
             "initial_state": initial_state,
             "voice_profiles": _list(rules.get("voice_profiles")),
@@ -471,24 +539,264 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _join_text(values: list[Any]) -> str:
+    return "；".join(_value_strings(values))
+
+
+def _value_strings(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return _unique_strings(
+            text
+            for item in value
+            for text in _value_strings(item)
+        )
+    if isinstance(value, dict):
+        return _unique_strings(
+            text
+            for item in value.values()
+            for text in _value_strings(item)
+        )
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _unique_strings(values: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _normalize_confirmed_requirements(
+    requirements: dict[str, Any],
+    raw_user_input: str = "",
+) -> dict[str, Any]:
+    story_background = _string(requirements.get("story_background"))
+    if not story_background:
+        story_background = _join_text(
+            [
+                requirements.get("genre"),
+                requirements.get("world_style"),
+                requirements.get("setting"),
+                requirements.get("background"),
+            ]
+        )
+
+    core_premise = _string(requirements.get("core_premise"))
+    if not core_premise:
+        core_premise = _join_text(
+            [
+                requirements.get("player_fantasy"),
+                requirements.get("protagonist_identity"),
+                requirements.get("core_gameplay"),
+                requirements.get("main_goal"),
+            ]
+        )
+
+    must_include = _unique_strings(
+        [
+            *_value_strings(requirements.get("must_include")),
+            *_value_strings(requirements.get("must_hit_beats")),
+            *_value_strings(requirements.get("relationship_focus")),
+        ]
+    )
+    forbidden_content = _unique_strings(
+        [
+            *_value_strings(requirements.get("forbidden_content")),
+            *_value_strings(requirements.get("forbidden_elements")),
+            *_value_strings(requirements.get("forbidden_drift")),
+        ]
+    )
+    playstyle_preferences = _unique_strings(
+        [
+            *_value_strings(requirements.get("playstyle_preferences")),
+            *_value_strings(requirements.get("rule_complexity")),
+            *_value_strings(requirements.get("failure_cost")),
+            *_value_strings(requirements.get("core_gameplay")),
+        ]
+    )
+    tone_preferences = _unique_strings(
+        [
+            *_value_strings(requirements.get("tone_preferences")),
+            *_value_strings(requirements.get("world_style")),
+            *_value_strings(requirements.get("pacing_preference")),
+        ]
+    )
+    raw_input = _string(requirements.get("raw_user_input")) or raw_user_input
+
+    return {
+        "story_background": story_background,
+        "core_premise": core_premise,
+        "must_include": must_include,
+        "forbidden_content": forbidden_content,
+        "playstyle_preferences": playstyle_preferences,
+        "tone_preferences": tone_preferences,
+        "raw_user_input": raw_input,
+    }
+
+
+def _final_user_brief(
+    request: GeneratorFinalizeRequest,
+    script_outline: dict[str, Any],
+) -> dict[str, Any]:
+    request_brief = _normalize_confirmed_requirements(
+        request.confirmed_requirements,
+        request.concept,
+    )
+    outline_brief = _normalize_confirmed_requirements(
+        _mapping(script_outline.get("user_brief")),
+        request.concept,
+    )
+    return {
+        "story_background": request_brief["story_background"]
+        or outline_brief["story_background"],
+        "core_premise": request_brief["core_premise"] or outline_brief["core_premise"],
+        "must_include": _unique_strings(
+            [
+                *_list(request_brief["must_include"]),
+                *_list(outline_brief["must_include"]),
+            ]
+        ),
+        "forbidden_content": _unique_strings(
+            [
+                *_list(request_brief["forbidden_content"]),
+                *_list(outline_brief["forbidden_content"]),
+            ]
+        ),
+        "playstyle_preferences": _unique_strings(
+            [
+                *_list(request_brief["playstyle_preferences"]),
+                *_list(outline_brief["playstyle_preferences"]),
+            ]
+        ),
+        "tone_preferences": _unique_strings(
+            [
+                *_list(request_brief["tone_preferences"]),
+                *_list(outline_brief["tone_preferences"]),
+            ]
+        ),
+        "raw_user_input": request_brief["raw_user_input"]
+        or outline_brief["raw_user_input"]
+        or request.concept,
+    }
+
+
 def _campaign_contract(
     outline: dict[str, Any],
     script_outline: dict[str, Any],
+    worldview: dict[str, Any],
+    user_brief: dict[str, Any],
 ) -> dict[str, Any]:
     contract = _mapping(script_outline.get("campaign_contract")) or _mapping(
         outline.get("campaign_contract")
     )
+    acts = _list(script_outline.get("acts"))
+    current_act = _current_act(acts, _string(contract.get("current_act")) or "act_1")
     canon_terms = _list(contract.get("canon_terms")) or _list(outline.get("canon_terms"))
     contract.setdefault("premise", _string(outline.get("description")) or "围绕玩家核心设定推进。")
+    contract.setdefault(
+        "main_goal",
+        _string(current_act.get("objective")) or _string(contract.get("premise")),
+    )
     contract.setdefault("tone_do", [])
     contract.setdefault("tone_dont", [])
-    contract.setdefault("act_plan", _list(script_outline.get("acts")))
+    contract.setdefault("act_plan", acts)
     contract.setdefault("relationship_arcs", [])
+    contract.setdefault(
+        "key_npcs",
+        _names_from_relationship_arcs(_list(contract.get("relationship_arcs"))),
+    )
+    contract.setdefault("key_conflicts", _list(worldview.get("core_conflicts")))
+    contract.setdefault("narrative_style", _string(worldview.get("tone")))
     contract.setdefault("forbidden_drift", _list(outline.get("forbidden_drift")))
     contract["canon_terms"] = canon_terms
     contract.setdefault("pacing_rules", [])
     contract.setdefault("current_act", "act_1")
+    contract.setdefault(
+        "player_fantasy",
+        _string(user_brief.get("core_premise")) or _string(contract.get("premise")),
+    )
+    contract.setdefault(
+        "central_question",
+        _string(outline.get("central_question"))
+        or _string(contract.get("main_goal"))
+        or _string(contract.get("premise")),
+    )
+    contract.setdefault("emotional_arc", "")
+    contract["must_preserve"] = _unique_strings(
+        [
+            *_value_strings(contract.get("must_preserve")),
+            *_value_strings(user_brief.get("must_include")),
+        ]
+    )
+    must_not_become = _unique_strings(
+        [
+            *_value_strings(contract.get("must_not_become")),
+            *_value_strings(user_brief.get("forbidden_content")),
+        ]
+    )
+    contract["must_not_become"] = must_not_become
+    contract["forbidden_drift"] = _unique_strings(
+        [
+            *_value_strings(contract.get("forbidden_drift")),
+            *_value_strings(must_not_become),
+        ]
+    )
     return contract
+
+
+def _mechanics_contract(
+    outline: dict[str, Any],
+    script_outline: dict[str, Any],
+    lore_entries: list[Any],
+) -> list[Any]:
+    existing = _list(script_outline.get("mechanics_contract")) or _list(
+        outline.get("mechanics_contract")
+    )
+    if existing:
+        return existing
+
+    mechanics: list[dict[str, str]] = []
+    for entry in lore_entries:
+        if not isinstance(entry, dict):
+            continue
+        entry_type = _string(entry.get("type")).lower()
+        if entry_type not in {"mechanic", "core_rule", "rule"}:
+            continue
+        mechanics.append(
+            {
+                "name": _string(entry.get("title")) or "核心机制",
+                "rule": _string(entry.get("public_info")) or _string(entry.get("content")),
+                "progression": _string(entry.get("usage_note")),
+                "visibility": _string(entry.get("visibility")) or "mixed",
+            }
+        )
+    return mechanics[:8]
+
+
+def _current_act(acts: list[Any], current_act_id: str) -> dict[str, Any]:
+    for act in acts:
+        act_map = _mapping(act)
+        if _string(act_map.get("id")) == current_act_id:
+            return act_map
+    return _mapping(acts[0] if acts else {})
+
+
+def _names_from_relationship_arcs(arcs: list[Any]) -> list[str]:
+    names: list[str] = []
+    for arc in arcs:
+        text = _string(arc)
+        name = text.split("：", 1)[0].split(":", 1)[0].strip()
+        if name:
+            names.append(name)
+    return names
 
 
 def _system_prompt(rules: dict[str, Any], outline: dict[str, Any]) -> str:

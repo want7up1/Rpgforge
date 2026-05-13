@@ -15,6 +15,7 @@ from app.services.model_router import ModelRouter
 from app.services.prompt_builder import PromptBuilder
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import state_v2_view
+from app.services.story_blueprint import build_story_blueprint
 from app.services.story_director import StoryDirectorDecision
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class DriftValidator:
                 "description": game.description,
             },
             "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
+            "story_blueprint": build_story_blueprint(game.config),
             "script_outline": game.config.script_outline if game.config else {},
             "current_state_v2": state_v2_view(game.state.state_json if game.state else {}),
             "recent_turns": [
