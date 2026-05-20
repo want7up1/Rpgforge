@@ -1,9 +1,11 @@
+import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from threading import Thread
 from time import sleep
 from types import SimpleNamespace
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -22,6 +24,7 @@ from app.services.game_creator import create_game_from_config
 from app.services.gameplay import GameplayService
 from app.services.lore_retriever import LoreRetriever
 from app.services.mode_matcher import select_mode
+from app.services.prompt_builder import PromptBuilder
 from app.services.state_applier import apply_state_delta
 from app.services.story_director import StoryDirector
 from app.services.turn_jobs import extract_partial_json_string_field, run_turn_job
@@ -247,6 +250,43 @@ def build_generated_config() -> GeneratedGameConfig:
     )
 
 
+def build_two_act_config() -> GeneratedGameConfig:
+    config = build_generated_config().model_copy(deep=True)
+    config.script_outline["acts"][0]["completion_anchors"] = [
+        {
+            "id": "act_1_anchor_1",
+            "title": "发现异常痕迹",
+            "required": True,
+            "completion_signal": "玩家发现门槛泥痕或棺木底部湿泥。",
+            "story_effect": "允许 GM 把义庄异常从传闻推进到现场证据。",
+        },
+        {
+            "id": "act_1_anchor_2",
+            "title": "确认黑伞客线索",
+            "required": True,
+            "completion_signal": "玩家确认黑伞客与账册残页有关。",
+            "story_effect": "允许 GM 把下一幕焦点转向黑伞客。",
+        },
+    ]
+    config.script_outline["acts"][0]["transition_to_next_act"] = {
+        "target_act": "act_2",
+        "allowed_when": "required_anchors_completed",
+        "transition_style": "自然过渡，不强制玩家离开当前场景。",
+    }
+    config.script_outline["acts"].append(
+        {
+            "id": "act_2",
+            "name": "黑伞追踪",
+            "objective": "追查黑伞客的真实身份。",
+            "dramatic_question": "陆沉舟是敌是友？",
+            "allowed_reveals": ["黑伞客知道账册下落"],
+            "forbidden_reveals": ["旧案最终主使"],
+            "completion_signal": "玩家确认陆沉舟与账册交易的关系。",
+        }
+    )
+    return config
+
+
 def test_create_turn_requires_deepseek_api_key(monkeypatch, db_session) -> None:
     monkeypatch.setattr(settings, "deepseek_api_key", "")
     game = create_game_from_config(db_session, build_generated_config())
@@ -401,6 +441,152 @@ def test_prompt_injects_explicit_campaign_contract(db_session) -> None:
     assert runtime_payload["campaign_contract"]["current_act"] == "act_1"
     assert "终局门派战争" in runtime_payload["campaign_contract"]["forbidden_drift"][0]
     assert runtime_payload["current_state_v2"]["version"] == 1
+
+
+def test_story_progress_advances_runtime_act_without_mutating_settings(db_session) -> None:
+    config = build_two_act_config()
+    game = create_game_from_config(db_session, config)
+    turn = Turn(
+        game_id=game.id,
+        turn_number=3,
+        player_input="我带着账册残页去找陆沉舟。",
+        gm_output="义庄旧案的第一条线索已经闭合，黑伞客指向下一段追查。",
+        visible_summary="玩家完成义庄调查并进入黑伞客线索。",
+        state_delta_json={},
+        action_options_json=[],
+        model_used="deepseek-v4-pro-test",
+    )
+
+    state_json = apply_state_delta(
+        game.state,
+        turn,
+        {
+            "story_progress_update": {
+                "current_act": "act_2",
+                "completed_act": "act_1",
+                "advance_reason": "义庄旧案第一条线索闭合，剧情进入黑伞客追查。",
+            }
+        },
+    )
+
+    assert state_json["story_progress"]["current_act"] == "act_2"
+    assert state_json["story_progress"]["completed_acts"] == ["act_1"]
+    assert state_json["story_progress"]["last_advance_turn"] == 3
+    assert state_json["v2"]["story_progress"]["current_act"] == "act_2"
+    assert game.config.script_outline["campaign_contract"]["current_act"] == "act_1"
+
+
+def test_prompt_uses_runtime_story_progress_current_act(db_session) -> None:
+    config = build_two_act_config()
+    game = create_game_from_config(db_session, config)
+    game.state.state_json = {
+        **game.state.state_json,
+        "story_progress": {
+            "current_act": "act_2",
+            "completed_acts": ["act_1"],
+            "last_advance_turn": 3,
+            "last_advance_reason": "完成义庄调查。",
+        },
+    }
+
+    messages = PromptBuilder().build_runtime_messages(
+        game=game,
+        player_input="我去追查黑伞客。",
+        selected_mode=None,
+        recent_turns=[],
+        related_lore=[],
+        summaries={},
+    )
+    runtime_payload = json.loads(messages[1]["content"])
+
+    assert runtime_payload["campaign_contract"]["current_act"] == "act_1"
+    assert runtime_payload["story_blueprint"]["current_act"]["id"] == "act_2"
+    assert (
+        runtime_payload["story_blueprint"]["current_act"]["objective"]
+        == "追查黑伞客的真实身份。"
+    )
+    assert runtime_payload["story_blueprint"]["story_progress"]["completed_acts"] == ["act_1"]
+    assert runtime_payload["current_state_v2"]["story_progress"]["current_act"] == "act_2"
+
+
+def test_story_blueprint_includes_completion_anchors(db_session) -> None:
+    game = create_game_from_config(db_session, build_two_act_config())
+
+    messages = PromptBuilder().build_runtime_messages(
+        game=game,
+        player_input="我继续检查义庄。",
+        selected_mode=None,
+        recent_turns=[],
+        related_lore=[],
+        summaries={},
+    )
+    runtime_payload = json.loads(messages[1]["content"])
+    current_act = runtime_payload["story_blueprint"]["current_act"]
+
+    assert current_act["completion_anchors"][0]["id"] == "act_1_anchor_1"
+    assert current_act["completion_anchors"][0]["required"] is True
+    assert (
+        current_act["transition_to_next_act"]["allowed_when"]
+        == "required_anchors_completed"
+    )
+
+
+def test_story_progress_anchor_completion_marks_ready_without_changing_act(db_session) -> None:
+    game = create_game_from_config(db_session, build_two_act_config())
+    turn = Turn(
+        game_id=game.id,
+        turn_number=2,
+        player_input="我检查义庄现场。",
+        gm_output="玩家发现门槛泥痕，但还没有确认黑伞客与账册残页有关。",
+        visible_summary="发现门槛泥痕。",
+        state_delta_json={},
+        action_options_json=[],
+        model_used="deepseek-v4-pro-test",
+    )
+
+    state_json = apply_state_delta(
+        game.state,
+        turn,
+        {
+            "story_progress_update": {
+                "completed_anchors": ["act_1_anchor_1"],
+                "anchor_reason": "发现门槛泥痕。",
+            }
+        },
+    )
+
+    assert state_json["story_progress"]["current_act"] == "act_1"
+    assert state_json["story_progress"]["completed_anchors"] == ["act_1_anchor_1"]
+    assert state_json["story_progress"]["ready_for_next_act"] is False
+
+    game.state.state_json = state_json
+    next_state_json = apply_state_delta(
+        game.state,
+        Turn(
+            game_id=game.id,
+            turn_number=3,
+            player_input="我追问黑伞客。",
+            gm_output="玩家确认黑伞客与账册残页有关。",
+            visible_summary="黑伞客线索成立。",
+            state_delta_json={},
+            action_options_json=[],
+            model_used="deepseek-v4-pro-test",
+        ),
+        {
+            "story_progress_update": {
+                "completed_anchors": ["act_1_anchor_2"],
+                "anchor_reason": "确认黑伞客与账册残页有关。",
+            }
+        },
+    )
+
+    assert next_state_json["story_progress"]["current_act"] == "act_1"
+    assert next_state_json["story_progress"]["completed_anchors"] == [
+        "act_1_anchor_1",
+        "act_1_anchor_2",
+    ]
+    assert next_state_json["story_progress"]["ready_for_next_act"] is True
+    assert next_state_json["v2"]["story_progress"]["ready_for_next_act"] is True
 
 
 def test_story_director_fallback_uses_story_blueprint_current_act(db_session) -> None:
@@ -1169,6 +1355,106 @@ def test_turn_job_events_poll_db_snapshot_without_broker_event(db_session, monke
     assert "义庄门槛内侧的泥痕尚未干透" in body
 
 
+def test_turn_job_events_reads_stream_broker_event(db_session, monkeypatch) -> None:
+    monkeypatch.setattr("app.routers.gameplay.SSE_DB_SNAPSHOT_INTERVAL_SECONDS", 0.01)
+    game = create_game_from_config(db_session, build_generated_config())
+    job = TurnJob(
+        game_id=game.id,
+        status="pending",
+        request_json={"player_input": "我检查门槛。"},
+        progress_message="等待剧情生成。",
+        stage="prepare_context",
+        stage_label="准备上下文",
+        stage_index=1,
+        stage_total=7,
+        last_event_at=datetime.now(UTC),
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+
+    stream_calls = {"count": 0}
+    monkeypatch.setattr(
+        "app.routers.gameplay.turn_stream_event_broker.latest_stream_entry",
+        lambda job_id: None,
+    )
+
+    async def fake_read_stream_event(job_id, last_id, *, timeout_seconds):
+        del last_id
+        if stream_calls["count"] == 0:
+            stream_calls["count"] += 1
+            return (
+                "1-0",
+                {
+                    "type": "progress",
+                    "job_id": str(job_id),
+                    "status": "running",
+                    "progress_message": "broker 进度：GM 正在书写剧情。",
+                    "last_event_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        await asyncio.sleep(timeout_seconds)
+        return None
+
+    monkeypatch.setattr(
+        "app.routers.gameplay.turn_stream_event_broker.read_stream_event",
+        fake_read_stream_event,
+    )
+
+    def complete_job_later() -> None:
+        sleep(0.05)
+        with SessionLocal() as db:
+            turn = Turn(
+                game_id=game.id,
+                turn_number=1,
+                player_input="我检查门槛。",
+                gm_output="义庄门槛内侧的泥痕尚未干透。",
+                visible_summary="泥痕通向后院",
+                hidden_summary=None,
+                state_delta_json={},
+                action_options_json=[
+                    {"key": "A", "label": "沿着泥痕追到后院"},
+                    {"key": "B", "label": "检查其他脚印"},
+                    {"key": "C", "label": "询问守庄老仆"},
+                    {"key": "D", "label": "先关上义庄大门"},
+                ],
+                model_used="deepseek-v4-pro-test",
+            )
+            db.add(turn)
+            db.flush()
+            saved = db.get(TurnJob, job.id)
+            assert saved is not None
+            now = datetime.now(UTC)
+            saved.status = "completed"
+            saved.turn_id = turn.id
+            saved.model_used = "deepseek-v4-pro-test"
+            saved.narrative_buffer = turn.gm_output
+            saved.progress_message = "剧情已生成，状态变更已写入。"
+            saved.stage = "completed"
+            saved.stage_label = "完成"
+            saved.stage_index = 7
+            saved.stage_total = 7
+            saved.last_event_at = now
+            saved.completed_at = now
+            db.add(saved)
+            db.commit()
+
+    updater = Thread(target=complete_job_later)
+    updater.start()
+    client = TestClient(app)
+    try:
+        with client.stream("GET", f"/api/games/{game.id}/turns/jobs/{job.id}/events") as response:
+            body = "".join(response.iter_text())
+    finally:
+        updater.join(timeout=1)
+
+    assert response.status_code == 200
+    assert "event: progress" in body
+    assert "broker 进度：GM 正在书写剧情。" in body
+    assert '"terminal": true' in body
+    assert "义庄门槛内侧的泥痕尚未干透" in body
+
+
 def test_extract_partial_narrative_from_streaming_json() -> None:
     content = (
         '{"narrative":"义庄门轴发出干涩低响，\\n纸钱被风卷起。",'
@@ -1264,7 +1550,7 @@ def test_approve_state_delta_applies_state(db_session) -> None:
 
 
 def test_get_game_auto_applies_pending_state_delta(db_session) -> None:
-    game_id, _delta_id = create_pending_state_delta(db_session)
+    game_id, delta_id = create_pending_state_delta(db_session)
     client = TestClient(app)
 
     response = client.get(f"/api/games/{game_id}")
@@ -1276,6 +1562,9 @@ def test_get_game_auto_applies_pending_state_delta(db_session) -> None:
     deltas_response = client.get(f"/api/games/{game_id}/state-deltas")
     assert deltas_response.status_code == 200
     assert deltas_response.json()[0]["status"] == "approved"
+    db_session.expire_all()
+    delta = db_session.get(StateDelta, UUID(delta_id))
+    assert delta.turn.state_delta_json == delta.delta_json
 
 
 def test_update_state_delta_then_approve_applies_edited_json(db_session) -> None:
@@ -1305,6 +1594,9 @@ def test_update_state_delta_then_approve_applies_edited_json(db_session) -> None
     )
     assert update_response.status_code == 200
     assert update_response.json()["status"] == "edited"
+    db_session.expire_all()
+    edited_delta = db_session.get(StateDelta, UUID(delta_id))
+    assert edited_delta.turn.state_delta_json["inventory_add"] == ["黑漆木牌"]
 
     approve_response = client.post(f"/api/games/{game_id}/state-deltas/{delta_id}/approve")
 
@@ -1312,9 +1604,12 @@ def test_update_state_delta_then_approve_applies_edited_json(db_session) -> None
     state_json = approve_response.json()["state_json"]
     assert state_json["inventory"] == ["黑漆木牌"]
     assert state_json["variables"]["edited_delta"] is True
+    db_session.expire_all()
+    approved_delta = db_session.get(StateDelta, UUID(delta_id))
+    assert approved_delta.turn.state_delta_json == approved_delta.delta_json
 
 
-def test_reject_state_delta_marks_rejected(db_session) -> None:
+def test_reject_pending_state_delta_marks_rejected(db_session) -> None:
     game_id, delta_id = create_pending_state_delta(db_session)
     client = TestClient(app)
 
@@ -1322,3 +1617,29 @@ def test_reject_state_delta_marks_rejected(db_session) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "rejected"
+    db_session.expire_all()
+    rejected_delta = db_session.get(StateDelta, UUID(delta_id))
+    assert rejected_delta.turn.state_delta_json == {}
+
+
+def test_reject_approved_state_delta_rebuilds_state_without_delta(db_session) -> None:
+    game_id, delta_id = create_pending_state_delta(db_session)
+    client = TestClient(app)
+
+    approve_response = client.post(f"/api/games/{game_id}/state-deltas/{delta_id}/approve")
+    assert approve_response.status_code == 200
+    assert "赤铜鱼符" in approve_response.json()["state_json"]["inventory"]
+
+    reject_response = client.post(f"/api/games/{game_id}/state-deltas/{delta_id}/reject")
+    assert reject_response.status_code == 200
+    assert reject_response.json()["status"] == "rejected"
+
+    state_response = client.get(f"/api/games/{game_id}/state")
+    assert state_response.status_code == 200
+    state_json = state_response.json()["state_json"]
+    assert state_json["current_turn"] == 0
+    assert "赤铜鱼符" not in state_json["inventory"]
+    assert state_json["variables"].get("mud_trace_found") is None
+    db_session.expire_all()
+    rejected_delta = db_session.get(StateDelta, UUID(delta_id))
+    assert rejected_delta.turn.state_delta_json == {}

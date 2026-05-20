@@ -7,15 +7,24 @@ import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
 import { JsonBlock } from "@/components/JsonBlock";
-import { deleteGame, getGame, getGameScriptExport } from "@/lib/api";
+import {
+  createGameProgressSave,
+  deleteGame,
+  deleteGameProgressSave,
+  getGame,
+  getGameProgressSaves,
+  getGameScriptExport,
+  loadGameProgressSave,
+  restartGameProgress
+} from "@/lib/api";
 import { downloadBlob } from "@/lib/downloads";
 import { buildGameBlueprint, type StoryBlueprintView } from "@/lib/gameExperience";
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
-import type { GameDetail } from "@/lib/types";
+import type { GameDetail, GameProgressSaveRead } from "@/lib/types";
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; game: GameDetail }
+  | { status: "ready"; game: GameDetail; saves: GameProgressSaveRead[] }
   | { status: "error"; message: string };
 
 export default function GameDetailPage() {
@@ -27,9 +36,12 @@ export default function GameDetailPage() {
 
     async function loadGame() {
       try {
-        const game = await getGame(params.id);
+        const [game, saves] = await Promise.all([
+          getGame(params.id),
+          getGameProgressSaves(params.id)
+        ]);
         if (!controller.signal.aborted) {
-          setState({ status: "ready", game });
+          setState({ status: "ready", game, saves });
         }
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -55,13 +67,25 @@ export default function GameDetailPage() {
       ) : state.status === "error" ? (
         <section className="app-alert">{state.message}</section>
       ) : (
-        <GameDetailView game={state.game} />
+        <GameDetailView
+          game={state.game}
+          onProgressChanged={(game, saves) => setState({ status: "ready", game, saves })}
+          saves={state.saves}
+        />
       )}
     </AppShell>
   );
 }
 
-function GameDetailView({ game }: { game: GameDetail }) {
+function GameDetailView({
+  game,
+  saves,
+  onProgressChanged
+}: {
+  game: GameDetail;
+  saves: GameProgressSaveRead[];
+  onProgressChanged: (game: GameDetail, saves: GameProgressSaveRead[]) => void;
+}) {
   const router = useRouter();
   const longTermSummary = latestSummary(game, "long_term");
   const chapterSummary = latestSummary(game, "chapter");
@@ -160,6 +184,8 @@ function GameDetailView({ game }: { game: GameDetail }) {
       <ScriptLockSection blueprint={blueprint} />
 
       <StatusSnapshot game={game} stateV2={stateV2} />
+
+      <ProgressSaveSection game={game} onChanged={onProgressChanged} saves={saves} />
 
       <section className="surface-panel surface-panel-strong">
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
@@ -271,6 +297,225 @@ function GameDetailView({ game }: { game: GameDetail }) {
         </div>
       </details>
     </div>
+  );
+}
+
+function ProgressSaveSection({
+  game,
+  saves,
+  onChanged
+}: {
+  game: GameDetail;
+  saves: GameProgressSaveRead[];
+  onChanged: (game: GameDetail, saves: GameProgressSaveRead[]) => void;
+}) {
+  const [saveName, setSaveName] = useState(defaultSaveName(game));
+  const [saveNote, setSaveNote] = useState("");
+  const [operation, setOperation] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshWith(updatedGame: GameDetail) {
+    const refreshedSaves = await getGameProgressSaves(game.id);
+    onChanged(updatedGame, refreshedSaves);
+  }
+
+  async function handleCreateSave() {
+    const name = saveName.trim();
+    if (!name) {
+      setError("存档名称不能为空。");
+      return;
+    }
+    setOperation("create");
+    setStatus("正在创建进度存档...");
+    setError(null);
+    try {
+      await createGameProgressSave(game.id, {
+        name,
+        note: saveNote.trim() || null
+      });
+      const refreshedSaves = await getGameProgressSaves(game.id);
+      onChanged(game, refreshedSaves);
+      setSaveName(defaultSaveName(game));
+      setSaveNote("");
+      setStatus("进度存档已创建。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "创建存档失败。");
+      setStatus(null);
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function handleLoadSave(progressSave: GameProgressSaveRead) {
+    const confirmed = window.confirm(
+      `读取「${progressSave.name}」会覆盖当前进度，但不会修改任何游戏设定。确定读取？`
+    );
+    if (!confirmed) {
+      return;
+    }
+    setOperation(`load-${progressSave.id}`);
+    setStatus("正在读取进度存档...");
+    setError(null);
+    try {
+      const updatedGame = await loadGameProgressSave(game.id, progressSave.id);
+      await refreshWith(updatedGame);
+      setStatus("进度已恢复，游戏设定未修改。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "读取存档失败。");
+      setStatus(null);
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function handleDeleteSave(progressSave: GameProgressSaveRead) {
+    const confirmed = window.confirm(`删除进度存档「${progressSave.name}」？`);
+    if (!confirmed) {
+      return;
+    }
+    setOperation(`delete-${progressSave.id}`);
+    setStatus("正在删除进度存档...");
+    setError(null);
+    try {
+      await deleteGameProgressSave(game.id, progressSave.id);
+      const refreshedSaves = await getGameProgressSaves(game.id);
+      onChanged(game, refreshedSaves);
+      setStatus("进度存档已删除。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "删除存档失败。");
+      setStatus(null);
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  async function handleRestart() {
+    const confirmedTitle = window.prompt(
+      `重新开始会清空当前回合、状态和摘要，但不会修改设定或删除存档。请输入游戏标题确认：${game.title}`
+    );
+    if (confirmedTitle === null) {
+      return;
+    }
+    if (confirmedTitle !== game.title) {
+      setError("标题不一致，已取消重新开始。");
+      return;
+    }
+    setOperation("restart");
+    setStatus("正在重新开始当前剧本...");
+    setError(null);
+    try {
+      const updatedGame = await restartGameProgress(game.id);
+      await refreshWith(updatedGame);
+      setSaveName(defaultSaveName(updatedGame));
+      setStatus("已重新开始，设定和存档保持不变。");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "重新开始失败。");
+      setStatus(null);
+    } finally {
+      setOperation(null);
+    }
+  }
+
+  return (
+    <section className="surface-panel surface-panel-strong">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="surface-title">进度存档</h2>
+            <span className="app-pill">{saves.length} 个存档</span>
+          </div>
+          <p className="surface-subtle mt-1">
+            只保存回合、状态、摘要和状态变更；不会保存或覆盖剧本设定。
+          </p>
+          <div className="mt-4 grid gap-3">
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">存档名称</span>
+              <input
+                className="app-input"
+                disabled={operation !== null}
+                onChange={(event) => setSaveName(event.target.value)}
+                value={saveName}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="font-medium">备注</span>
+              <textarea
+                className="app-input min-h-24 resize-y leading-6"
+                disabled={operation !== null}
+                onChange={(event) => setSaveNote(event.target.value)}
+                placeholder="可选"
+                value={saveNote}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="app-button app-button-primary"
+                disabled={operation !== null || !saveName.trim()}
+                onClick={handleCreateSave}
+                type="button"
+              >
+                {operation === "create" ? "创建中..." : "创建进度存档"}
+              </button>
+              <button
+                className="app-button border-[color:var(--danger-border)] text-[color:var(--danger-text)]"
+                disabled={operation !== null}
+                onClick={handleRestart}
+                type="button"
+              >
+                {operation === "restart" ? "重开中..." : "重新开始当前剧本"}
+              </button>
+            </div>
+            {status ? <p className="app-status">{status}</p> : null}
+            {error ? <p className="app-alert">{error}</p> : null}
+          </div>
+        </div>
+        <div className="grid gap-3">
+          {saves.length === 0 ? (
+            <article className="archive-card">
+              <p className="text-sm text-[color:var(--muted)]">暂无进度存档。</p>
+            </article>
+          ) : (
+            saves.map((progressSave) => (
+              <article className="archive-card archive-card-green" key={progressSave.id}>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="font-semibold">{progressSave.name}</h3>
+                    <p className="mt-1 text-xs text-[color:var(--muted)]">
+                      第 {progressSave.state_current_turn} 回合 · 历史 {progressSave.turn_count} 回 · 摘要{" "}
+                      {progressSave.summary_count} 条 · {formatDateTime(progressSave.updated_at)}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="app-button"
+                      disabled={operation !== null}
+                      onClick={() => handleLoadSave(progressSave)}
+                      type="button"
+                    >
+                      {operation === `load-${progressSave.id}` ? "读取中..." : "读取"}
+                    </button>
+                    <button
+                      className="app-button border-[color:var(--danger-border)] text-[color:var(--danger-text)]"
+                      disabled={operation !== null}
+                      onClick={() => handleDeleteSave(progressSave)}
+                      type="button"
+                    >
+                      {operation === `delete-${progressSave.id}` ? "删除中..." : "删除"}
+                    </button>
+                  </div>
+                </div>
+                {progressSave.note ? (
+                  <p className="app-wrap-text mt-3 whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
+                    {progressSave.note}
+                  </p>
+                ) : null}
+              </article>
+            ))
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -426,4 +671,21 @@ function formatSummaryRange(summary: ReturnType<typeof latestSummary>) {
     return `第 ${summary.range_end_turn} 回`;
   }
   return `第 ${summary.range_start_turn}-${summary.range_end_turn} 回`;
+}
+
+function defaultSaveName(game: GameDetail) {
+  return `第 ${game.state?.current_turn ?? 0} 回合 · ${formatDateTime(new Date().toISOString())}`;
+}
+
+function formatDateTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }

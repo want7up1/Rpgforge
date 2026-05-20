@@ -297,7 +297,10 @@ class ContextCompressor:
                 "description": game.description,
             },
             "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
-            "story_blueprint": build_story_blueprint(game.config),
+            "story_blueprint": build_story_blueprint(
+                game.config,
+                game.state.state_json if game.state else {},
+            ),
             "current_state": game.state.state_json if game.state else {},
             "previous_summaries": existing_summaries,
             "turn": {

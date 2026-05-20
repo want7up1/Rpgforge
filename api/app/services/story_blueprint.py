@@ -5,9 +5,13 @@ from typing import Any
 from app.models.game import GameConfig
 
 LIST_LIMIT = 8
+ANCHOR_LIMIT = 12
 
 
-def build_story_blueprint(config: GameConfig | None) -> dict[str, Any]:
+def build_story_blueprint(
+    config: GameConfig | None,
+    state_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if config is None:
         return {}
 
@@ -15,13 +19,32 @@ def build_story_blueprint(config: GameConfig | None) -> dict[str, Any]:
     worldview = config.worldview if isinstance(config.worldview, dict) else {}
     campaign = _record(script.get("campaign_contract"))
     acts = _list(script.get("acts"))
-    current_act = _current_act(acts, _text(campaign.get("current_act")) or "act_1")
+    configured_current_act = _text(campaign.get("current_act")) or "act_1"
+    story_progress = story_progress_from_state(state_json)
+    current_act_id = _runtime_current_act_id(
+        acts,
+        story_progress.get("current_act"),
+        configured_current_act,
+    )
+    current_act = _current_act(acts, current_act_id)
+    next_act = _next_act(acts, current_act)
 
     return {
         "user_brief": _record(script.get("user_brief")),
         "central_question": _text(campaign.get("central_question")),
         "main_goal": _text(campaign.get("main_goal") or campaign.get("premise")),
         "current_act": _act_payload(current_act),
+        "next_act": _act_payload(next_act),
+        "story_progress": {
+            "current_act": _text(_act_identity(current_act) or current_act_id),
+            "configured_start_act": configured_current_act,
+            "completed_acts": story_progress.get("completed_acts", []),
+            "completed_anchors": story_progress.get("completed_anchors", []),
+            "ready_for_next_act": story_progress.get("ready_for_next_act", False),
+            "last_advance_turn": story_progress.get("last_advance_turn"),
+            "last_advance_reason": story_progress.get("last_advance_reason", ""),
+            "last_anchor_update_turn": story_progress.get("last_anchor_update_turn"),
+        },
         "truth_map": _bounded_list(script.get("truth_map")),
         "clue_ladder": _bounded_list(script.get("clue_ladder")),
         "pressure_clock": _bounded_list(script.get("pressure_clock")),
@@ -36,6 +59,79 @@ def build_story_blueprint(config: GameConfig | None) -> dict[str, Any]:
         },
         "forbidden_public_spoilers": _bounded_list(script.get("forbidden_public_spoilers")),
     }
+
+
+def initial_story_progress(config: GameConfig | None) -> dict[str, Any]:
+    if config is None:
+        return {
+            "current_act": "",
+            "completed_acts": [],
+            "completed_anchors": [],
+            "ready_for_next_act": False,
+            "last_advance_turn": None,
+            "last_advance_reason": "",
+            "last_anchor_update_turn": None,
+            "act_history": [],
+            "anchor_history": [],
+        }
+
+    script = config.script_outline if isinstance(config.script_outline, dict) else {}
+    campaign = _record(script.get("campaign_contract"))
+    acts = _list(script.get("acts"))
+    configured_current_act = _text(campaign.get("current_act")) or "act_1"
+    current_act = _current_act(acts, configured_current_act)
+    current_act_id = _text(_act_identity(current_act) or configured_current_act)
+    return {
+        "current_act": current_act_id,
+        "completed_acts": [],
+        "completed_anchors": [],
+        "ready_for_next_act": False,
+        "last_advance_turn": None,
+        "last_advance_reason": "",
+        "last_anchor_update_turn": None,
+        "act_history": [],
+        "anchor_history": [],
+    }
+
+
+def story_progress_from_state(state_json: dict[str, Any] | None) -> dict[str, Any]:
+    state = _record(state_json)
+    progress = _record(state.get("story_progress"))
+    if not progress:
+        progress = _record(_record(state.get("v2")).get("story_progress"))
+    return {
+        "current_act": _text(progress.get("current_act") or progress.get("act")),
+        "completed_acts": _unique(_strings(progress.get("completed_acts"))),
+        "completed_anchors": _unique(_strings(progress.get("completed_anchors"))),
+        "ready_for_next_act": _bool(progress.get("ready_for_next_act"), False),
+        "last_advance_turn": progress.get("last_advance_turn"),
+        "last_advance_reason": _text(progress.get("last_advance_reason")),
+        "last_anchor_update_turn": progress.get("last_anchor_update_turn"),
+    }
+
+
+def completion_anchor_ids_for_act(
+    config: GameConfig | None,
+    act_id: str,
+    *,
+    required_only: bool = True,
+) -> list[str]:
+    act = _act_for_config(config, act_id)
+    anchors = _completion_anchors(act)
+    ids: list[str] = []
+    for anchor in anchors:
+        if required_only and not _bool(anchor.get("required"), True):
+            continue
+        anchor_id = _text(anchor.get("id"))
+        if anchor_id and anchor_id not in ids:
+            ids.append(anchor_id)
+    return ids
+
+
+def transition_target_for_act(config: GameConfig | None, act_id: str) -> str:
+    act = _act_for_config(config, act_id)
+    transition = _transition_payload(_record(act.get("transition_to_next_act")))
+    return _text(transition.get("target_act"))
 
 
 def build_campaign_contract_payload(config: GameConfig | None) -> dict[str, Any]:
@@ -140,8 +236,11 @@ def merge_required_script_fields(
     return protect_user_brief_contract(merged)
 
 
-def story_blueprint_search_fragments(config: GameConfig | None) -> list[str]:
-    blueprint = build_story_blueprint(config)
+def story_blueprint_search_fragments(
+    config: GameConfig | None,
+    state_json: dict[str, Any] | None = None,
+) -> list[str]:
+    blueprint = build_story_blueprint(config, state_json)
     fragments: list[str] = []
     fragments.extend(_strings(blueprint.get("central_question")))
     fragments.extend(_strings(blueprint.get("main_goal")))
@@ -150,6 +249,9 @@ def story_blueprint_search_fragments(config: GameConfig | None) -> list[str]:
     fragments.extend(_strings(_record(blueprint.get("current_act")).get("pressure")))
     fragments.extend(_strings(_record(blueprint.get("current_act")).get("must_hit_beats")))
     fragments.extend(_strings(_record(blueprint.get("current_act")).get("allowed_reveals")))
+    fragments.extend(_strings(_record(blueprint.get("current_act")).get("completion_anchors")))
+    fragments.extend(_strings(_record(blueprint.get("next_act")).get("objective")))
+    fragments.extend(_strings(_record(blueprint.get("next_act")).get("dramatic_question")))
     fragments.extend(_strings(blueprint.get("clue_ladder")))
     fragments.extend(_strings(blueprint.get("pressure_clock")))
     fragments.extend(_strings(blueprint.get("mechanics_contract")))
@@ -157,6 +259,8 @@ def story_blueprint_search_fragments(config: GameConfig | None) -> list[str]:
 
 
 def _act_payload(act: dict[str, Any]) -> dict[str, Any]:
+    if not act:
+        return {}
     return {
         "id": _text(act.get("id") or act.get("key")),
         "name": _text(act.get("name") or act.get("title")),
@@ -169,7 +273,79 @@ def _act_payload(act: dict[str, Any]) -> dict[str, Any]:
         "relationship_turn": _text(act.get("relationship_turn")),
         "escalation_limit": _text(act.get("escalation_limit")),
         "completion_signal": _text(act.get("completion_signal")),
+        "completion_anchors": [
+            _anchor_payload(anchor)
+            for anchor in _completion_anchors(act)[:ANCHOR_LIMIT]
+        ],
+        "transition_to_next_act": _transition_payload(
+            _record(act.get("transition_to_next_act"))
+        ),
     }
+
+
+def _anchor_payload(anchor: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _text(anchor.get("id") or anchor.get("key")),
+        "title": _text(anchor.get("title") or anchor.get("name")),
+        "required": _bool(anchor.get("required"), True),
+        "completion_signal": _text(anchor.get("completion_signal") or anchor.get("signal")),
+        "story_effect": _text(anchor.get("story_effect") or anchor.get("effect")),
+        "allowed_reveals": _bounded_list(anchor.get("allowed_reveals")),
+        "forbidden_reveals": _bounded_list(anchor.get("forbidden_reveals")),
+    }
+
+
+def _transition_payload(transition: dict[str, Any]) -> dict[str, Any]:
+    if not transition:
+        return {}
+    return {
+        "target_act": _text(transition.get("target_act") or transition.get("act")),
+        "allowed_when": _text(transition.get("allowed_when")) or "required_anchors_completed",
+        "transition_style": _text(transition.get("transition_style") or transition.get("style")),
+    }
+
+
+def _completion_anchors(act: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        anchor
+        for item in _list(act.get("completion_anchors"))
+        if (anchor := _record(item))
+    ]
+
+
+def _act_for_config(config: GameConfig | None, act_id: str) -> dict[str, Any]:
+    if config is None:
+        return {}
+    script = config.script_outline if isinstance(config.script_outline, dict) else {}
+    return _current_act(_list(script.get("acts")), act_id)
+
+
+def _runtime_current_act_id(
+    acts: list[Any],
+    state_current_act: Any,
+    configured_current_act: str,
+) -> str:
+    candidate = _text(state_current_act)
+    if candidate and (not acts or _act_exists(acts, candidate)):
+        return candidate
+    return configured_current_act
+
+
+def _act_exists(acts: list[Any], act_id: str) -> bool:
+    for item in acts:
+        act = _record(item)
+        if act_id and act_id in _act_identifiers(act):
+            return True
+    return False
+
+
+def _act_identifiers(act: dict[str, Any]) -> list[str]:
+    return [
+        _text(act.get("id")),
+        _text(act.get("key")),
+        _text(act.get("name")),
+        _text(act.get("title")),
+    ]
 
 
 def _current_act(acts: list[Any], current_act_id: str) -> dict[str, Any]:
@@ -178,15 +354,36 @@ def _current_act(acts: list[Any], current_act_id: str) -> dict[str, Any]:
         act = _record(item)
         if not act:
             continue
-        identifiers = [
-            _text(act.get("id")),
-            _text(act.get("key")),
-            _text(act.get("name")),
-            _text(act.get("title")),
-        ]
-        if current_act_id and current_act_id in identifiers:
+        if current_act_id and current_act_id in _act_identifiers(act):
             return act
     return fallback
+
+
+def _next_act(acts: list[Any], current_act: dict[str, Any]) -> dict[str, Any]:
+    current_identity = _act_identity(current_act)
+    if not current_identity:
+        return {}
+    for index, item in enumerate(acts):
+        act = _record(item)
+        if not act:
+            continue
+        if _act_identity(act) != current_identity:
+            continue
+        for next_item in acts[index + 1:]:
+            next_act = _record(next_item)
+            if next_act:
+                return next_act
+        return {}
+    return {}
+
+
+def _act_identity(act: dict[str, Any]) -> str:
+    return _text(
+        act.get("id")
+        or act.get("key")
+        or act.get("name")
+        or act.get("title")
+    )
 
 
 def _merge_missing(target: dict[str, Any], source: dict[str, Any]) -> None:
@@ -215,6 +412,18 @@ def _bounded_list(value: Any) -> list[Any]:
 
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y"}:
+            return True
+        if text in {"false", "0", "no", "n"}:
+            return False
+    return default
 
 
 def _strings(value: Any) -> list[str]:

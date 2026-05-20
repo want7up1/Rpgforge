@@ -57,7 +57,10 @@ class ContextDiagnosticService:
             recent_turn_numbers=[recent_turn.turn_number for recent_turn in recent_turns],
             memory_summaries=summaries,
             campaign_contract=PromptBuilder._campaign_contract_payload(game.config),
-            story_blueprint=build_story_blueprint(game.config),
+            story_blueprint=build_story_blueprint(
+                game.config,
+                game.state.state_json if game.state else {},
+            ),
             always_on_lore=[self._lore_payload(entry) for entry in always_on_lore],
             related_lore=[self._retrieval_payload(result) for result in related_lore],
         )

@@ -108,7 +108,10 @@ class StoryDirector:
                 "description": game.description,
             },
             "campaign_contract": PromptBuilder._campaign_contract_payload(config),
-            "story_blueprint": build_story_blueprint(config),
+            "story_blueprint": build_story_blueprint(
+                config,
+                game.state.state_json if game.state else {},
+            ),
             "worldview": config.worldview if config else {},
             "script_outline": config.script_outline if config else {},
             "selected_mode": self._mode_payload(selected_mode),
@@ -158,16 +161,19 @@ class StoryDirector:
         selected_mode: Mode | None,
     ) -> StoryDirectorDecision:
         contract = PromptBuilder._campaign_contract_payload(game.config)
-        blueprint = build_story_blueprint(game.config)
+        blueprint = build_story_blueprint(
+            game.config,
+            game.state.state_json if game.state else {},
+        )
         current_act = blueprint.get("current_act") if isinstance(blueprint, dict) else {}
         if not isinstance(current_act, dict):
             current_act = {}
         return StoryDirectorDecision(
             player_intent=player_input,
             current_act=str(
-                contract.get("current_act")
-                or current_act.get("id")
+                current_act.get("id")
                 or current_act.get("name")
+                or contract.get("current_act")
                 or ""
             ),
             scene_objective=str(

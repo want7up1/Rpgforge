@@ -42,6 +42,8 @@ def test_create_and_read_manual_game(reset_database) -> None:
     assert created["state"]["state_json"]["conditions"] == []
     assert created["state"]["state_json"]["relationships"] == []
     assert created["state"]["state_json"]["v2"]["progression"]["next_level_xp"] == 100
+    assert created["config"]["generation_settings"]["narrative_target_min_chars"] == 800
+    assert created["config"]["generation_settings"]["recent_turn_excerpt_chars"] == 420
 
     list_response = client.get("/api/games")
     assert list_response.status_code == 200
@@ -189,6 +191,17 @@ def test_update_game_config_updates_runtime_contract_and_versions(db_session) ->
             "description": "追查义庄背后的黑伞契约。",
             "system_prompt": "保持克制，遵守 RPGForge 剧情 Markdown 契约。",
             "generation_notes": "玩家手动修订。",
+            "generation_settings": {
+                "narrative_target_min_chars": 900,
+                "narrative_target_max_chars": 1300,
+                "narrative_min_chars": 850,
+                "paragraph_min": 4,
+                "paragraph_max": 7,
+                "scene_heading_max": 2,
+                "emphasis_min": 1,
+                "emphasis_max": 3,
+                "recent_turn_excerpt_chars": 180,
+            },
             "worldview": {
                 "summary": "黑伞契约正在侵蚀雁回镇。",
                 "tone": "冷峻悬疑",
@@ -214,6 +227,8 @@ def test_update_game_config_updates_runtime_contract_and_versions(db_session) ->
         body["config"]["script_outline"]["campaign_contract"]["main_goal"]
         == "查清黑伞契约真相"
     )
+    assert body["config"]["generation_settings"]["narrative_target_min_chars"] == 900
+    assert body["config"]["generation_settings"]["recent_turn_excerpt_chars"] == 180
 
     versions = db_session.scalars(
         select(GameSettingVersion)
@@ -243,12 +258,229 @@ def test_update_game_config_updates_runtime_contract_and_versions(db_session) ->
     runtime_payload = json.loads(messages[1]["content"])
     assert runtime_payload["worldview"]["tone"] == "冷峻悬疑"
     assert runtime_payload["campaign_contract"]["main_goal"] == "查清黑伞契约真相"
+    assert runtime_payload["generation_settings"]["narrative_target_max_chars"] == 1300
 
     restore_response = client.post(
         f"/api/games/{game.id}/setting-versions/{versions[0].id}/restore"
     )
     assert restore_response.status_code == 200
     assert restore_response.json()["title"] == "雁回镇旧案"
+    assert (
+        restore_response.json()["config"]["generation_settings"]["narrative_target_min_chars"]
+        == 800
+    )
+
+
+def test_settings_export_import_roundtrip_overwrites_config_lore_and_modes(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    db_session.add(
+        Character(
+            game_id=game.id,
+            name="沈砚",
+            role="protagonist",
+            identity="失忆镖师",
+            description="追查义庄旧案的主角。",
+            appearance="眉骨锋利，旧伤横过左肩。",
+            aliases=["沈镖头"],
+            story_profile={"desire": "查清旧案"},
+            portrait_prompt="旧画像提示",
+            portrait_path="/tmp/rpgforge-test-portrait.png",
+            source="manual",
+            sync_meta={"identity": "失忆镖师"},
+            manual_fields=["identity"],
+        )
+    )
+    db_session.commit()
+    client = TestClient(app)
+
+    export_response = client.get(f"/api/games/{game.id}/settings-export")
+
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"].startswith("application/json")
+    payload = export_response.json()
+    assert payload["format_version"] == "rpgforge.settings.v1"
+    assert payload["import_mode"] == "replace_all"
+    assert payload["_ai_editing_guide"]["import_behavior"].startswith("当前导出默认")
+    assert payload["_field_guide"]["import_mode"]["accepted_values"] == [
+        "replace_all",
+        "protected",
+    ]
+    assert payload["_field_guide"]["game.title"]["import_effective"] is True
+    assert payload["_field_guide"]["game.title"]["example"] == "雾港旧案"
+    assert payload["_field_guide"]["generation_settings.narrative_target_min_chars"][
+        "fill_rule"
+    ].startswith("填写 100 到 10000")
+    assert payload["_field_guide"]["script_outline.acts[].completion_anchors"][
+        "import_effective"
+    ] is True
+    assert payload["_field_guide"][
+        "script_outline.acts[].transition_to_next_act.target_act"
+    ]["example"] == "act_2"
+    assert payload["_field_guide"]["lore_entries[].gm_secret"]["purpose"].startswith(
+        "GM 需要知道"
+    )
+    assert payload["_field_guide"]["characters[]"]["import_effective"] is True
+    assert "turns" not in payload
+    assert "state" not in payload
+    payload["_field_guide"]["game.title"]["example"] = "说明区修改不应导入"
+    payload["_ai_editing_guide"]["purpose"] = "说明区修改不应导入"
+    payload["game"]["title"] = "导入后的雁回镇"
+    payload["game"]["status"] = "active"
+    payload["generation_settings"]["narrative_target_min_chars"] = 650
+    payload["generation_settings"]["recent_turn_excerpt_chars"] = 64
+    payload["script_outline"]["user_brief"]["must_include"] = []
+    payload["script_outline"]["user_brief"]["forbidden_content"] = []
+    payload["script_outline"]["campaign_contract"]["must_preserve"] = []
+    payload["script_outline"]["campaign_contract"]["must_not_become"] = []
+    payload["script_outline"]["campaign_contract"]["forbidden_drift"] = []
+    payload["script_outline"].pop("_character_profiles", None)
+    payload["script_outline"]["acts"][0]["completion_anchors"] = [
+        {
+            "id": "act_1_anchor_1",
+            "title": "发现异常痕迹",
+            "required": True,
+            "completion_signal": "玩家发现门槛泥痕或棺木底部湿泥。",
+            "story_effect": "允许 GM 强化人为遮掩的证据。",
+        }
+    ]
+    payload["script_outline"]["acts"][0]["transition_to_next_act"] = {
+        "target_act": "act_2",
+        "allowed_when": "required_anchors_completed",
+        "transition_style": "自然过渡，不强制传送玩家离开当前场景。",
+    }
+    payload["lore_entries"] = [
+        {
+            "title": "导入资料",
+            "type": "location",
+            "keywords": ["导入"],
+            "trigger_words": ["导入"],
+            "priority": "high",
+            "always_on": True,
+            "visibility": "mixed",
+            "public_info": "导入后的公开资料。",
+            "gm_secret": "导入后的隐藏资料。",
+            "content": "导入资料会重建向量。",
+            "usage_note": "导入测试。",
+            "is_active": True,
+        }
+    ]
+    payload["modes"] = [
+        {
+            "name": "导入模式",
+            "triggers": ["导入"],
+            "injection": "使用导入后的模式规则。",
+            "priority": "medium",
+            "enabled": True,
+        }
+    ]
+    character_payload = next(item for item in payload["characters"] if item["name"] == "沈砚")
+    payload["characters"] = [
+        {
+            **character_payload,
+            "name": "沈砚归来",
+            "aliases": ["沈镖头", "义庄醒来者"],
+            "role": "companion",
+            "identity": "被导入 JSON 改写的失忆镖师",
+            "description": "导入后的角色描述。",
+            "appearance": "导入后的外貌描述。",
+            "story_profile": {"desire": "按导入设定追查黑伞契约"},
+            "portrait_prompt": "导入后的画像提示",
+            "visibility": "hidden",
+            "is_visible": False,
+            "source": "settings_import",
+            "sync_meta": {},
+            "manual_fields": ["identity", "appearance"],
+        }
+    ]
+
+    import_response = client.post(f"/api/games/{game.id}/settings-import", json=payload)
+
+    assert import_response.status_code == 200
+    body = import_response.json()
+    assert body["title"] == "导入后的雁回镇"
+    assert body["status"] == "active"
+    assert body["config"]["generation_settings"]["narrative_target_min_chars"] == 650
+    assert body["config"]["generation_settings"]["recent_turn_excerpt_chars"] == 64
+    imported_outline = body["config"]["script_outline"]
+    assert imported_outline["user_brief"]["must_include"] == []
+    assert imported_outline["user_brief"]["forbidden_content"] == []
+    assert imported_outline["campaign_contract"]["must_preserve"] == []
+    assert imported_outline["campaign_contract"]["must_not_become"] == []
+    assert imported_outline["campaign_contract"]["forbidden_drift"] == []
+    assert "_character_profiles" not in imported_outline
+    imported_act = body["config"]["script_outline"]["acts"][0]
+    assert imported_act["completion_anchors"][0]["id"] == "act_1_anchor_1"
+    assert imported_act["transition_to_next_act"]["target_act"] == "act_2"
+    assert [entry["title"] for entry in body["lore_entries"]] == ["导入资料"]
+    assert [mode["name"] for mode in body["modes"]] == ["导入模式"]
+
+    db_session.expire_all()
+    saved = db_session.scalars(
+        select(Game)
+        .options(
+            selectinload(Game.config),
+            selectinload(Game.lore_entries),
+            selectinload(Game.characters),
+        )
+        .where(Game.id == game.id)
+    ).one()
+    assert saved.lore_entries[0].embedding is not None
+    assert len(saved.characters) == 1
+    imported_character = saved.characters[0]
+    assert imported_character.name == "沈砚归来"
+    assert imported_character.identity == "被导入 JSON 改写的失忆镖师"
+    assert imported_character.appearance == "导入后的外貌描述。"
+    assert imported_character.story_profile == {"desire": "按导入设定追查黑伞契约"}
+    assert imported_character.portrait_prompt == "导入后的画像提示"
+    assert imported_character.portrait_path == "/tmp/rpgforge-test-portrait.png"
+    assert imported_character.visibility == "hidden"
+    assert imported_character.is_visible is False
+    assert imported_character.sync_meta == {}
+    assert imported_character.manual_fields == ["identity", "appearance"]
+    version = db_session.scalars(
+        select(GameSettingVersion).where(
+            GameSettingVersion.game_id == game.id,
+            GameSettingVersion.scope == "settings_import",
+        )
+    ).first()
+    assert version
+    assert "_ai_editing_guide" not in version.snapshot_json
+    assert "_field_guide" not in version.snapshot_json
+    assert version.snapshot_json["import_mode"] == "replace_all"
+
+
+def test_settings_import_validation_and_active_job_rejection(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    client = TestClient(app)
+
+    invalid_body_response = client.post(f"/api/games/{game.id}/settings-import", json=[])
+    assert invalid_body_response.status_code == 422
+
+    wrong_version_response = client.post(
+        f"/api/games/{game.id}/settings-import",
+        json={"format_version": "unknown"},
+    )
+    assert wrong_version_response.status_code == 400
+
+    wrong_import_mode_response = client.post(
+        f"/api/games/{game.id}/settings-import",
+        json={"format_version": "rpgforge.settings.v1", "import_mode": "unknown"},
+    )
+    assert wrong_import_mode_response.status_code == 400
+
+    db_session.add(
+        TurnJob(
+            game_id=game.id,
+            status="running",
+            request_json={"player_input": "我继续前进。"},
+        )
+    )
+    db_session.commit()
+    active_job_response = client.post(
+        f"/api/games/{game.id}/settings-import",
+        json={"format_version": "rpgforge.settings.v1"},
+    )
+    assert active_job_response.status_code == 409
 
 
 def test_update_game_config_advanced_json_preserves_required_story_fields(db_session) -> None:
@@ -334,6 +566,7 @@ def test_runtime_prompt_uses_token_optimized_context(db_session) -> None:
     assert "current_state" not in runtime_payload
     assert "script_outline" not in runtime_payload
     assert runtime_payload["current_state_v2"]["version"] == 1
+    assert runtime_payload["generation_settings"]["recent_turn_excerpt_chars"] == 420
     assert runtime_payload["campaign_contract"]
     assert "gm_output" not in recent_turn
     assert recent_turn["gm_output_excerpt"].endswith("...")

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from app.models.state import GameState
 from app.schemas.generator import GeneratedGameConfig
 from app.services.characters import build_character_records_from_config
 from app.services.state_v2 import normalize_state_v2
+from app.services.story_blueprint import initial_story_progress
 from app.services.text_vectorizer import text_to_vector
 
 
@@ -44,6 +46,13 @@ def build_default_initial_state(title: str, description: str | None = None) -> d
         "known_facts": [],
         "hidden_facts": [],
         "open_threads": [],
+        "story_progress": {
+            "current_act": "",
+            "completed_acts": [],
+            "last_advance_turn": None,
+            "last_advance_reason": "",
+            "act_history": [],
+        },
     }
 
 
@@ -85,14 +94,26 @@ def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
         system_prompt=config.system_prompt,
         worldview=config.worldview,
         script_outline=script_outline,
+        generation_settings={},
         generation_notes=config.generation_notes,
     )
+    initial_state = (
+        deepcopy(config.initial_state)
+        if config.initial_state
+        else build_default_initial_state(
+            config.title,
+            config.description,
+        )
+    )
+    story_progress = initial_state.get("story_progress")
+    if not isinstance(story_progress, dict) or not story_progress.get("current_act"):
+        initial_state["story_progress"] = initial_story_progress(game.config)
+    initial_turn = int(initial_state.get("current_turn", 0))
+    normalized_initial_state = normalize_state_v2(initial_state, initial_turn)
     game.state = GameState(
-        current_turn=int(config.initial_state.get("current_turn", 0)),
-        state_json=normalize_state_v2(
-            config.initial_state or build_default_initial_state(config.title, config.description),
-            int(config.initial_state.get("current_turn", 0)),
-        ),
+        current_turn=initial_turn,
+        state_json=normalized_initial_state,
+        initial_state_json=normalized_initial_state,
         summary="",
     )
     game.lore_entries = [

@@ -161,6 +161,7 @@ function CharacterPanel({ stateV2, xpPercent }: { stateV2: StateV2; xpPercent: n
 
 function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
   const scene = stateV2.active_scene;
+  const storyProgress = stateV2.story_progress;
 
   return (
     <section className="surface-panel surface-panel-strong">
@@ -169,6 +170,8 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
         <span className="app-pill">第 {scene.turn} 回合</span>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        <CompactField label="当前幕" value={formatStoryProgress(storyProgress)} />
+        <CompactField label="幕完成锚点" value={formatAnchorProgress(storyProgress)} />
         <CompactField label="地点" value={scene.location || "未记录"} />
         <CompactField label="时间" value={scene.time || "未记录"} />
         <CompactField label="压力" value={scene.pressure || "暂无"} />
@@ -185,6 +188,19 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
       ) : null}
     </section>
   );
+}
+
+function formatStoryProgress(progress: StateV2["story_progress"]): string {
+  const currentAct = progress.current_act || "未记录";
+  const advanceNote =
+    progress.last_advance_turn !== null ? `第 ${progress.last_advance_turn} 回合推进` : "";
+  return [currentAct, advanceNote].filter(Boolean).join(" · ");
+}
+
+function formatAnchorProgress(progress: StateV2["story_progress"]): string {
+  const countLabel = `${progress.completed_anchors.length} 个已完成`;
+  const readyLabel = progress.ready_for_next_act ? "可进入下一幕" : "未满足过渡条件";
+  return `${countLabel} · ${readyLabel}`;
 }
 
 function SkillsPanel({ skills }: { skills: SkillState[] }) {

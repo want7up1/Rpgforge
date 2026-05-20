@@ -8,14 +8,13 @@ from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
-from app.models.state_delta import StateDelta
 from app.models.turn import Turn
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
 from app.services.game_activity import touch_game
 from app.services.gameplay import gameplay_game_query
-from app.services.state_applier import apply_state_delta
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
+from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
 from app.services.turn_jobs import publish_turn_job_snapshot
 
 logger = logging.getLogger(__name__)
@@ -125,21 +124,16 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
             return
 
         turn.state_delta_json = delta_json
-        approved_at = datetime.now(UTC)
         if game.state is not None:
-            game.state.state_json = apply_state_delta(game.state, turn, delta_json)
-            game.state.current_turn = max(game.state.current_turn, turn.turn_number)
-            db.add(game.state)
-        db.add(turn)
-        db.add(
-            StateDelta(
-                game_id=game.id,
-                turn_id=turn.id,
+            approve_turn_state_delta(
+                db,
+                game=game,
+                turn=turn,
                 delta_json=delta_json,
-                status="approved",
-                approved_at=approved_at,
+                approved_at=datetime.now(UTC),
             )
-        )
+            rebuild_game_state(db, game)
+        db.add(turn)
         touch_game(db, game.id)
         db.commit()
 

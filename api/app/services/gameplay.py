@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.game import Game
 from app.models.mode import Mode
-from app.models.state_delta import StateDelta
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput, TurnCreate
 from app.services.context_compressor import ContextCompressor
@@ -21,9 +20,9 @@ from app.services.lore_retriever import LoreRetriever
 from app.services.mode_matcher import select_mode
 from app.services.model_router import ModelRouter
 from app.services.prompt_builder import PromptBuilder
-from app.services.state_applier import apply_state_delta
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
+from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
 from app.services.story_director import StoryDirector, StoryDirectorDecision
 
 logger = logging.getLogger(__name__)
@@ -290,22 +289,17 @@ class GameplayService:
             return False
 
         turn.state_delta_json = delta_json
-        approved_at = datetime.now(UTC)
         if game.state is not None:
-            game.state.state_json = apply_state_delta(game.state, turn, delta_json)
-            game.state.current_turn = max(game.state.current_turn, turn.turn_number)
-            db.add(game.state)
+            approve_turn_state_delta(
+                db,
+                game=game,
+                turn=turn,
+                delta_json=delta_json,
+                approved_at=datetime.now(UTC),
+            )
+            rebuild_game_state(db, game)
         touch_game(db, game.id)
         db.add(turn)
-        db.add(
-            StateDelta(
-                game_id=game.id,
-                turn_id=turn.id,
-                delta_json=delta_json,
-                status="approved",
-                approved_at=approved_at,
-            )
-        )
         db.commit()
         db.refresh(turn)
         await self._update_context_after_turn(db, game, turn, delta_json)

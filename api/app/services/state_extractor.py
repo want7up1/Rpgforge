@@ -32,6 +32,7 @@ class StateDeltaExtraction(BaseModel):
     ability_updates: list[Any] = Field(default_factory=list)
     condition_updates: list[Any] = Field(default_factory=list)
     relationship_events: list[Any] = Field(default_factory=list)
+    story_progress_update: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator(
         "inventory_add",
@@ -58,6 +59,11 @@ class StateDeltaExtraction(BaseModel):
             return value
         return [value]
 
+    @field_validator("story_progress_update", mode="before")
+    @classmethod
+    def coerce_mapping(cls, value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
 
 class StateExtractorValidationError(RuntimeError):
     pass
@@ -76,7 +82,7 @@ class StateExtractor:
                 "description": game.description,
             },
             "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
-            "story_blueprint": build_story_blueprint(game.config),
+            "story_blueprint": build_story_blueprint(game.config, current_state),
             "current_state": current_state,
             "turn": {
                 "turn_number": turn.turn_number,

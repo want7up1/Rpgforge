@@ -116,6 +116,7 @@ export function buildGameBlueprint(game: GameDetail): StoryBlueprintView {
     description: game.description ?? "",
     worldview: asRecord(game.config?.worldview),
     script: asRecord(game.config?.script_outline),
+    stateJson: game.state?.state_json,
     loreCount: game.lore_entries.length,
     modeCount: game.modes.length
   });
@@ -125,18 +126,27 @@ function buildBlueprintFromParts({
   title,
   description,
   worldview,
-  script
+  script,
+  stateJson
 }: {
   title: string;
   description: string;
   worldview: Record<string, unknown>;
   script: Record<string, unknown>;
+  stateJson?: Record<string, unknown>;
   loreCount: number;
   modeCount: number;
 }): StoryBlueprintView {
   const campaign = asRecord(script.campaign_contract);
   const acts = asList(script.acts);
-  const currentActId = pickString(campaign, ["current_act", "act", "stage", "phase"]);
+  const stateRoot = asRecord(stateJson);
+  const runtimeProgress = firstRecord([
+    stateRoot.story_progress,
+    asRecord(stateRoot.v2).story_progress
+  ]);
+  const currentActId =
+    pickString(runtimeProgress, ["current_act", "act"]) ||
+    pickString(campaign, ["current_act", "act", "stage", "phase"]);
   const currentAct = findAct(acts, currentActId);
   const firstAct = asRecord(acts[0]);
 
@@ -148,7 +158,7 @@ function buildBlueprintFromParts({
       pickString(currentAct, ["dramatic_question"]),
     openingStage: pickString(worldview, ["setting", "opening_stage", "summary"]),
     currentAct: compactList([
-      pickString(campaign, ["current_act", "act", "stage", "phase"]),
+      currentActId,
       pickString(currentAct, ["name", "title"])
     ]).join(" · "),
     currentActGoal:
@@ -217,7 +227,14 @@ export function buildContractView(game: GameDetail): ContractView {
   const storyContract = asRecord(script.story_contract);
   const userBrief = normalizeConfirmedRequirements(script.user_brief, game.description ?? "");
   const acts = asList(script.acts);
-  const currentActId = pickString(campaignContract, ["current_act", "act", "stage", "phase"]);
+  const stateRoot = asRecord(game.state?.state_json);
+  const runtimeProgress = firstRecord([
+    stateRoot.story_progress,
+    asRecord(stateRoot.v2).story_progress
+  ]);
+  const currentActId =
+    pickString(runtimeProgress, ["current_act", "act"]) ||
+    pickString(campaignContract, ["current_act", "act", "stage", "phase"]);
   const currentAct = findAct(acts, currentActId);
   const firstAct = asRecord(acts[0]);
 
@@ -257,7 +274,7 @@ export function buildContractView(game: GameDetail): ContractView {
       key: "act",
       label: "当前幕",
       items: compactList([
-        pickString(campaignContract, ["current_act", "act", "stage", "phase"]),
+        currentActId,
         pickString(currentAct, ["name", "title"]),
         pickString(currentAct, ["objective", "goal"]),
         pickString(directorContract, ["current_act", "act", "stage"])
@@ -468,10 +485,7 @@ function findAct(acts: unknown[], currentActId: string): Record<string, unknown>
   return asRecord(
     acts.find((item) => {
       const act = asRecord(item);
-      return (
-        pickString(act, ["id", "key", "name", "title"]) === currentActId ||
-        pickString(act, ["id", "key"]) === currentActId
-      );
+      return ["id", "key", "name", "title"].some((key) => pickString(act, [key]) === currentActId);
     })
   );
 }
@@ -496,6 +510,16 @@ function valueToList(value: unknown): string[] {
   return Object.values(record)
     .flatMap(valueToList)
     .filter(Boolean);
+}
+
+function firstRecord(values: unknown[]): Record<string, unknown> {
+  for (const value of values) {
+    const record = asRecord(value);
+    if (Object.keys(record).length > 0) {
+      return record;
+    }
+  }
+  return {};
 }
 
 function readableLines(value: unknown): string[] {
