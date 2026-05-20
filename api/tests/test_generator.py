@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from threading import Thread
@@ -670,6 +671,87 @@ def test_generator_chat_job_events_poll_db_snapshot_without_broker_event(
 
     assert response.status_code == 200
     assert "event: snapshot" in body
+    assert '"terminal": true' in body
+    assert "设定已确认，可以生成完整配置。" in body
+
+
+def test_generator_chat_job_events_reads_stream_broker_event(db_session, monkeypatch) -> None:
+    monkeypatch.setattr("app.routers.generator.SSE_DB_SNAPSHOT_INTERVAL_SECONDS", 0.01)
+    job = GeneratorChatJob(
+        status="pending",
+        request_json={
+            "user_input": "黑暗武侠",
+            "history": [],
+            "confirmed_requirements": {},
+        },
+        progress_message="等待 DeepSeek 返回流式事件。",
+        last_event_at=datetime.now(UTC),
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+
+    stream_calls = {"count": 0}
+    monkeypatch.setattr(
+        "app.routers.generator.generator_stream_event_broker.latest_stream_entry",
+        lambda job_id: None,
+    )
+
+    async def fake_read_stream_event(job_id, last_id, *, timeout_seconds):
+        del last_id
+        if stream_calls["count"] == 0:
+            stream_calls["count"] += 1
+            return (
+                "1-0",
+                {
+                    "type": "progress",
+                    "job_id": str(job_id),
+                    "status": "running",
+                    "progress_message": "broker 进度：生成器正在确认设定。",
+                    "last_event_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        await asyncio.sleep(timeout_seconds)
+        return None
+
+    monkeypatch.setattr(
+        "app.routers.generator.generator_stream_event_broker.read_stream_event",
+        fake_read_stream_event,
+    )
+
+    def complete_job_later() -> None:
+        sleep(0.05)
+        with SessionLocal() as db:
+            saved = db.get(GeneratorChatJob, job.id)
+            assert saved is not None
+            now = datetime.now(UTC)
+            saved.status = "completed"
+            saved.result_json = {
+                "stage": "ready_to_generate",
+                "confirmed_requirements": {"genre": "武侠"},
+                "missing_questions": [],
+                "assistant_reply": "设定已确认，可以生成完整配置。",
+                "model_used": "deepseek-v4-pro",
+            }
+            saved.model_used = "deepseek-v4-pro"
+            saved.progress_message = "访谈回复已完成，正在返回结果。"
+            saved.last_event_at = now
+            saved.completed_at = now
+            db.add(saved)
+            db.commit()
+
+    updater = Thread(target=complete_job_later)
+    updater.start()
+    client = TestClient(app)
+    try:
+        with client.stream("GET", f"/api/generator/chat-jobs/{job.id}/events") as response:
+            body = "".join(response.iter_text())
+    finally:
+        updater.join(timeout=1)
+
+    assert response.status_code == 200
+    assert "event: progress" in body
+    assert "broker 进度：生成器正在确认设定。" in body
     assert '"terminal": true' in body
     assert "设定已确认，可以生成完整配置。" in body
 

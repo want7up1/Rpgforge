@@ -9,6 +9,9 @@
 6. 必须从 story_blueprint.current_act 提取当前幕目标、允许揭露、禁止揭露和升级上限；不要跳过线索阶梯直接公布真相地图。
 7. forbidden_reveals 必须写出本回合不能提前揭露或不能引入的内容。
 8. gm_instruction 必须简短、可执行，直接告诉 GM 本回合该怎么写。
+9. 如果 current_state_v2.story_progress 和 story_blueprint.current_act 显示当前幕目标已经完成，可以建议 GM 做自然收束并引向 story_blueprint.next_act；没有完成信号时不要提前切换幕。
+10. 如果 story_blueprint.current_act.completion_anchors 仍有 required=true 的锚点未完成，scene_objective 应优先围绕玩家行动和未完成锚点推进，不要建议进入下一幕。
+11. 如果 required 锚点已完成且玩家行动表现出离开、追查、交付证据或转场意图，可以建议自然过渡到 story_blueprint.next_act；不要强制把仍想停留场景的玩家带走。
 
 输出结构：
 {

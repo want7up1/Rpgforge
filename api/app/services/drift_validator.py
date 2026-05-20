@@ -63,7 +63,10 @@ class DriftValidator:
                 "description": game.description,
             },
             "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
-            "story_blueprint": build_story_blueprint(game.config),
+            "story_blueprint": build_story_blueprint(
+                game.config,
+                game.state.state_json if game.state else {},
+            ),
             "script_outline": game.config.script_outline if game.config else {},
             "current_state_v2": state_v2_view(game.state.state_json if game.state else {}),
             "recent_turns": [

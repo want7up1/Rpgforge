@@ -11,12 +11,14 @@ from app.models.state import GameState
 from app.models.state_delta import StateDelta
 from app.schemas.game import GameStateRead
 from app.schemas.state_delta import StateDeltaRead, StateDeltaUpdate
-from app.services.state_applier import apply_state_delta
+from app.services.game_activity import touch_game
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
+from app.services.state_rebuilder import rebuild_game_state, sync_turn_state_delta
 
 router = APIRouter(tags=["states"])
 DB_DEPENDENCY = Depends(get_db)
 EDITABLE_STATUSES = {"pending", "edited"}
+REJECTABLE_STATUSES = {"pending", "edited", "approved"}
 
 
 def state_game_query(game_id: UUID):
@@ -59,6 +61,14 @@ def ensure_editable(delta: StateDelta) -> None:
         )
 
 
+def ensure_rejectable(delta: StateDelta) -> None:
+    if delta.status not in REJECTABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"State delta is already {delta.status}.",
+        )
+
+
 @router.get("/api/games/{game_id}/state", response_model=GameStateRead)
 def get_game_state(game_id: UUID, db: Session = DB_DEPENDENCY) -> GameState:
     game = get_game_or_404(db, game_id)
@@ -91,7 +101,12 @@ def update_state_delta(
     ensure_editable(delta)
     delta.delta_json = payload.delta_json
     delta.status = "edited"
+    delta.approved_at = None
+    sync_turn_state_delta(delta, active=True)
+    db.add(delta.turn)
     db.add(delta)
+    rebuild_game_state(db, game_id)
+    touch_game(db, game_id)
     db.commit()
     db.refresh(delta)
     return delta
@@ -111,12 +126,14 @@ def approve_state_delta(
     delta = get_delta_or_404(db, game_id, delta_id)
     ensure_editable(delta)
 
-    game_state.state_json = apply_state_delta(game_state, delta.turn, delta.delta_json)
-    game_state.current_turn = max(game_state.current_turn, delta.turn.turn_number)
     delta.status = "approved"
     delta.approved_at = datetime.now(UTC)
+    sync_turn_state_delta(delta, active=True)
+    db.add(delta.turn)
     db.add(game_state)
     db.add(delta)
+    rebuild_game_state(db, game)
+    touch_game(db, game_id)
     db.commit()
     db.refresh(game_state)
     return game_state
@@ -131,11 +148,16 @@ def reject_state_delta(
     delta_id: UUID,
     db: Session = DB_DEPENDENCY,
 ) -> StateDelta:
-    get_game_or_404(db, game_id)
+    game = get_game_or_404(db, game_id)
     delta = get_delta_or_404(db, game_id, delta_id)
-    ensure_editable(delta)
+    ensure_rejectable(delta)
     delta.status = "rejected"
+    delta.approved_at = None
+    sync_turn_state_delta(delta, active=False)
+    db.add(delta.turn)
     db.add(delta)
+    rebuild_game_state(db, game)
+    touch_game(db, game_id)
     db.commit()
     db.refresh(delta)
     return delta

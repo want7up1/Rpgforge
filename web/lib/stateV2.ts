@@ -90,6 +90,28 @@ export type ThreadLog = {
   resolved: ThreadItem[];
 };
 
+export type StoryProgressState = {
+  current_act: string;
+  completed_acts: string[];
+  completed_anchors: string[];
+  ready_for_next_act: boolean;
+  last_advance_turn: number | null;
+  last_advance_reason: string;
+  last_anchor_update_turn: number | null;
+  act_history: {
+    turn: number | null;
+    from_act: string;
+    to_act: string;
+    reason: string;
+  }[];
+  anchor_history: {
+    turn: number | null;
+    act: string;
+    anchor_id: string;
+    reason: string;
+  }[];
+};
+
 export type RelationshipAxis =
   | "trust"
   | "affection"
@@ -126,6 +148,7 @@ export type StateV2 = {
   npc_registry: NpcRegistryItem[];
   quest_log: QuestLog;
   open_threads: ThreadLog;
+  story_progress: StoryProgressState;
   relationship_tracks: RelationshipTrack[];
 };
 
@@ -160,6 +183,9 @@ export function getStateV2(stateJson: Record<string, unknown> | null | undefined
     npc_registry: normalizeNpcRegistry(rawV2.npc_registry ?? root.npcs),
     quest_log: normalizeQuestLog(rawV2.quest_log, root.quests),
     open_threads: normalizeThreadLog(rawV2.open_threads, root.open_threads),
+    story_progress: normalizeStoryProgress(
+      firstRecord([rawV2.story_progress, root.story_progress])
+    ),
     relationship_tracks: normalizeRelationships(rawV2.relationship_tracks ?? root.relationships)
   };
 }
@@ -354,6 +380,37 @@ function normalizeThreadItems(value: unknown): ThreadItem[] {
   return [];
 }
 
+function normalizeStoryProgress(value: unknown): StoryProgressState {
+  const progress = asRecord(value);
+  return {
+    current_act: asString(progress.current_act) || asString(progress.act),
+    completed_acts: asStringList(progress.completed_acts),
+    completed_anchors: asStringList(progress.completed_anchors),
+    ready_for_next_act: asBoolean(progress.ready_for_next_act, false),
+    last_advance_turn: optionalNumber(progress.last_advance_turn),
+    last_advance_reason: asString(progress.last_advance_reason),
+    last_anchor_update_turn: optionalNumber(progress.last_anchor_update_turn),
+    act_history: asRecordList(progress.act_history)
+      .map((item) => ({
+        turn: optionalNumber(item.turn),
+        from_act: asString(item.from_act),
+        to_act: asString(item.to_act),
+        reason: asString(item.reason)
+      }))
+      .filter((item) => item.from_act || item.to_act || item.reason)
+      .slice(-20),
+    anchor_history: asRecordList(progress.anchor_history)
+      .map((item) => ({
+        turn: optionalNumber(item.turn),
+        act: asString(item.act),
+        anchor_id: asString(item.anchor_id) || asString(item.id),
+        reason: asString(item.reason)
+      }))
+      .filter((item) => item.anchor_id)
+      .slice(-30)
+  };
+}
+
 function normalizeRelationships(value: unknown): RelationshipTrack[] {
   return asRecordList(value)
     .map((item) => ({
@@ -444,6 +501,30 @@ function asNumber(value: unknown, fallback: number): number {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) {
       return parsed;
+    }
+  }
+  return fallback;
+}
+
+function optionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const parsed = asNumber(value, Number.NaN);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
+}
+
+function asBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no", "n"].includes(normalized)) {
+      return false;
     }
   }
   return fallback;

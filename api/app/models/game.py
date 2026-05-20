@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.character import Character
     from app.models.lore import LoreEntry
     from app.models.mode import Mode
+    from app.models.progress_save import GameProgressSave
     from app.models.setting_version import GameSettingVersion
     from app.models.state import GameState
     from app.models.state_delta import StateDelta
@@ -84,6 +85,11 @@ class Game(Base):
         back_populates="game",
         cascade="all, delete-orphan",
     )
+    progress_saves: Mapped[list[GameProgressSave]] = relationship(
+        back_populates="game",
+        cascade="all, delete-orphan",
+        order_by="GameProgressSave.updated_at.desc()",
+    )
 
 
 class GameConfig(Base):
@@ -99,6 +105,11 @@ class GameConfig(Base):
     system_prompt: Mapped[str | None] = mapped_column(Text)
     worldview: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     script_outline: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    generation_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
     generation_notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

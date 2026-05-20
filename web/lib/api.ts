@@ -17,6 +17,9 @@ import type {
   GeneratorChatJobRead,
   GeneratorFinalizeJobCreateResponse,
   GeneratorFinalizeJobRead,
+  GameProgressSaveCreate,
+  GameProgressSaveRead,
+  GameProgressSaveUpdate,
   GeneratedGameConfig,
   GeneratorChatResponse,
   GeneratorJobStreamEvent,
@@ -141,7 +144,7 @@ function formatApiErrorDetail(detail: unknown): string {
 
 function filenameFromContentDisposition(header: string | null): string {
   if (!header) {
-    return "RPGForge-剧本.md";
+    return "RPGForge-download";
   }
   const encodedMatch = /filename\*=UTF-8''([^;]+)/i.exec(header);
   if (encodedMatch?.[1]) {
@@ -152,7 +155,7 @@ function filenameFromContentDisposition(header: string | null): string {
     }
   }
   const plainMatch = /filename="?([^";]+)"?/i.exec(header);
-  return plainMatch?.[1] || "RPGForge-剧本.md";
+  return plainMatch?.[1] || "RPGForge-download";
 }
 
 export async function getGames(): Promise<GameListItem[]> {
@@ -165,6 +168,52 @@ export async function getGame(gameId: string): Promise<GameDetail> {
 
 export async function deleteGame(gameId: string): Promise<void> {
   return requestVoid(`/api/games/${gameId}`, { method: "DELETE" });
+}
+
+export async function getGameProgressSaves(gameId: string): Promise<GameProgressSaveRead[]> {
+  return requestJson<GameProgressSaveRead[]>(`/api/games/${gameId}/progress-saves`);
+}
+
+export async function createGameProgressSave(
+  gameId: string,
+  payload: GameProgressSaveCreate
+): Promise<GameProgressSaveRead> {
+  return requestJson<GameProgressSaveRead>(`/api/games/${gameId}/progress-saves`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateGameProgressSave(
+  gameId: string,
+  saveId: string,
+  payload: GameProgressSaveUpdate
+): Promise<GameProgressSaveRead> {
+  return requestJson<GameProgressSaveRead>(`/api/games/${gameId}/progress-saves/${saveId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function loadGameProgressSave(
+  gameId: string,
+  saveId: string
+): Promise<GameDetail> {
+  return requestJson<GameDetail>(`/api/games/${gameId}/progress-saves/${saveId}/load`, {
+    method: "POST"
+  });
+}
+
+export async function deleteGameProgressSave(gameId: string, saveId: string): Promise<void> {
+  return requestVoid(`/api/games/${gameId}/progress-saves/${saveId}`, {
+    method: "DELETE"
+  });
+}
+
+export async function restartGameProgress(gameId: string): Promise<GameDetail> {
+  return requestJson<GameDetail>(`/api/games/${gameId}/progress/restart`, {
+    method: "POST"
+  });
 }
 
 export async function getGameScriptExport(
@@ -197,6 +246,48 @@ export async function getGameScriptExport(
     blob: await response.blob(),
     filename: filenameFromContentDisposition(response.headers.get("Content-Disposition"))
   };
+}
+
+export async function getGameSettingsExport(
+  gameId: string
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/games/${encodeURIComponent(gameId)}/settings-export`,
+    {
+      headers: {
+        Accept: "application/json"
+      },
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as ApiErrorBody;
+      if (body.detail) {
+        message = formatApiErrorDetail(body.detail);
+      }
+    } catch {
+      // Keep the HTTP fallback.
+    }
+    throw new Error(message);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition"))
+  };
+}
+
+export async function importGameSettings(
+  gameId: string,
+  payload: unknown
+): Promise<GameDetail> {
+  return requestJson<GameDetail>(`/api/games/${gameId}/settings-import`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function getGameMemory(gameId: string): Promise<GameMemoryRead> {

@@ -2,9 +2,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.turn import TurnRead
+from app.services.generation_settings import normalize_generation_settings
 
 
 class GameCreate(BaseModel):
@@ -21,9 +22,15 @@ class GameConfigRead(BaseModel):
     system_prompt: str | None
     worldview: dict[str, Any]
     script_outline: dict[str, Any]
+    generation_settings: dict[str, Any] = Field(default_factory=dict)
     generation_notes: str | None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("generation_settings", mode="before")
+    @classmethod
+    def _normalize_generation_settings(cls, value: Any) -> dict[str, int]:
+        return normalize_generation_settings(value)
 
 
 class LoreEntryRead(BaseModel):
@@ -103,6 +110,7 @@ class GameConfigUpdate(BaseModel):
     description: str | None = None
     system_prompt: str | None = None
     generation_notes: str | None = None
+    generation_settings: Any | None = None
     worldview: WorldviewUpdate | None = None
     worldview_json: Any | None = None
     script_outline_json: Any | None = None
@@ -259,3 +267,27 @@ class LoreReindexResponse(BaseModel):
 class SummaryRebuildResponse(BaseModel):
     total: int
     summaries: list[SummaryRead]
+
+
+class GameProgressSaveCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class GameProgressSaveUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class GameProgressSaveRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    game_id: UUID
+    name: str
+    note: str | None
+    state_current_turn: int
+    turn_count: int
+    summary_count: int
+    created_at: datetime
+    updated_at: datetime

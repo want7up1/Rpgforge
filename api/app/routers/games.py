@@ -1,3 +1,4 @@
+import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,14 +42,34 @@ from app.services.context_compressor import ContextCompressor
 from app.services.context_diagnostics import ContextDiagnosticService
 from app.services.game_activity import touch_game
 from app.services.game_creator import build_manual_generated_config, create_game_from_config
+from app.services.generation_settings import normalize_generation_settings
 from app.services.lore_retriever import LoreRetriever
 from app.services.script_exporter import export_game_script_markdown, script_export_filename
+from app.services.settings_export_guide import (
+    settings_export_ai_editing_guide,
+    settings_export_field_guide,
+)
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
 from app.services.story_blueprint import merge_required_script_fields, protect_user_brief_contract
 from app.services.text_vectorizer import text_to_vector
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 DB_DEPENDENCY = Depends(get_db)
+SETTINGS_EXPORT_FORMAT_VERSION = "rpgforge.settings.v1"
+SETTINGS_IMPORT_MODE_PROTECTED = "protected"
+SETTINGS_IMPORT_MODE_REPLACE_ALL = "replace_all"
+ACCEPTED_SETTINGS_IMPORT_MODES = {
+    SETTINGS_IMPORT_MODE_PROTECTED,
+    SETTINGS_IMPORT_MODE_REPLACE_ALL,
+}
+ACCEPTED_SETTINGS_FORMAT_VERSIONS = {
+    SETTINGS_EXPORT_FORMAT_VERSION,
+    "rpgforge_settings_v1",
+    "1",
+    1,
+}
+CHARACTER_ROLES = {"protagonist", "npc", "companion", "other"}
+CHARACTER_VISIBILITIES = {"visible", "hidden"}
 
 
 def game_detail_query(game_id: UUID, *, include_turns: bool = False):
@@ -139,6 +160,43 @@ def export_game_script(game_id: UUID, db: Session = DB_DEPENDENCY) -> Response:
     )
 
 
+@router.get("/{game_id}/settings-export")
+def export_game_settings(game_id: UUID, db: Session = DB_DEPENDENCY) -> Response:
+    game = _get_game_for_settings_transfer(db, game_id)
+    filename = _settings_export_filename(game.title)
+    return Response(
+        content=json.dumps(_settings_export_payload(game), ensure_ascii=False, indent=2),
+        media_type="application/json; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        },
+    )
+
+
+@router.post("/{game_id}/settings-import", response_model=GameDetail)
+def import_game_settings(
+    game_id: UUID,
+    payload: dict[str, Any],
+    db: Session = DB_DEPENDENCY,
+) -> GameDetail:
+    game = _get_game_for_settings_transfer(db, game_id)
+    _assert_settings_editable(db, game_id)
+    _apply_settings_import(db, game, payload)
+    touch_game(db, game_id)
+    db.add(game)
+    db.flush()
+    _save_setting_version(
+        db,
+        game_id,
+        "settings_import",
+        None,
+        "imported",
+        _settings_export_payload(game, include_guides=False),
+    )
+    db.commit()
+    return game_detail_response(get_game_or_404(db, game_id))
+
+
 @router.delete("/{game_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_game(game_id: UUID, db: Session = DB_DEPENDENCY) -> None:
     game = get_game_or_404(db, game_id)
@@ -168,7 +226,7 @@ def update_game_config(
     game = get_game_or_404(db, game_id)
     _assert_settings_editable(db, game_id)
     if game.config is None:
-        game.config = GameConfig(worldview={}, script_outline={})
+        game.config = GameConfig(worldview={}, script_outline={}, generation_settings={})
         db.add(game.config)
         db.flush()
 
@@ -185,6 +243,10 @@ def update_game_config(
         game.config.system_prompt = _clean_optional(updates["system_prompt"])
     if "generation_notes" in updates:
         game.config.generation_notes = _clean_optional(updates["generation_notes"])
+    if "generation_settings" in updates:
+        game.config.generation_settings = normalize_generation_settings(
+            updates["generation_settings"]
+        )
 
     if updates.get("worldview_json") is not None:
         worldview = _json_object(updates["worldview_json"], "worldview_json")
@@ -524,6 +586,386 @@ def _lore_memory_payload(entry) -> LoreEntryMemoryRead:
     return LoreEntryMemoryRead.model_validate(payload)
 
 
+def _get_game_for_settings_transfer(db: Session, game_id: UUID) -> Game:
+    game = db.scalars(
+        select(Game)
+        .options(
+            selectinload(Game.config),
+            selectinload(Game.lore_entries),
+            selectinload(Game.modes),
+            selectinload(Game.characters),
+        )
+        .where(Game.id == game_id)
+    ).first()
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found.")
+    return game
+
+
+def _settings_export_filename(title: str) -> str:
+    safe_title = "".join(
+        character if character.isalnum() or character in ("-", "_") else "-"
+        for character in title.strip()
+    ).strip("-")
+    return f"RPGForge-{safe_title or 'settings'}-settings.json"
+
+
+def _settings_export_payload(game: Game, *, include_guides: bool = True) -> dict[str, Any]:
+    config = game.config
+    payload: dict[str, Any] = {
+        "format_version": SETTINGS_EXPORT_FORMAT_VERSION,
+        "import_mode": SETTINGS_IMPORT_MODE_REPLACE_ALL,
+    }
+    if include_guides:
+        payload["_ai_editing_guide"] = settings_export_ai_editing_guide()
+        payload["_field_guide"] = settings_export_field_guide()
+    payload.update(
+        {
+            "game": {
+                "title": game.title,
+                "genre": game.genre,
+                "description": game.description,
+                "status": game.status,
+            },
+            "system_prompt": config.system_prompt if config else None,
+            "generation_notes": config.generation_notes if config else None,
+            "generation_settings": normalize_generation_settings(
+                config.generation_settings if config else None
+            ),
+            "worldview": config.worldview if config else {},
+            "script_outline": config.script_outline if config else {},
+            "lore_entries": [_lore_export_payload(entry) for entry in game.lore_entries],
+            "modes": [_mode_export_payload(mode) for mode in game.modes],
+            "characters": [_character_export_payload(character) for character in game.characters],
+        }
+    )
+    return payload
+
+
+def _lore_export_payload(entry: LoreEntry) -> dict[str, Any]:
+    return {
+        "title": entry.title,
+        "type": entry.type,
+        "keywords": entry.keywords,
+        "trigger_words": entry.trigger_words,
+        "priority": entry.priority,
+        "always_on": entry.always_on,
+        "visibility": entry.visibility,
+        "public_info": entry.public_info,
+        "gm_secret": entry.gm_secret,
+        "content": entry.content,
+        "usage_note": entry.usage_note,
+        "is_active": entry.is_active,
+    }
+
+
+def _mode_export_payload(mode: Mode) -> dict[str, Any]:
+    return {
+        "name": mode.name,
+        "triggers": mode.triggers,
+        "injection": mode.injection,
+        "priority": mode.priority,
+        "enabled": mode.enabled,
+    }
+
+
+def _character_export_payload(character: Character) -> dict[str, Any]:
+    return {
+        "id": str(character.id),
+        "name": character.name,
+        "aliases": character.aliases,
+        "role": character.role,
+        "identity": character.identity,
+        "description": character.description,
+        "appearance": character.appearance,
+        "story_profile": character.story_profile,
+        "portrait_prompt": character.portrait_prompt,
+        "visibility": character.visibility,
+        "is_visible": character.is_visible,
+        "source": character.source,
+        "sync_meta": character.sync_meta,
+        "manual_fields": character.manual_fields,
+    }
+
+
+def _apply_settings_import(db: Session, game: Game, payload: dict[str, Any]) -> None:
+    format_version = payload.get("format_version")
+    if format_version not in ACCEPTED_SETTINGS_FORMAT_VERSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="settings JSON format_version 不受支持。",
+        )
+    import_mode = str(payload.get("import_mode") or SETTINGS_IMPORT_MODE_PROTECTED).strip()
+    if import_mode not in ACCEPTED_SETTINGS_IMPORT_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="settings JSON import_mode 不受支持。",
+        )
+    replace_all = import_mode == SETTINGS_IMPORT_MODE_REPLACE_ALL
+
+    if game.config is None:
+        game.config = GameConfig(worldview={}, script_outline={}, generation_settings={})
+        db.add(game.config)
+        db.flush()
+
+    _ensure_baseline_version(db, game, "config", None, _config_snapshot(game))
+
+    game_payload = _optional_record(payload.get("game"), "game")
+    config_payload = _optional_record(payload.get("config"), "config")
+    game.title = _clean_required(
+        game_payload.get("title", game.title),
+        "导入设置中的标题不能为空。",
+    )
+    if "genre" in game_payload:
+        game.genre = _clean_optional(game_payload.get("genre"))
+    if "description" in game_payload:
+        game.description = _clean_optional(game_payload.get("description"))
+    if "status" in game_payload:
+        game_status = _clean_required(
+            game_payload.get("status"),
+            "导入设置中的游戏状态不能为空。",
+        )
+        if len(game_status) > 32:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="导入设置中的游戏状态不能超过 32 个字符。",
+            )
+        game.status = game_status
+
+    system_prompt = _pick_import_value(payload, config_payload, "system_prompt")
+    if system_prompt is not _MISSING:
+        game.config.system_prompt = _clean_optional(system_prompt)
+    generation_notes = _pick_import_value(payload, config_payload, "generation_notes")
+    if generation_notes is not _MISSING:
+        game.config.generation_notes = _clean_optional(generation_notes)
+
+    generation_settings = _pick_import_value(payload, config_payload, "generation_settings")
+    game.config.generation_settings = normalize_generation_settings(
+        {} if generation_settings is _MISSING else generation_settings
+    )
+
+    worldview = _pick_import_value(payload, config_payload, "worldview")
+    game.config.worldview = _json_object({} if worldview is _MISSING else worldview, "worldview")
+
+    existing_script_outline = dict(game.config.script_outline or {})
+    script_outline = _pick_import_value(payload, config_payload, "script_outline")
+    imported_script_outline = _json_object(
+        {} if script_outline is _MISSING else script_outline,
+        "script_outline",
+    )
+    if replace_all:
+        game.config.script_outline = imported_script_outline
+    else:
+        game.config.script_outline = protect_user_brief_contract(
+            merge_required_script_fields(imported_script_outline, existing_script_outline)
+        )
+
+    game.lore_entries = [
+        _lore_entry_from_import(item)
+        for item in _list_of_records(payload.get("lore_entries"), "lore_entries")
+    ]
+    game.modes = [
+        _mode_from_import(item)
+        for item in _list_of_records(payload.get("modes"), "modes")
+    ]
+    if replace_all:
+        game.characters = _characters_from_import(
+            game,
+            _list_of_records(payload.get("characters"), "characters"),
+        )
+
+
+_MISSING = object()
+
+
+def _pick_import_value(
+    payload: dict[str, Any],
+    config_payload: dict[str, Any],
+    key: str,
+) -> Any:
+    if key in config_payload:
+        return config_payload[key]
+    if key in payload:
+        return payload[key]
+    return _MISSING
+
+
+def _optional_record(value: Any, label: str) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    return _json_object(value, label)
+
+
+def _list_of_records(value: Any, label: str) -> list[dict[str, Any]]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label} 必须是 JSON 数组。",
+        )
+    records: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{label}[{index}] 必须是 JSON 对象。",
+            )
+        records.append(item)
+    return records
+
+
+def _lore_entry_from_import(item: dict[str, Any]) -> LoreEntry:
+    entry = LoreEntry(
+        title=_clean_required(item.get("title"), "世界资料标题不能为空。"),
+        type=_clean_optional(item.get("type")),
+        keywords=_clean_payload_list(item.get("keywords")),
+        trigger_words=_clean_payload_list(item.get("trigger_words")),
+        priority=_clean_optional(item.get("priority")) or "medium",
+        always_on=_bool_value(item.get("always_on"), False),
+        visibility=_clean_optional(item.get("visibility")) or "mixed",
+        public_info=_clean_optional(item.get("public_info")),
+        gm_secret=_clean_optional(item.get("gm_secret")),
+        content=_clean_required(item.get("content"), "世界资料内容不能为空。"),
+        usage_note=_clean_optional(item.get("usage_note")),
+        is_active=_bool_value(item.get("is_active"), True),
+    )
+    entry.archived_at = None if entry.is_active else datetime.now(UTC)
+    entry.embedding = _lore_embedding(entry)
+    return entry
+
+
+def _mode_from_import(item: dict[str, Any]) -> Mode:
+    return Mode(
+        name=_clean_required(item.get("name"), "模式名称不能为空。"),
+        triggers=_clean_payload_list(item.get("triggers")),
+        injection=_clean_required(item.get("injection"), "模式注入不能为空。"),
+        priority=_clean_optional(item.get("priority")) or "medium",
+        enabled=_bool_value(item.get("enabled"), True),
+    )
+
+
+def _characters_from_import(game: Game, records: list[dict[str, Any]]) -> list[Character]:
+    existing_characters = list(game.characters)
+    existing_by_id = {character.id: character for character in existing_characters}
+    existing_by_name = {character.name: character for character in existing_characters}
+    imported_characters: list[Character] = []
+    used_existing_ids: set[UUID] = set()
+    seen_names: set[str] = set()
+
+    for index, item in enumerate(records):
+        label = f"characters[{index}]"
+        imported_id = _optional_uuid(item.get("id"), f"{label}.id")
+        imported_name = _clean_required(item.get("name"), f"{label}.name 不能为空。")
+        character = existing_by_id.get(imported_id) if imported_id else None
+        if character is None:
+            character = existing_by_name.get(imported_name)
+        if character is not None and character.id in used_existing_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{label} 重复引用了同一个角色。",
+            )
+
+        character = _character_from_import(item, label, character)
+        if character.name in seen_names:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{label}.name 与其他导入角色重复。",
+            )
+        seen_names.add(character.name)
+        if character.id is not None:
+            used_existing_ids.add(character.id)
+        imported_characters.append(character)
+
+    return imported_characters
+
+
+def _character_from_import(
+    item: dict[str, Any],
+    label: str,
+    existing: Character | None,
+) -> Character:
+    character = existing or Character()
+    role = _clean_optional(item.get("role")) or "npc"
+    if role not in CHARACTER_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label}.role 必须是 protagonist、npc、companion 或 other。",
+        )
+    visibility = _clean_optional(item.get("visibility")) or "visible"
+    if visibility not in CHARACTER_VISIBILITIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label}.visibility 必须是 visible 或 hidden。",
+        )
+    source = _clean_optional(item.get("source")) or "settings_import"
+    if len(source) > 32:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label}.source 不能超过 32 个字符。",
+        )
+
+    character.name = _clean_required(item.get("name"), f"{label}.name 不能为空。")
+    character.aliases = _clean_payload_list(item.get("aliases"))
+    character.role = role
+    character.identity = _clean_optional(item.get("identity"))
+    character.description = _clean_optional(item.get("description"))
+    character.appearance = _clean_optional(item.get("appearance"))
+    character.story_profile = _optional_json_object(
+        item.get("story_profile"),
+        f"{label}.story_profile",
+    )
+    character.portrait_prompt = _clean_optional(item.get("portrait_prompt"))
+    character.visibility = visibility
+    character.is_visible = _bool_value(item.get("is_visible"), visibility == "visible")
+    character.source = source
+    character.sync_meta = _optional_json_object(item.get("sync_meta"), f"{label}.sync_meta")
+    character.manual_fields = _clean_payload_list(item.get("manual_fields"))
+    return character
+
+
+def _optional_uuid(value: Any, label: str) -> UUID | None:
+    if value in (None, ""):
+        return None
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{label} 必须是合法 UUID。",
+        ) from exc
+
+
+def _optional_json_object(value: Any, label: str) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    return _json_object(value, label)
+
+
+def _clean_payload_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return _clean_list(value)
+    if isinstance(value, str):
+        return _clean_list([value])
+    return _clean_list([str(value)])
+
+
+def _bool_value(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y", "on"}:
+            return True
+        if text in {"false", "0", "no", "n", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
 def _assert_settings_editable(db: Session, game_id: UUID) -> None:
     active_turn_job = db.scalars(
         select(TurnJob)
@@ -574,6 +1016,9 @@ def _config_snapshot(game: Game) -> dict:
         "system_prompt": config.system_prompt if config else None,
         "worldview": config.worldview if config else {},
         "script_outline": config.script_outline if config else {},
+        "generation_settings": normalize_generation_settings(
+            config.generation_settings if config else None
+        ),
         "generation_notes": config.generation_notes if config else None,
     }
 
@@ -742,7 +1187,7 @@ def _get_mode_or_404(db: Session, game_id: UUID, mode_id: UUID) -> Mode:
 
 def _restore_config_snapshot(game: Game, snapshot: dict) -> None:
     if game.config is None:
-        game.config = GameConfig(worldview={}, script_outline={})
+        game.config = GameConfig(worldview={}, script_outline={}, generation_settings={})
     game.title = _clean_required(snapshot.get("title"), "版本中的标题为空，无法恢复。")
     game.genre = _clean_optional(snapshot.get("genre"))
     game.description = _clean_optional(snapshot.get("description"))
@@ -753,6 +1198,9 @@ def _restore_config_snapshot(game: Game, snapshot: dict) -> None:
     )
     game.config.script_outline = (
         snapshot.get("script_outline") if isinstance(snapshot.get("script_outline"), dict) else {}
+    )
+    game.config.generation_settings = normalize_generation_settings(
+        snapshot.get("generation_settings")
     )
 
 

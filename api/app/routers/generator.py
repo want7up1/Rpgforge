@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import UUID
@@ -29,7 +28,7 @@ from app.services.game_creator import create_game_from_config
 from app.services.game_generator import GameGeneratorService, ModelOutputValidationError
 from app.services.generator_stream_events import generator_stream_event_broker
 from app.services.job_queue import enqueue_chat_job, enqueue_finalize_job
-from app.services.turn_stream_events import format_sse_event
+from app.services.turn_stream_events import TurnStreamEvent, format_sse_event
 
 router = APIRouter(prefix="/api/generator", tags=["generator"])
 SSE_HEADERS = {
@@ -130,22 +129,21 @@ async def stream_chat_job_events(
     job_id: UUID,
     request: Request,
 ) -> StreamingResponse:
-    queue = generator_stream_event_broker.subscribe(job_id)
-    try:
-        initial_job = _load_chat_job_snapshot(job_id)
-        if initial_job is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Chat job not found.",
-            )
-    except HTTPException:
-        generator_stream_event_broker.unsubscribe(job_id, queue)
-        raise
+    latest_stream_entry = generator_stream_event_broker.latest_stream_entry(job_id)
+    latest_stream_event = latest_stream_entry[1] if latest_stream_entry is not None else None
+    stream_cursor = latest_stream_entry[0] if latest_stream_entry is not None else "0-0"
+    initial_job = _load_chat_job_snapshot(job_id)
+    if initial_job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat job not found.",
+        )
 
     return _stream_generator_job_events(
         job_id=job_id,
         request=request,
-        queue=queue,
+        stream_cursor=stream_cursor,
+        latest_stream_event=latest_stream_event,
         initial_job=initial_job,
         load_job_snapshot=lambda: _load_chat_job_snapshot(job_id),
     )
@@ -233,22 +231,21 @@ async def stream_finalize_job_events(
     job_id: UUID,
     request: Request,
 ) -> StreamingResponse:
-    queue = generator_stream_event_broker.subscribe(job_id)
-    try:
-        initial_job = _load_finalize_job_snapshot(job_id)
-        if initial_job is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Finalize job not found.",
-            )
-    except HTTPException:
-        generator_stream_event_broker.unsubscribe(job_id, queue)
-        raise
+    latest_stream_entry = generator_stream_event_broker.latest_stream_entry(job_id)
+    latest_stream_event = latest_stream_entry[1] if latest_stream_entry is not None else None
+    stream_cursor = latest_stream_entry[0] if latest_stream_entry is not None else "0-0"
+    initial_job = _load_finalize_job_snapshot(job_id)
+    if initial_job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Finalize job not found.",
+        )
 
     return _stream_generator_job_events(
         job_id=job_id,
         request=request,
-        queue=queue,
+        stream_cursor=stream_cursor,
+        latest_stream_event=latest_stream_event,
         initial_job=initial_job,
         load_job_snapshot=lambda: _load_finalize_job_snapshot(job_id),
     )
@@ -325,67 +322,46 @@ def _stream_generator_job_events(
     *,
     job_id: UUID,
     request: Request,
-    queue: asyncio.Queue,
+    stream_cursor: str,
+    latest_stream_event: TurnStreamEvent | None,
     initial_job: GeneratorChatJobRead | GeneratorFinalizeJobRead,
     load_job_snapshot: Callable[[], GeneratorChatJobRead | GeneratorFinalizeJobRead | None],
 ) -> StreamingResponse:
     async def event_stream():
         last_snapshot_signature = _generator_job_signature(initial_job)
-        try:
-            yield format_sse_event(
-                "snapshot",
-                {
-                    "type": "snapshot",
-                    "job": initial_job,
-                    "terminal": initial_job.status in {"completed", "failed"},
-                },
-            )
+        last_stream_id = stream_cursor
+        yield format_sse_event(
+            "snapshot",
+            {
+                "type": "snapshot",
+                "job": initial_job,
+                "terminal": initial_job.status in {"completed", "failed"},
+            },
+        )
 
-            latest_event = generator_stream_event_broker.latest(job_id)
-            if latest_event:
-                yield format_sse_event(str(latest_event.get("type", "message")), latest_event)
-                if latest_event.get("terminal"):
-                    return
+        if initial_job.status in {"completed", "failed"}:
+            return
 
-            if initial_job.status in {"completed", "failed"}:
+        if latest_stream_event is not None:
+            event_type = str(latest_stream_event.get("type", "message"))
+            event_job = latest_stream_event.get("job")
+            if event_job is not None:
+                last_snapshot_signature = _generator_job_signature(event_job)
+            yield format_sse_event(event_type, latest_stream_event)
+            if latest_stream_event.get("terminal"):
                 return
 
-            while True:
-                if await request.is_disconnected():
-                    return
-                try:
-                    event = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=SSE_DB_SNAPSHOT_INTERVAL_SECONDS,
-                    )
-                except TimeoutError:
-                    fresh_job = load_job_snapshot()
-                    if fresh_job is None:
-                        return
-                    terminal = fresh_job.status in {"completed", "failed"}
-                    fresh_signature = _generator_job_signature(fresh_job)
-                    if terminal or fresh_signature != last_snapshot_signature:
-                        last_snapshot_signature = fresh_signature
-                        yield format_sse_event(
-                            "snapshot",
-                            {
-                                "type": "snapshot",
-                                "job": fresh_job,
-                                "terminal": terminal,
-                            },
-                        )
-                        if terminal:
-                            return
-                    yield format_sse_event(
-                        "heartbeat",
-                        {
-                            "type": "heartbeat",
-                            "job_id": str(job_id),
-                            "sent_at": datetime.now(UTC).isoformat(),
-                        },
-                    )
-                    continue
+        while True:
+            if await request.is_disconnected():
+                return
 
+            stream_event = await generator_stream_event_broker.read_stream_event(
+                job_id,
+                last_stream_id,
+                timeout_seconds=SSE_DB_SNAPSHOT_INTERVAL_SECONDS,
+            )
+            if stream_event is not None:
+                last_stream_id, event = stream_event
                 event_type = str(event.get("type", "message"))
                 event_job = event.get("job")
                 if event_job is not None:
@@ -393,8 +369,32 @@ def _stream_generator_job_events(
                 yield format_sse_event(event_type, event)
                 if event.get("terminal"):
                     return
-        finally:
-            generator_stream_event_broker.unsubscribe(job_id, queue)
+
+            fresh_job = load_job_snapshot()
+            if fresh_job is None:
+                return
+            terminal = fresh_job.status in {"completed", "failed"}
+            fresh_signature = _generator_job_signature(fresh_job)
+            if terminal or fresh_signature != last_snapshot_signature:
+                last_snapshot_signature = fresh_signature
+                yield format_sse_event(
+                    "snapshot",
+                    {
+                        "type": "snapshot",
+                        "job": fresh_job,
+                        "terminal": terminal,
+                    },
+                )
+                if terminal:
+                    return
+            yield format_sse_event(
+                "heartbeat",
+                {
+                    "type": "heartbeat",
+                    "job_id": str(job_id),
+                    "sent_at": datetime.now(UTC).isoformat(),
+                },
+            )
 
     return StreamingResponse(
         event_stream(),

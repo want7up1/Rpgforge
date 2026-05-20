@@ -14,9 +14,22 @@ export type GameConfigRead = {
   system_prompt: string | null;
   worldview: Record<string, unknown>;
   script_outline: Record<string, unknown>;
+  generation_settings: GenerationSettings;
   generation_notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type GenerationSettings = {
+  narrative_target_min_chars?: number;
+  narrative_target_max_chars?: number;
+  narrative_min_chars?: number;
+  paragraph_min?: number;
+  paragraph_max?: number;
+  scene_heading_max?: number;
+  emphasis_min?: number;
+  emphasis_max?: number;
+  recent_turn_excerpt_chars?: number;
 };
 
 export type StoryBlueprintPayload = Record<string, unknown>;
@@ -99,6 +112,7 @@ export type GameConfigUpdate = {
   description?: string | null;
   system_prompt?: string | null;
   generation_notes?: string | null;
+  generation_settings?: GenerationSettings | null;
   worldview?: WorldviewUpdate | null;
   worldview_json?: Record<string, unknown> | null;
   script_outline_json?: Record<string, unknown> | null;
@@ -392,6 +406,28 @@ export type LoreReindexResponse = {
 export type SummaryRebuildResponse = {
   total: number;
   summaries: SummaryRead[];
+};
+
+export type GameProgressSaveRead = {
+  id: string;
+  game_id: string;
+  name: string;
+  note: string | null;
+  state_current_turn: number;
+  turn_count: number;
+  summary_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type GameProgressSaveCreate = {
+  name: string;
+  note?: string | null;
+};
+
+export type GameProgressSaveUpdate = {
+  name?: string | null;
+  note?: string | null;
 };
 
 export type GeneratorMessage = {

@@ -26,6 +26,8 @@ def normalize_state_v2(
     skills = _skill_view(state.get("skills"))
     abilities = _ability_view(state.get("abilities"))
     conditions = _condition_view(state.get("conditions"))
+    story_progress = _story_progress(state.get("story_progress"))
+    state["story_progress"] = story_progress
 
     state["v2"] = {
         "version": STATE_V2_VERSION,
@@ -49,6 +51,7 @@ def normalize_state_v2(
         "npc_registry": _npc_registry(npcs),
         "quest_log": _quest_log(quests),
         "open_threads": _thread_log(state.get("open_threads")),
+        "story_progress": story_progress,
         "relationship_tracks": _relationship_tracks(state.get("relationships"), npcs),
     }
     return state
@@ -237,6 +240,64 @@ def _thread_item(thread: Any) -> dict[str, Any]:
 def _thread_is_resolved(thread: dict[str, Any]) -> bool:
     text = "\n".join(_first_text(thread.get(key)) for key in ("title", "status"))
     return any(marker in text for marker in ("完成", "解决", "关闭", "resolved", "closed"))
+
+
+def _story_progress(value: Any) -> dict[str, Any]:
+    progress = _mapping(value)
+    return {
+        "current_act": _first_text(progress.get("current_act"), progress.get("act")),
+        "completed_acts": _unique_texts(progress.get("completed_acts")),
+        "completed_anchors": _unique_texts(progress.get("completed_anchors")),
+        "ready_for_next_act": _bool(progress.get("ready_for_next_act"), False),
+        "last_advance_turn": _optional_nonnegative_int(progress.get("last_advance_turn")),
+        "last_advance_reason": _first_text(progress.get("last_advance_reason")),
+        "last_anchor_update_turn": _optional_nonnegative_int(
+            progress.get("last_anchor_update_turn")
+        ),
+        "act_history": _act_history(progress.get("act_history")),
+        "anchor_history": _anchor_history(progress.get("anchor_history")),
+    }
+
+
+def _act_history(value: Any) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    for item in _list(value)[-20:]:
+        if not isinstance(item, dict):
+            continue
+        record = {
+            "turn": _optional_nonnegative_int(item.get("turn")),
+            "from_act": _first_text(item.get("from_act")),
+            "to_act": _first_text(item.get("to_act")),
+            "reason": _first_text(item.get("reason")),
+        }
+        if record["from_act"] or record["to_act"] or record["reason"]:
+            history.append(record)
+    return history
+
+
+def _anchor_history(value: Any) -> list[dict[str, Any]]:
+    history: list[dict[str, Any]] = []
+    for item in _list(value)[-30:]:
+        if not isinstance(item, dict):
+            continue
+        record = {
+            "turn": _optional_nonnegative_int(item.get("turn")),
+            "act": _first_text(item.get("act")),
+            "anchor_id": _first_text(item.get("anchor_id"), item.get("id")),
+            "reason": _first_text(item.get("reason")),
+        }
+        if record["anchor_id"]:
+            history.append(record)
+    return history
+
+
+def _unique_texts(value: Any) -> list[str]:
+    texts: list[str] = []
+    for item in _list(value):
+        text = _identity(item)
+        if text and text not in texts:
+            texts.append(text)
+    return texts
 
 
 def _progression(state: dict[str, Any]) -> dict[str, Any]:
@@ -439,6 +500,24 @@ def _int(value: Any, default: int) -> int:
 
 def _positive_int(value: Any, default: int) -> int:
     return max(1, _int(value, default))
+
+
+def _optional_nonnegative_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    return max(0, _int(value, 0))
+
+
+def _bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y"}:
+            return True
+        if text in {"false", "0", "no", "n"}:
+            return False
+    return default
 
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:

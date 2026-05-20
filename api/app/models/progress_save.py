@@ -15,24 +15,34 @@ if TYPE_CHECKING:
     from app.models.game import Game
 
 
-class GameState(Base):
-    __tablename__ = "game_states"
+class GameProgressSave(Base):
+    __tablename__ = "game_progress_saves"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     game_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("games.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,
+        index=True,
     )
-    current_turn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    state_current_turn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     state_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    initial_state_json: Mapped[dict[str, Any]] = mapped_column(
+    state_summary: Mapped[str | None] = mapped_column(Text)
+    turns_json: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list)
+    summaries_json: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
-        default=dict,
+        default=list,
     )
-    summary: Mapped[str | None] = mapped_column(Text)
+    state_deltas_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -45,4 +55,4 @@ class GameState(Base):
         nullable=False,
     )
 
-    game: Mapped[Game] = relationship(back_populates="state")
+    game: Mapped[Game] = relationship(back_populates="progress_saves")

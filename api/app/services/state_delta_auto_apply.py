@@ -8,7 +8,7 @@ from app.models.game import Game
 from app.models.state_delta import StateDelta
 from app.models.turn import Turn
 from app.services.game_activity import touch_game
-from app.services.state_applier import apply_state_delta
+from app.services.state_rebuilder import rebuild_game_state, sync_turn_state_delta
 
 AUTO_APPLY_STATUSES = {"pending", "edited"}
 
@@ -34,12 +34,14 @@ def apply_pending_state_deltas(db: Session, game: Game) -> bool:
 
     approved_at = datetime.now(UTC)
     for delta in deltas:
-        game.state.state_json = apply_state_delta(game.state, delta.turn, delta.delta_json)
-        game.state.current_turn = max(game.state.current_turn, delta.turn.turn_number)
         delta.status = "approved"
         delta.approved_at = approved_at
+        sync_turn_state_delta(delta, active=True)
+        if delta.turn is not None:
+            db.add(delta.turn)
         db.add(delta)
 
+    rebuild_game_state(db, game)
     db.add(game.state)
     touch_game(db, game.id)
     db.commit()

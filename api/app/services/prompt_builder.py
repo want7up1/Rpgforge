@@ -5,6 +5,7 @@ from app.models.game import Game, GameConfig
 from app.models.lore import LoreEntry
 from app.models.mode import Mode
 from app.models.turn import Turn
+from app.services.generation_settings import normalize_generation_settings
 from app.services.lore_retriever import LoreRetrievalResult
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import state_v2_view
@@ -12,8 +13,6 @@ from app.services.story_blueprint import (
     build_campaign_contract_payload,
     build_story_blueprint,
 )
-
-RECENT_TURN_GM_OUTPUT_EXCERPT_CHARS = 420
 
 
 class PromptBuilder:
@@ -32,6 +31,9 @@ class PromptBuilder:
         config = game.config
         game_state = game.state
         always_on_lore = self._select_always_on_lore(game.lore_entries)
+        generation_settings = normalize_generation_settings(
+            config.generation_settings if config else None
+        )
 
         runtime_payload = {
             "game": {
@@ -42,8 +44,12 @@ class PromptBuilder:
             },
             "system_prompt": config.system_prompt if config else "",
             "worldview": config.worldview if config else {},
+            "generation_settings": generation_settings,
             "campaign_contract": self._campaign_contract_payload(config),
-            "story_blueprint": build_story_blueprint(config),
+            "story_blueprint": build_story_blueprint(
+                config,
+                game_state.state_json if game_state else {},
+            ),
             "selected_mode": self._mode_payload(selected_mode),
             "always_on_lore": [self._lore_payload(entry) for entry in always_on_lore],
             "related_lore": [
@@ -53,7 +59,10 @@ class PromptBuilder:
             "memory_summaries": summaries or {},
             "story_director": story_director or {},
             "drift_rewrite_instruction": drift_rewrite_instruction or "",
-            "recent_turns": [self._turn_payload(turn) for turn in recent_turns],
+            "recent_turns": [
+                self._turn_payload(turn, generation_settings["recent_turn_excerpt_chars"])
+                for turn in recent_turns
+            ],
             "player_input": player_input,
         }
 
@@ -118,7 +127,7 @@ class PromptBuilder:
         }
 
     @staticmethod
-    def _turn_payload(turn: Turn) -> dict[str, object]:
+    def _turn_payload(turn: Turn, excerpt_chars: int) -> dict[str, object]:
         return {
             "turn_number": turn.turn_number,
             "player_input": turn.player_input,
@@ -126,7 +135,7 @@ class PromptBuilder:
             "hidden_summary": turn.hidden_summary,
             "gm_output_excerpt": _trim_text(
                 turn.gm_output,
-                RECENT_TURN_GM_OUTPUT_EXCERPT_CHARS,
+                excerpt_chars,
             ),
             "action_options": turn.action_options_json,
         }

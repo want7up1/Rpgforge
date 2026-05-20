@@ -1,4 +1,3 @@
-import asyncio
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -252,72 +251,48 @@ async def stream_turn_job_events(
     job_id: UUID,
     request: Request,
 ) -> StreamingResponse:
-    queue = turn_stream_event_broker.subscribe(job_id)
-    try:
-        initial_job = _load_turn_job_snapshot(game_id, job_id)
-        if initial_job is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn job not found.")
-    except HTTPException:
-        turn_stream_event_broker.unsubscribe(job_id, queue)
-        raise
+    latest_stream_entry = turn_stream_event_broker.latest_stream_entry(job_id)
+    latest_stream_event = latest_stream_entry[1] if latest_stream_entry is not None else None
+    stream_cursor = latest_stream_entry[0] if latest_stream_entry is not None else "0-0"
+    initial_job = _load_turn_job_snapshot(game_id, job_id)
+    if initial_job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn job not found.")
 
     async def event_stream():
         last_snapshot_signature = _turn_job_signature(initial_job)
-        try:
-            yield format_sse_event(
-                "snapshot",
-                {
-                    "type": "snapshot",
-                    "job": initial_job,
-                    "terminal": initial_job.status in {"completed", "failed"},
-                },
-            )
+        last_stream_id = stream_cursor
+        yield format_sse_event(
+            "snapshot",
+            {
+                "type": "snapshot",
+                "job": initial_job,
+                "terminal": initial_job.status in {"completed", "failed"},
+            },
+        )
 
-            latest_event = turn_stream_event_broker.latest(job_id)
-            if latest_event:
-                yield format_sse_event(str(latest_event.get("type", "message")), latest_event)
-                if latest_event.get("terminal"):
-                    return
+        if initial_job.status in {"completed", "failed"}:
+            return
 
-            if initial_job.status in {"completed", "failed"}:
+        if latest_stream_event is not None:
+            event_type = str(latest_stream_event.get("type", "message"))
+            event_job = latest_stream_event.get("job")
+            if event_job is not None:
+                last_snapshot_signature = _turn_job_signature(event_job)
+            yield format_sse_event(event_type, latest_stream_event)
+            if latest_stream_event.get("terminal"):
                 return
 
-            while True:
-                if await request.is_disconnected():
-                    return
-                try:
-                    event = await asyncio.wait_for(
-                        queue.get(),
-                        timeout=SSE_DB_SNAPSHOT_INTERVAL_SECONDS,
-                    )
-                except TimeoutError:
-                    fresh_job = _load_turn_job_snapshot(game_id, job_id)
-                    if fresh_job is None:
-                        return
-                    terminal = fresh_job.status in {"completed", "failed"}
-                    fresh_signature = _turn_job_signature(fresh_job)
-                    if terminal or fresh_signature != last_snapshot_signature:
-                        last_snapshot_signature = fresh_signature
-                        yield format_sse_event(
-                            "snapshot",
-                            {
-                                "type": "snapshot",
-                                "job": fresh_job,
-                                "terminal": terminal,
-                            },
-                        )
-                        if terminal:
-                            return
-                    yield format_sse_event(
-                        "heartbeat",
-                        {
-                            "type": "heartbeat",
-                            "job_id": str(job_id),
-                            "sent_at": datetime.now(UTC).isoformat(),
-                        },
-                    )
-                    continue
+        while True:
+            if await request.is_disconnected():
+                return
 
+            stream_event = await turn_stream_event_broker.read_stream_event(
+                job_id,
+                last_stream_id,
+                timeout_seconds=SSE_DB_SNAPSHOT_INTERVAL_SECONDS,
+            )
+            if stream_event is not None:
+                last_stream_id, event = stream_event
                 event_type = str(event.get("type", "message"))
                 event_job = event.get("job")
                 if event_job is not None:
@@ -325,8 +300,32 @@ async def stream_turn_job_events(
                 yield format_sse_event(event_type, event)
                 if event.get("terminal"):
                     return
-        finally:
-            turn_stream_event_broker.unsubscribe(job_id, queue)
+
+            fresh_job = _load_turn_job_snapshot(game_id, job_id)
+            if fresh_job is None:
+                return
+            terminal = fresh_job.status in {"completed", "failed"}
+            fresh_signature = _turn_job_signature(fresh_job)
+            if terminal or fresh_signature != last_snapshot_signature:
+                last_snapshot_signature = fresh_signature
+                yield format_sse_event(
+                    "snapshot",
+                    {
+                        "type": "snapshot",
+                        "job": fresh_job,
+                        "terminal": terminal,
+                    },
+                )
+                if terminal:
+                    return
+            yield format_sse_event(
+                "heartbeat",
+                {
+                    "type": "heartbeat",
+                    "job_id": str(job_id),
+                    "sent_at": datetime.now(UTC).isoformat(),
+                },
+            )
 
     return StreamingResponse(
         event_stream(),

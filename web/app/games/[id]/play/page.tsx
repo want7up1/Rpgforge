@@ -74,6 +74,17 @@ export default function PlayPage() {
   const maintenanceActive = isTurnMaintenanceActive(turnProcess);
   const backgroundMaintenanceActive = isTurnBackgroundMaintenanceActive(turnProcess);
 
+  useEffect(() => {
+    document.documentElement.classList.add("gameplay-scroll-lock");
+    document.body.classList.add("gameplay-scroll-lock");
+    window.scrollTo(0, 0);
+
+    return () => {
+      document.documentElement.classList.remove("gameplay-scroll-lock");
+      document.body.classList.remove("gameplay-scroll-lock");
+    };
+  }, []);
+
   const refreshAfterTurnJob = useCallback(async (gameId: string, completedJob: TurnJobRead) => {
     const turn = completedJob.turn;
     if (!turn) {
@@ -374,9 +385,9 @@ function AdventureSidebar({
       <section className="mb-5 grid gap-2">
         <p className="text-xs font-black uppercase text-[color:var(--faint)]">Adventure</p>
         <div className="app-link-card">
-          <div className="flex items-center justify-between gap-3">
+          <div className="adventure-sidebar-card-title-row">
             <strong className="min-w-0 truncate">{game.title}</strong>
-            <span className="app-pill">{currentTurn}</span>
+            <span className="app-pill adventure-turn-pill">{currentTurn}</span>
           </div>
           <p className="text-xs leading-5 text-[color:var(--muted)]">
             {stateV2?.active_scene.location || game.genre || "当前冒险"}

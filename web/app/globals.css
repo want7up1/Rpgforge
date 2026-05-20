@@ -48,6 +48,12 @@ body {
   overscroll-behavior-y: auto;
 }
 
+html.gameplay-scroll-lock,
+body.gameplay-scroll-lock {
+  overflow: hidden;
+  overscroll-behavior-y: none;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -878,6 +884,22 @@ textarea.app-input {
   overflow: auto;
   overscroll-behavior: contain;
   padding: 1rem;
+}
+
+.adventure-sidebar-card-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.adventure-turn-pill {
+  flex: none;
+  min-width: 2rem;
+  justify-content: center;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .adventure-inspector {

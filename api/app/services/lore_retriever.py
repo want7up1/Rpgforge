@@ -227,7 +227,12 @@ class LoreRetriever:
             parts.extend([selected_mode.name, selected_mode.injection, *selected_mode.triggers])
         if game.state is not None:
             parts.extend(self._state_query_fragments(game.state.state_json))
-        parts.extend(story_blueprint_search_fragments(game.config))
+        parts.extend(
+            story_blueprint_search_fragments(
+                game.config,
+                game.state.state_json if game.state else {},
+            )
+        )
         for turn in recent_turns[-3:]:
             parts.extend(
                 [
