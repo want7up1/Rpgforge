@@ -41,8 +41,18 @@ def downgrade() -> None:
         sa.Column("embedding", postgresql.ARRAY(sa.Float()), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["game_id"], ["games.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_lore_entries_game_id", "lore_entries", ["game_id"])
@@ -57,8 +67,18 @@ def downgrade() -> None:
         sa.Column("injection", sa.Text(), nullable=False),
         sa.Column("priority", sa.Text(), nullable=True),
         sa.Column("enabled", sa.Boolean(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.now(),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(["game_id"], ["games.id"], ondelete="CASCADE"),
     )
     op.create_index("ix_modes_game_id", "modes", ["game_id"])

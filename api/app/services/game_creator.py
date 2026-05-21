@@ -101,7 +101,10 @@ def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
         initial_state_json=normalized_initial_state,
         summary="",
     )
-    game.characters = [_character_from_story_settings(item) for item in story_settings["core_characters"]]
+    game.characters = [
+        _character_from_story_settings(item)
+        for item in story_settings["core_characters"]
+    ]
 
     db.add(game)
     db.commit()

@@ -20,13 +20,13 @@ from app.services.prompt_builder import PromptBuilder
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
+from app.services.story_director import StoryDirector, StoryDirectorDecision
 from app.services.story_settings import (
     StoryMaterialResult,
     build_runtime_story,
     retrieve_story_materials,
     select_action_style,
 )
-from app.services.story_director import StoryDirector, StoryDirectorDecision
 
 logger = logging.getLogger(__name__)
 GameplayStreamUpdateCallback = Callable[[str, str, str | None], Awaitable[None]]
@@ -246,7 +246,8 @@ class GameplayService:
             if len(reveal_text) >= 4 and reveal_text in output_text:
                 return True
 
-        runtime_story = build_runtime_story(game.config, game.state.state_json if game.state else {})
+        state_json = game.state.state_json if game.state else {}
+        runtime_story = build_runtime_story(game.config, state_json)
         core = runtime_story.get("story_core") if isinstance(runtime_story, dict) else {}
         if not isinstance(core, dict):
             core = {}

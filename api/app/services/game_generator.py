@@ -348,7 +348,8 @@ class GameGeneratorService:
                     "上一次导演总纲输出不是完整合法 JSON，可能在长字符串或嵌套结构中被截断。"
                     "请重新生成完整 JSON object，保持原有剧情丰富度、字段完整度和设定细节，"
                     "不要输出 Markdown，不要解释。必须保留 game_profile、worldview、story_core、"
-                    "act_plan_outline、main_quest_path_outline、material_plan、hard_rules 和 generation_parameters。"
+                    "act_plan_outline、main_quest_path_outline、material_plan、"
+                    "hard_rules 和 generation_parameters。"
                 ),
             },
         ]

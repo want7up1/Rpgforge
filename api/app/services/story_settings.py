@@ -110,12 +110,29 @@ def normalize_story_settings(settings: Any) -> dict[str, Any]:
             },
             core,
         ),
-        "core_characters": [_character(item) for item in _records(source.get("core_characters"))],
-        "act_plan": [_act(item, index) for index, item in enumerate(_records(source.get("act_plan")))],
-        "main_quest_path": [_quest(item, index) for index, item in enumerate(_records(source.get("main_quest_path")))],
-        "core_mechanics": [_named_record(item, "未命名机制") for item in _records(source.get("core_mechanics"))],
-        "action_style_rules": [_action_style(item) for item in _records(source.get("action_style_rules"))],
-        "story_material_library": [_material(item) for item in _records(source.get("story_material_library"))],
+        "core_characters": [
+            _character(item) for item in _records(source.get("core_characters"))
+        ],
+        "act_plan": [
+            _act(item, index)
+            for index, item in enumerate(_records(source.get("act_plan")))
+        ],
+        "main_quest_path": [
+            _quest(item, index)
+            for index, item in enumerate(_records(source.get("main_quest_path")))
+        ],
+        "core_mechanics": [
+            _named_record(item, "未命名机制")
+            for item in _records(source.get("core_mechanics"))
+        ],
+        "action_style_rules": [
+            _action_style(item)
+            for item in _records(source.get("action_style_rules"))
+        ],
+        "story_material_library": [
+            _material(item)
+            for item in _records(source.get("story_material_library"))
+        ],
         "home_base": _record(source.get("home_base")),
         "hard_rules": _object_with_extra(
             {
@@ -254,7 +271,11 @@ def select_action_style(
             candidates.append((score, _priority_weight(style.get("priority")), -index, style))
     if candidates:
         return max(candidates, key=lambda item: (item[0], item[1], item[2]))[3]
-    enabled = [style for style in _records(story.get("action_style_rules")) if style.get("enabled") is not False]
+    enabled = [
+        style
+        for style in _records(story.get("action_style_rules"))
+        if style.get("enabled") is not False
+    ]
     return enabled[0] if enabled else None
 
 
@@ -418,7 +439,10 @@ def validate_story_settings(settings: Any) -> dict[str, Any]:
         for anchor_index, anchor in enumerate(_records(act.get("completion_anchors"))):
             anchor_id = _text(anchor.get("id"))
             if not anchor_id:
-                raise ValueError(f"act_plan[{index}].completion_anchors[{anchor_index}].id 不能为空。")
+                raise ValueError(
+                    f"act_plan[{index}].completion_anchors[{anchor_index}].id "
+                    "不能为空。"
+                )
             if anchor_id in anchor_ids:
                 raise ValueError(f"完成锚点 id 重复：{anchor_id}")
             anchor_ids.add(anchor_id)
