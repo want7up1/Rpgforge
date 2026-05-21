@@ -142,7 +142,7 @@ def recover_stale_jobs(connection: Redis | None = None) -> dict[str, int]:
                 continue
             _mark_stale_maintenance_failed(
                 job,
-                "状态维护执行超过超时阈值，已标记失败。下一回合仍可继续。",
+                "状态维护执行超过超时阈值，已标记失败；系统会在下次继续前自动重试。",
                 now,
             )
             counts["maintenance_timeout"] = counts.get("maintenance_timeout", 0) + 1
@@ -157,7 +157,7 @@ def recover_stale_jobs(connection: Redis | None = None) -> dict[str, int]:
                 continue
             _mark_stale_maintenance_failed(
                 job,
-                "状态维护仍在等待，但队列中已找不到对应任务。下一回合仍可继续。",
+                "状态维护仍在等待，但队列中已找不到对应任务；系统会在下次继续前自动重试。",
                 now,
             )
             counts["maintenance_pending_missing"] = (

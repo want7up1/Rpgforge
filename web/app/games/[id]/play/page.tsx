@@ -401,7 +401,7 @@ function AdventureSidebar({
       <section className="mb-5 grid gap-2">
         <p className="text-xs font-black uppercase text-[color:var(--faint)]">Tools</p>
         <Link className="app-button" href={`/games/${game.id}/memory`}>
-          世界资料 · {game.lore_entries.length}
+          剧本设定 · {storyMaterialCount(game)}
         </Link>
         <Link className="app-button" href={`/games/${game.id}/characters`}>
           角色档案
@@ -474,11 +474,11 @@ function AdventureInspector({
       </section>
 
       <section className="app-card app-card-pad mt-3">
-        <h3 className="font-semibold">世界资料</h3>
+        <h3 className="font-semibold">剧本素材</h3>
         <div className="mt-3 flex flex-wrap gap-2">
-          {game.lore_entries.slice(0, 6).map((entry) => (
-            <span className="app-pill" key={entry.id}>
-              {entry.title}
+          {storyMaterialTitles(game).map((title) => (
+            <span className="app-pill" key={title}>
+              {title}
             </span>
           ))}
         </div>
@@ -1095,4 +1095,33 @@ function formatStageElapsed(value: string | null, now: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `已等待 ${minutes} 分 ${remainingSeconds} 秒`;
+}
+
+function storyMaterialCount(game: GameDetail): number {
+  return storyMaterials(game).length;
+}
+
+function storyMaterialTitles(game: GameDetail): string[] {
+  return storyMaterials(game)
+    .slice(0, 6)
+    .map((item, index) => pickString(item, "title") || `素材 ${index + 1}`);
+}
+
+function storyMaterials(game: GameDetail): Record<string, unknown>[] {
+  const config = game.config?.story_settings;
+  const materials = asRecord(config).story_material_library;
+  return Array.isArray(materials)
+    ? materials.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function pickString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : "";
 }

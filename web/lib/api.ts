@@ -25,13 +25,6 @@ import type {
   GeneratorJobStreamEvent,
   GeneratorMessage,
   StateDeltaRead,
-  LoreEntryCreate,
-  LoreReindexResponse,
-  LoreEntryRead,
-  LoreEntryUpdate,
-  ModeCreate,
-  ModeRead,
-  ModeUpdate,
   SummaryRebuildResponse,
   TurnJobCreateResponse,
   TurnJobStreamEvent,
@@ -280,6 +273,38 @@ export async function getGameSettingsExport(
   };
 }
 
+export async function getGameSettingsGuideExport(
+  gameId: string
+): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/games/${encodeURIComponent(gameId)}/settings-guide-export`,
+    {
+      headers: {
+        Accept: "text/markdown"
+      },
+      cache: "no-store"
+    }
+  );
+
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as ApiErrorBody;
+      if (body.detail) {
+        message = formatApiErrorDetail(body.detail);
+      }
+    } catch {
+      // Keep the HTTP fallback.
+    }
+    throw new Error(message);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition"))
+  };
+}
+
 export async function importGameSettings(
   gameId: string,
   payload: unknown
@@ -299,54 +324,6 @@ export async function updateGameConfig(
   payload: GameConfigUpdate
 ): Promise<GameDetail> {
   return requestJson<GameDetail>(`/api/games/${gameId}/config`, {
-    method: "PATCH",
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function createLoreEntry(
-  gameId: string,
-  payload: LoreEntryCreate
-): Promise<LoreEntryRead> {
-  return requestJson<LoreEntryRead>(`/api/games/${gameId}/memory/lore`, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function updateLoreEntry(
-  gameId: string,
-  loreId: string,
-  payload: LoreEntryUpdate
-): Promise<LoreEntryRead> {
-  return requestJson<LoreEntryRead>(`/api/games/${gameId}/memory/lore/${loreId}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function archiveLoreEntry(
-  gameId: string,
-  loreId: string
-): Promise<LoreEntryRead> {
-  return requestJson<LoreEntryRead>(`/api/games/${gameId}/memory/lore/${loreId}`, {
-    method: "DELETE"
-  });
-}
-
-export async function createMode(gameId: string, payload: ModeCreate): Promise<ModeRead> {
-  return requestJson<ModeRead>(`/api/games/${gameId}/modes`, {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function updateMode(
-  gameId: string,
-  modeId: string,
-  payload: ModeUpdate
-): Promise<ModeRead> {
-  return requestJson<ModeRead>(`/api/games/${gameId}/modes/${modeId}`, {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
@@ -373,12 +350,6 @@ export async function getContextDiagnostic(
   return requestJson<ContextDiagnosticRead | null>(
     `/api/games/${gameId}/context-diagnostic${query}`
   );
-}
-
-export async function reindexGameLore(gameId: string): Promise<LoreReindexResponse> {
-  return requestJson<LoreReindexResponse>(`/api/games/${gameId}/memory/lore/reindex`, {
-    method: "POST"
-  });
 }
 
 export async function rebuildGameSummaries(gameId: string): Promise<SummaryRebuildResponse> {

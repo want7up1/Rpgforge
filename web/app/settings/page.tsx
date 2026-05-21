@@ -29,38 +29,62 @@ const taskRouteRows: {
   },
   {
     key: "generator_finalize_outline",
-    label: "世界导演总纲",
-    description: "先锁定剧本承诺、专有名词和分块生成锚点。",
+    label: "剧本导演总纲",
+    description: "先锁定 story_settings v2 的世界观、故事核心、幕结构计划和强制边界。",
     defaultSlot: "pro"
   },
   {
-    key: "generator_finalize_characters",
-    label: "角色档案生成",
+    key: "generator_finalize_core_characters",
+    label: "核心人物生成",
     description: "生成主角、关键 NPC、关系定位、公开介绍和外貌描述。",
     defaultSlot: "pro"
   },
   {
-    key: "generator_finalize_lore_entries",
-    label: "世界书生成",
-    description: "生成核心规则、地点、势力、秘密和触发词。",
+    key: "generator_finalize_act_plan",
+    label: "五幕主线生成",
+    description: "生成当前故事的幕结构、完成锚点和过渡条件。",
     defaultSlot: "pro"
   },
   {
-    key: "generator_finalize_modes",
-    label: "模式注入生成",
-    description: "生成主线、调查、社交、探索等场景模式。",
+    key: "generator_finalize_main_quest_path",
+    label: "主线轨迹生成",
+    description: "生成软主线任务轨迹，让 GM 能推进但不强迫玩家离场。",
+    defaultSlot: "pro"
+  },
+  {
+    key: "generator_finalize_core_mechanics",
+    label: "核心机制生成",
+    description: "生成长期玩法机制、成长、资源、压力和判定规则。",
+    defaultSlot: "pro"
+  },
+  {
+    key: "generator_finalize_action_style_rules",
+    label: "行动风格规则生成",
+    description: "生成调查、社交、探索、战斗等行动风格下的 GM 处理规则。",
+    defaultSlot: "pro"
+  },
+  {
+    key: "generator_finalize_story_material_library",
+    label: "剧本素材库生成",
+    description: "生成可召回的地点、势力、秘密、线索、压力和反转素材。",
+    defaultSlot: "pro"
+  },
+  {
+    key: "generator_finalize_home_base",
+    label: "破晓基地生成",
+    description: "生成长期据点、功能、NPC 服务、升级路径和剧情钩子。",
+    defaultSlot: "pro"
+  },
+  {
+    key: "generator_finalize_hard_rules",
+    label: "强制规则生成",
+    description: "生成最高优先级强制规则、禁止事项、揭露规则和连续性规则。",
     defaultSlot: "pro"
   },
   {
     key: "generator_finalize_initial_state",
     label: "初始状态生成",
     description: "生成开局状态、能力、经验、关系和可见线索。",
-    defaultSlot: "pro"
-  },
-  {
-    key: "generator_finalize_rules",
-    label: "系统规则生成",
-    description: "生成本局 GM 规则、输出约束和生成说明。",
     defaultSlot: "pro"
   },
   {

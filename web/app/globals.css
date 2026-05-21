@@ -699,6 +699,47 @@ textarea.app-input {
   white-space: normal;
 }
 
+.history-toolbar-group.history-toolbar-tabs {
+  display: grid;
+  width: min(100%, 34rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.history-toolbar-button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 2.625rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(243, 238, 228, 0.055);
+  padding: 0.5rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 750;
+  line-height: 1.15rem;
+  text-align: center;
+  white-space: nowrap;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.history-toolbar-button:hover {
+  border-color: rgba(82, 164, 127, 0.5);
+  background: rgba(243, 238, 228, 0.085);
+  color: var(--foreground);
+}
+
+.history-toolbar-button.active {
+  border-color: rgba(82, 164, 127, 0.62);
+  background: rgba(47, 122, 96, 0.22);
+  color: var(--foreground);
+}
+
 .contract-grid {
   display: grid;
   gap: 0.75rem;

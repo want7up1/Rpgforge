@@ -81,7 +81,7 @@ export default function GamesPage() {
           <p className="text-sm font-bold uppercase text-[color:var(--gold)]">Adventures</p>
           <h1 className="mt-2 text-3xl font-black sm:text-4xl">冒险存档</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
-            选择一局继续剧情，或进入概览查看世界资料、角色档案和旅程记忆。
+            选择一局继续剧情，或进入概览查看剧本设定、角色档案和旅程记忆。
           </p>
         </div>
         <Link className="app-button app-button-primary" href="/games/new">

@@ -15,6 +15,7 @@ from app.services.game_activity import touch_game
 from app.services.gameplay import gameplay_game_query
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
+from app.services.state_settlement import record_failed_turn_state_delta
 from app.services.turn_jobs import publish_turn_job_snapshot
 
 logger = logging.getLogger(__name__)
@@ -35,21 +36,23 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
         delta_json = await _extract_delta(job_id)
     except (DeepSeekError, StateExtractorValidationError, ValueError) as exc:
         logger.warning("Turn maintenance state extraction failed for job %s: %s", job_id, exc)
+        _record_failed_delta(job_id, str(exc))
         _mark_maintenance_terminal(
             job_id,
             status="failed",
             stage="state_extract",
-            message="状态提取失败，下一回合仍可继续。",
+            message="状态提取失败，系统会在下次继续前自动重试。",
             error=str(exc),
         )
         return
     except Exception as exc:
         logger.exception("Unexpected turn maintenance failure for job %s", job_id)
+        _record_failed_delta(job_id, f"{type(exc).__name__}: {exc}")
         _mark_maintenance_terminal(
             job_id,
             status="failed",
             stage="state_extract",
-            message="状态维护失败，下一回合仍可继续。",
+            message="状态维护失败，系统会在下次继续前自动重试。",
             error=f"{type(exc).__name__}: {exc}",
         )
         return
@@ -134,6 +137,21 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
             )
             rebuild_game_state(db, game)
         db.add(turn)
+        touch_game(db, game.id)
+        db.commit()
+
+
+def _record_failed_delta(job_id: UUID, error: str) -> None:
+    with SessionLocal() as db:
+        job = db.get(TurnJob, job_id)
+        if job is None or job.turn_id is None:
+            return
+        game = db.scalars(gameplay_game_query(job.game_id)).first()
+        turn = db.get(Turn, job.turn_id)
+        if game is None or turn is None:
+            return
+        record_failed_turn_state_delta(db, game=game, turn=turn, error=error)
+        rebuild_game_state(db, game)
         touch_game(db, game.id)
         db.commit()
 

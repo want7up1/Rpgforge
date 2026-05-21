@@ -101,6 +101,7 @@ def update_state_delta(
     ensure_editable(delta)
     delta.delta_json = payload.delta_json
     delta.status = "edited"
+    delta.error_message = None
     delta.approved_at = None
     sync_turn_state_delta(delta, active=True)
     db.add(delta.turn)
@@ -127,6 +128,7 @@ def approve_state_delta(
     ensure_editable(delta)
 
     delta.status = "approved"
+    delta.error_message = None
     delta.approved_at = datetime.now(UTC)
     sync_turn_state_delta(delta, active=True)
     db.add(delta.turn)
@@ -152,6 +154,7 @@ def reject_state_delta(
     delta = get_delta_or_404(db, game_id, delta_id)
     ensure_rejectable(delta)
     delta.status = "rejected"
+    delta.error_message = None
     delta.approved_at = None
     sync_turn_state_delta(delta, active=False)
     db.add(delta.turn)

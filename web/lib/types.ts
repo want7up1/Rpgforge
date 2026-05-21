@@ -11,148 +11,25 @@ export type GameListItem = {
 export type GameConfigRead = {
   id: string;
   game_id: string;
-  system_prompt: string | null;
-  worldview: Record<string, unknown>;
-  script_outline: Record<string, unknown>;
-  generation_settings: GenerationSettings;
-  generation_notes: string | null;
+  story_settings: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-};
-
-export type GenerationSettings = {
-  narrative_target_min_chars?: number;
-  narrative_target_max_chars?: number;
-  narrative_min_chars?: number;
-  paragraph_min?: number;
-  paragraph_max?: number;
-  scene_heading_max?: number;
-  emphasis_min?: number;
-  emphasis_max?: number;
-  recent_turn_excerpt_chars?: number;
 };
 
 export type StoryBlueprintPayload = Record<string, unknown>;
 
-export type AdvancedConfigJsonDraft = {
-  worldview_json: Record<string, unknown>;
-  script_outline_json: Record<string, unknown>;
-};
-
-export type LoreEntryRead = {
-  id: string;
-  game_id: string;
-  title: string;
-  type: string | null;
-  keywords: string[];
-  trigger_words: string[];
-  priority: string | null;
-  always_on: boolean;
-  visibility: string | null;
-  public_info: string | null;
-  gm_secret: string | null;
-  content: string;
-  usage_note: string | null;
-  is_active: boolean;
-  archived_at: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type LoreEntryMemoryRead = LoreEntryRead & {
-  embedding_configured: boolean;
-};
-
-export type ModeRead = {
-  id: string;
-  game_id: string;
-  name: string;
-  triggers: string[];
-  injection: string;
-  priority: string | null;
-  enabled: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-export type WorldviewUpdate = {
-  summary?: string | null;
-  tone?: string | null;
-  genre?: string | null;
-  key_npcs?: string[] | null;
-  factions?: string[] | null;
-  conflicts?: string[] | null;
-};
-
-export type ContractUpdate = {
-  premise?: string | null;
-  player_fantasy?: string | null;
-  central_question?: string | null;
-  emotional_arc?: string | null;
-  main_goal?: string | null;
-  current_act?: string | null;
-  narrative_style?: string | null;
-  tone?: string | null;
-  pacing?: string | null;
-  narrative_focus?: string | null;
-  canon_terms?: string[] | null;
-  key_npcs?: string[] | null;
-  key_conflicts?: string[] | null;
-  forbidden_drift?: string[] | null;
-  forbidden_reveals?: string[] | null;
-  must_preserve?: string[] | null;
-  must_not_become?: string[] | null;
-  guardrails?: string[] | null;
-  act_plan?: string[] | null;
-};
-
 export type GameConfigUpdate = {
+  story_settings?: Record<string, unknown> | null;
+  story_settings_json?: Record<string, unknown> | null;
   title?: string | null;
   genre?: string | null;
   description?: string | null;
-  system_prompt?: string | null;
-  generation_notes?: string | null;
-  generation_settings?: GenerationSettings | null;
-  worldview?: WorldviewUpdate | null;
-  worldview_json?: Record<string, unknown> | null;
-  script_outline_json?: Record<string, unknown> | null;
-  campaign_contract?: ContractUpdate | null;
-  director_contract?: ContractUpdate | null;
-  story_contract?: ContractUpdate | null;
 };
-
-export type LoreEntryCreate = {
-  title: string;
-  type?: string | null;
-  keywords?: string[];
-  trigger_words?: string[];
-  priority?: string | null;
-  always_on?: boolean;
-  visibility?: string | null;
-  public_info?: string | null;
-  gm_secret?: string | null;
-  content: string;
-  usage_note?: string | null;
-};
-
-export type LoreEntryUpdate = Partial<LoreEntryCreate> & {
-  is_active?: boolean;
-};
-
-export type ModeCreate = {
-  name: string;
-  triggers?: string[];
-  injection: string;
-  priority?: string | null;
-  enabled?: boolean;
-};
-
-export type ModeUpdate = Partial<ModeCreate>;
 
 export type GameSettingVersionRead = {
   id: string;
   game_id: string;
-  scope: "config" | "lore" | "mode" | string;
+  scope: "config" | string;
   entity_id: string | null;
   action: string;
   snapshot_json: Record<string, unknown>;
@@ -356,51 +233,26 @@ export type TurnJobStreamEvent = {
 export type GameDetail = GameListItem & {
   config: GameConfigRead | null;
   state: GameStateRead | null;
-  lore_entries: LoreEntryRead[];
-  modes: ModeRead[];
   summaries: SummaryRead[];
   turns: TurnRead[];
-};
-
-export type LoreDiagnosticRead = {
-  id: string;
-  title: string;
-  type: string | null;
-  priority: string | null;
-  always_on: boolean;
-  keywords: string[];
-  trigger_words: string[];
-  usage_note: string | null;
-  score: number | null;
-  keyword_score: number | null;
-  vector_score: number | null;
-  matched_terms: string[];
 };
 
 export type ContextDiagnosticRead = {
   turn_id: string | null;
   turn_number: number | null;
   player_input: string;
-  selected_mode: ModeRead | null;
+  selected_action_style: Record<string, unknown> | null;
   recent_turn_numbers: number[];
   memory_summaries: Record<string, unknown>;
-  campaign_contract: Record<string, unknown>;
-  story_blueprint: StoryBlueprintPayload;
-  always_on_lore: LoreDiagnosticRead[];
-  related_lore: LoreDiagnosticRead[];
+  runtime_story: StoryBlueprintPayload;
+  related_story_materials: Record<string, unknown>[];
 };
 
 export type GameMemoryRead = {
   game: GameListItem;
   current_turn: number;
   turn_count: number;
-  lore_entries: LoreEntryMemoryRead[];
   summaries: SummaryRead[];
-};
-
-export type LoreReindexResponse = {
-  total: number;
-  updated: number;
 };
 
 export type SummaryRebuildResponse = {
@@ -501,39 +353,11 @@ export type GeneratorJobStreamEvent = {
   job?: GeneratorChatJobRead | GeneratorFinalizeJobRead;
 };
 
-export type GeneratedLoreEntry = {
-  title: string;
-  type: string;
-  keywords: string[];
-  trigger_words: string[];
-  priority: string;
-  always_on: boolean;
-  visibility: string;
-  public_info: string;
-  gm_secret: string;
-  content: string;
-  usage_note: string;
-};
-
-export type GeneratedMode = {
-  name: string;
-  triggers: string[];
-  injection: string;
-  priority: string;
-  enabled: boolean;
-};
-
 export type GeneratedGameConfig = {
   title: string;
   genre: string | null;
   description: string | null;
-  system_prompt: string;
-  worldview: Record<string, unknown>;
-  script_outline: Record<string, unknown>;
-  generation_notes: string;
-  characters?: Record<string, unknown>[];
-  lore_entries: GeneratedLoreEntry[];
-  modes: GeneratedMode[];
+  story_settings: Record<string, unknown>;
   initial_state: Record<string, unknown>;
   voice_profiles?: Record<string, unknown>[];
 };

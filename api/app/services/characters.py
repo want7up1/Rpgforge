@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.models.character import Character
 from app.models.game import Game
-from app.schemas.generator import GeneratedCharacterProfile, GeneratedGameConfig, GeneratedLoreEntry
+from app.schemas.generator import GeneratedGameConfig
+from app.services.story_settings import story_settings_from_config
 
-VISIBLE_LORE_TYPES = {"protagonist", "npc", "character", "companion"}
 PLACEHOLDER_NAMES = {"", "未定", "未知", "无名", "待定"}
 ROLE_PRIORITY = {"protagonist": 0, "companion": 1, "npc": 2, "other": 3}
 SYNC_FIELDS = ("role", "identity", "description", "appearance", "portrait_prompt", "visibility")
@@ -123,72 +123,43 @@ def extract_profiles_from_config(config: GeneratedGameConfig) -> list[CharacterP
     profiles: list[CharacterProfile] = []
     state = config.initial_state if isinstance(config.initial_state, dict) else {}
 
-    for item in config.characters:
-        profiles.append(profile_from_generated_character(item))
+    settings = config.story_settings if isinstance(config.story_settings, dict) else {}
+    for item in settings.get("core_characters") or []:
+        data = as_mapping(item)
+        if data:
+            profiles.append(profile_from_story_settings_character(data))
 
     profiles.extend(extract_profiles_from_state(state))
-    profiles.extend(extract_profiles_from_lore(config.lore_entries))
     return merge_profiles(profiles)
 
 
 def extract_profiles_from_game(game: Game) -> list[CharacterProfile]:
     profiles: list[CharacterProfile] = []
-    if game.config and isinstance(game.config.script_outline, dict):
-        profiles.extend(extract_profiles_from_config_archive(game.config.script_outline))
+    settings = story_settings_from_config(game.config)
+    for item in settings.get("core_characters") or []:
+        data = as_mapping(item)
+        if data:
+            profiles.append(profile_from_story_settings_character(data))
     if game.state and isinstance(game.state.state_json, dict):
         profiles.extend(extract_profiles_from_state(game.state.state_json))
-    if game.lore_entries:
-        profiles.extend(
-            extract_profiles_from_lore(
-                [
-                    GeneratedLoreEntry.model_validate(
-                        {
-                            "title": entry.title,
-                            "type": entry.type or "npc",
-                            "keywords": entry.keywords,
-                            "trigger_words": entry.trigger_words,
-                            "priority": entry.priority or "medium",
-                            "always_on": entry.always_on,
-                            "visibility": entry.visibility or "mixed",
-                            "public_info": entry.public_info or "",
-                            "gm_secret": "",
-                            "content": entry.public_info or entry.title,
-                            "usage_note": entry.usage_note or "",
-                        }
-                    )
-                    for entry in game.lore_entries
-                ]
-            )
-        )
     return merge_profiles(profiles)
 
 
-def extract_profiles_from_config_archive(script_outline: dict[str, Any]) -> list[CharacterProfile]:
-    profiles: list[CharacterProfile] = []
-    for item in as_list(script_outline.get("_character_profiles")):
-        data = as_mapping(item)
-        if not data:
-            continue
-        try:
-            generated = GeneratedCharacterProfile.model_validate(data)
-        except ValueError:
-            continue
-        profiles.append(profile_from_generated_character(generated))
-    return profiles
-
-
-def profile_from_generated_character(item: GeneratedCharacterProfile) -> CharacterProfile:
+def profile_from_story_settings_character(item: dict[str, Any]) -> CharacterProfile:
     return CharacterProfile(
-        name=clean_text(item.name),
-        role=normalize_role(item.role),
-        aliases=[],
-        identity=clean_text(item.identity),
-        description=clean_text(item.description),
-        appearance=clean_text(item.appearance),
-        story_profile=story_profile_from_mapping(item.model_dump()),
-        portrait_prompt="",
-        visibility=normalize_visibility(item.visibility),
-        source="generated",
+        name=clean_text(item.get("name")) or "未命名角色",
+        aliases=clean_aliases(as_list(item.get("aliases"))),
+        role=normalize_role(clean_text(item.get("role"))),
+        identity=clean_text(item.get("identity")),
+        description=clean_text(item.get("description")),
+        appearance=clean_text(item.get("appearance")),
+        portrait_prompt=clean_text(item.get("portrait_prompt")),
+        visibility=normalize_visibility(clean_text(item.get("visibility"))),
+        story_profile={
+            key: clean_text(item.get(key))
+            for key in STORY_PROFILE_KEYS
+        },
+        source="story_settings",
     )
 
 
@@ -227,33 +198,6 @@ def extract_profiles_from_state(state: dict[str, Any]) -> list[CharacterProfile]
                 )
             )
 
-    return profiles
-
-
-def extract_profiles_from_lore(entries: list[GeneratedLoreEntry]) -> list[CharacterProfile]:
-    profiles: list[CharacterProfile] = []
-    for entry in entries:
-        lore_type = clean_text(entry.type).lower()
-        if lore_type not in VISIBLE_LORE_TYPES:
-            continue
-        if clean_text(entry.visibility).lower() == "hidden":
-            continue
-
-        name = canonical_character_name(entry.title)
-        if not name or name in PLACEHOLDER_NAMES:
-            continue
-
-        role = "companion" if lore_type == "companion" else "npc"
-        if lore_type == "protagonist":
-            role = "protagonist"
-        profiles.append(
-            CharacterProfile(
-                name=name,
-                role=role,
-                description=clean_text(entry.public_info),
-                source="lore",
-            )
-        )
     return profiles
 
 

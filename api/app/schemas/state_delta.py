@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-StateDeltaStatus = Literal["pending", "approved", "edited", "rejected"]
+StateDeltaStatus = Literal["pending", "approved", "edited", "rejected", "failed"]
 
 
 class StateDeltaRead(BaseModel):
@@ -15,6 +15,7 @@ class StateDeltaRead(BaseModel):
     turn_id: UUID
     delta_json: dict[str, Any]
     status: StateDeltaStatus
+    error_message: str | None = None
     approved_at: datetime | None
     created_at: datetime
     updated_at: datetime

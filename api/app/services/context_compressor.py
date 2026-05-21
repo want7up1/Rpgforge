@@ -16,9 +16,8 @@ from app.services.deepseek_client import DeepSeekError
 from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
-from app.services.prompt_builder import PromptBuilder
 from app.services.prompt_loader import load_prompt_template
-from app.services.story_blueprint import build_story_blueprint
+from app.services.story_settings import build_runtime_story
 
 logger = logging.getLogger(__name__)
 
@@ -296,8 +295,7 @@ class ContextCompressor:
                 "genre": game.genre,
                 "description": game.description,
             },
-            "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
-            "story_blueprint": build_story_blueprint(
+            "runtime_story": build_runtime_story(
                 game.config,
                 game.state.state_json if game.state else {},
             ),

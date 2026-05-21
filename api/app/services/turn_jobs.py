@@ -304,7 +304,7 @@ def _mark_maintenance_failed(job_id: UUID, message: str, *, stage: str) -> None:
         now = datetime.now(UTC)
         job.maintenance_status = "failed"
         job.maintenance_stage = stage
-        job.maintenance_message = "状态维护失败，下一回合仍可继续。"
+        job.maintenance_message = "状态维护失败，系统会在下次继续前自动重试。"
         job.maintenance_error = message[:4000]
         job.maintenance_completed_at = now
         job.last_event_at = now
@@ -525,7 +525,7 @@ def _infer_turn_stage(message: str, *, current_stage: str) -> str:
         return "gm_runtime"
     if "导演" in message or "规划" in message:
         return "story_director"
-    if "检索" in message or "摘要" in message or "世界书" in message:
+    if "检索" in message or "摘要" in message or "剧本素材" in message:
         return "retrieve_memory"
     return current_stage or "prepare_context"
 

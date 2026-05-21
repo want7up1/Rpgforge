@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.game import Game
-from app.models.mode import Mode
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput, TurnCreate
 from app.services.context_compressor import ContextCompressor
@@ -16,13 +15,17 @@ from app.services.deepseek_client import DeepSeekError
 from app.services.drift_validator import DriftValidator
 from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
-from app.services.lore_retriever import LoreRetriever
-from app.services.mode_matcher import select_mode
 from app.services.model_router import ModelRouter
 from app.services.prompt_builder import PromptBuilder
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
+from app.services.story_settings import (
+    StoryMaterialResult,
+    build_runtime_story,
+    retrieve_story_materials,
+    select_action_style,
+)
 from app.services.story_director import StoryDirector, StoryDirectorDecision
 
 logger = logging.getLogger(__name__)
@@ -38,9 +41,9 @@ class GameplayValidationError(RuntimeError):
 class TurnRuntimeContext:
     game: Game
     player_input: str
-    selected_mode: Mode | None
+    selected_action_style: dict[str, Any] | None
     recent_turns: list[Turn]
-    related_lore: list[Any]
+    related_materials: list[StoryMaterialResult]
     summaries: dict[str, Any]
 
 
@@ -50,7 +53,6 @@ class GameplayService:
         router: ModelRouter | None = None,
         prompt_builder: PromptBuilder | None = None,
         state_extractor: StateExtractor | None = None,
-        lore_retriever: LoreRetriever | None = None,
         context_compressor: ContextCompressor | None = None,
         story_director: StoryDirector | None = None,
         drift_validator: DriftValidator | None = None,
@@ -58,7 +60,6 @@ class GameplayService:
         self.router = router or ModelRouter()
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.state_extractor = state_extractor or StateExtractor(router=self.router)
-        self.lore_retriever = lore_retriever or LoreRetriever()
         self.context_compressor = context_compressor or ContextCompressor(router=self.router)
         self.story_director = story_director or StoryDirector(router=self.router)
         self.drift_validator = drift_validator or DriftValidator(router=self.router)
@@ -117,23 +118,23 @@ class GameplayService:
     ) -> TurnRuntimeContext:
         apply_pending_state_deltas(db, game)
         player_input = payload.resolved_player_input
-        selected_mode = select_mode(player_input, game.modes)
+        selected_action_style = select_action_style(game.config, player_input)
         recent_turns = self._recent_turns(db, game.id)
         if on_progress:
-            await on_progress("正在检索相关世界书与压缩摘要。")
-        related_lore, summaries = self._load_runtime_inputs(
+            await on_progress("正在检索相关剧本素材与压缩摘要。")
+        related_materials, summaries = self._load_runtime_inputs(
             db=db,
             game=game,
             player_input=player_input,
-            selected_mode=selected_mode,
+            selected_action_style=selected_action_style,
             recent_turns=recent_turns,
         )
         return TurnRuntimeContext(
             game=game,
             player_input=player_input,
-            selected_mode=selected_mode,
+            selected_action_style=selected_action_style,
             recent_turns=recent_turns,
-            related_lore=related_lore,
+            related_materials=related_materials,
             summaries=summaries,
         )
 
@@ -148,9 +149,9 @@ class GameplayService:
         director_decision = await self.story_director.plan(
             game=context.game,
             player_input=context.player_input,
-            selected_mode=context.selected_mode,
+            selected_action_style=context.selected_action_style,
             recent_turns=context.recent_turns,
-            related_lore=context.related_lore,
+            related_materials=context.related_materials,
             summaries=context.summaries,
         )
         if on_progress:
@@ -158,9 +159,9 @@ class GameplayService:
         messages = self._build_contextual_runtime_messages(
             game=context.game,
             player_input=context.player_input,
-            selected_mode=context.selected_mode,
+            selected_action_style=context.selected_action_style,
             recent_turns=context.recent_turns,
-            related_lore=context.related_lore,
+            related_materials=context.related_materials,
             summaries=context.summaries,
             director_decision=director_decision,
         )
@@ -188,9 +189,9 @@ class GameplayService:
         runtime_output, model_used = await self._validate_and_maybe_rewrite(
             game=context.game,
             player_input=context.player_input,
-            selected_mode=context.selected_mode,
+            selected_action_style=context.selected_action_style,
             recent_turns=context.recent_turns,
-            related_lore=context.related_lore,
+            related_materials=context.related_materials,
             summaries=context.summaries,
             director_decision=director_decision,
             runtime_output=runtime_output,
@@ -245,8 +246,11 @@ class GameplayService:
             if len(reveal_text) >= 4 and reveal_text in output_text:
                 return True
 
-        contract = PromptBuilder._campaign_contract_payload(game.config)
-        for forbidden in contract.get("forbidden_drift") or []:
+        runtime_story = build_runtime_story(game.config, game.state.state_json if game.state else {})
+        core = runtime_story.get("story_core") if isinstance(runtime_story, dict) else {}
+        if not isinstance(core, dict):
+            core = {}
+        for forbidden in core.get("forbidden_drift") or []:
             forbidden_text = str(forbidden).strip()
             if len(forbidden_text) >= 4 and forbidden_text in output_text:
                 return True
@@ -311,28 +315,28 @@ class GameplayService:
         db: Session,
         game: Game,
         player_input: str,
-        selected_mode: Mode | None,
+        selected_action_style: dict[str, Any] | None,
         recent_turns: list[Turn],
-    ) -> tuple[list[Any], dict[str, Any]]:
-        related_lore = self.lore_retriever.retrieve(
-            db=db,
-            game=game,
+    ) -> tuple[list[StoryMaterialResult], dict[str, Any]]:
+        related_materials = retrieve_story_materials(
+            game.config,
             player_input=player_input,
-            selected_mode=selected_mode,
+            selected_action_style=selected_action_style,
+            state_json=game.state.state_json if game.state else {},
             recent_turns=recent_turns,
         )
         self.context_compressor.ensure_bootstrap_summaries(db, game)
         summaries = self.context_compressor.load_prompt_summaries(db, game.id)
-        return related_lore, summaries
+        return related_materials, summaries
 
     def _build_contextual_runtime_messages(
         self,
         *,
         game: Game,
         player_input: str,
-        selected_mode: Mode | None,
+        selected_action_style: dict[str, Any] | None,
         recent_turns: list[Turn],
-        related_lore: list[Any],
+        related_materials: list[StoryMaterialResult],
         summaries: dict[str, Any],
         director_decision: StoryDirectorDecision,
         drift_rewrite_instruction: str | None = None,
@@ -340,9 +344,9 @@ class GameplayService:
         return self.prompt_builder.build_runtime_messages(
             game=game,
             player_input=player_input,
-            selected_mode=selected_mode,
+            selected_action_style=selected_action_style,
             recent_turns=recent_turns,
-            related_lore=related_lore,
+            related_materials=related_materials,
             summaries=summaries,
             story_director=director_decision.model_dump(),
             drift_rewrite_instruction=drift_rewrite_instruction,
@@ -353,9 +357,9 @@ class GameplayService:
         *,
         game: Game,
         player_input: str,
-        selected_mode: Mode | None,
+        selected_action_style: dict[str, Any] | None,
         recent_turns: list[Turn],
-        related_lore: list[Any],
+        related_materials: list[StoryMaterialResult],
         summaries: dict[str, Any],
         director_decision: StoryDirectorDecision,
         runtime_output: GMRuntimeOutput,
@@ -379,9 +383,9 @@ class GameplayService:
         rewrite_messages = self._build_contextual_runtime_messages(
             game=game,
             player_input=player_input,
-            selected_mode=selected_mode,
+            selected_action_style=selected_action_style,
             recent_turns=recent_turns,
-            related_lore=related_lore,
+            related_materials=related_materials,
             summaries=summaries,
             director_decision=director_decision,
             drift_rewrite_instruction=rewrite_instruction,
@@ -477,8 +481,6 @@ def gameplay_game_query(game_id):
         .options(
             selectinload(Game.config),
             selectinload(Game.state),
-            selectinload(Game.lore_entries),
-            selectinload(Game.modes),
             selectinload(Game.summaries),
         )
         .where(Game.id == game_id)

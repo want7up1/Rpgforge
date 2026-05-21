@@ -37,6 +37,8 @@ def ensure_test_database() -> None:
 def recreate_schema() -> None:
     ensure_test_database()
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS lore_entries CASCADE"))
+        connection.execute(text("DROP TABLE IF EXISTS modes CASCADE"))
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

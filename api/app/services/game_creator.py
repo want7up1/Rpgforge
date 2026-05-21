@@ -3,15 +3,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.models.character import Character
 from app.models.game import Game, GameConfig
-from app.models.lore import LoreEntry
-from app.models.mode import Mode
 from app.models.state import GameState
 from app.schemas.generator import GeneratedGameConfig
-from app.services.characters import build_character_records_from_config
 from app.services.state_v2 import normalize_state_v2
-from app.services.story_blueprint import initial_story_progress
-from app.services.text_vectorizer import text_to_vector
+from app.services.story_settings import (
+    default_story_settings,
+    game_profile,
+    initial_story_progress,
+    validate_story_settings,
+)
 
 
 def build_default_initial_state(title: str, description: str | None = None) -> dict[str, Any]:
@@ -65,38 +67,21 @@ def build_manual_generated_config(
         title=title,
         genre=genre,
         description=description,
-        system_prompt=(
-            "你是 RPGForge 的 GM。当前游戏仍处于手动创建草稿状态，"
-            "正式规则、世界书和模式注入将在规则生成器完成后补齐。"
-        ),
-        worldview={"title": title, "description": description or "", "genre": genre or ""},
-        script_outline={"title": title, "acts": []},
-        generation_notes="Manual Phase 1 creation without generator output.",
-        lore_entries=[],
-        modes=[],
+        story_settings=default_story_settings(title, genre, description),
         initial_state=build_default_initial_state(title, description),
     )
 
 
 def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
-    script_outline = dict(config.script_outline)
-    if config.characters and "_character_profiles" not in script_outline:
-        script_outline["_character_profiles"] = [
-            profile.model_dump(mode="json") for profile in config.characters
-        ]
+    story_settings = validate_story_settings(config.story_settings)
+    profile = game_profile(story_settings)
     game = Game(
-        title=config.title,
-        genre=config.genre,
-        description=config.description,
+        title=config.title or profile["title"],
+        genre=config.genre or profile["genre"],
+        description=config.description or profile["description"],
         status="active",
     )
-    game.config = GameConfig(
-        system_prompt=config.system_prompt,
-        worldview=config.worldview,
-        script_outline=script_outline,
-        generation_settings={},
-        generation_notes=config.generation_notes,
-    )
+    game.config = GameConfig(story_settings=story_settings)
     initial_state = (
         deepcopy(config.initial_state)
         if config.initial_state
@@ -116,49 +101,39 @@ def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
         initial_state_json=normalized_initial_state,
         summary="",
     )
-    game.lore_entries = [
-        LoreEntry(
-            title=entry.title,
-            type=entry.type,
-            keywords=entry.keywords,
-            trigger_words=entry.trigger_words,
-            priority=entry.priority,
-            always_on=entry.always_on,
-            visibility=entry.visibility,
-            public_info=entry.public_info,
-            gm_secret=entry.gm_secret,
-            content=entry.content,
-            usage_note=entry.usage_note,
-            embedding=text_to_vector(
-                "\n".join(
-                    [
-                        entry.title,
-                        entry.type or "",
-                        " ".join(entry.keywords),
-                        " ".join(entry.trigger_words),
-                        entry.public_info,
-                        entry.gm_secret,
-                        entry.content,
-                        entry.usage_note,
-                    ]
-                )
-            ),
-        )
-        for entry in config.lore_entries
-    ]
-    game.modes = [
-        Mode(
-            name=mode.name,
-            triggers=mode.triggers,
-            injection=mode.injection,
-            priority=mode.priority,
-            enabled=mode.enabled,
-        )
-        for mode in config.modes
-    ]
-    game.characters = build_character_records_from_config(config)
+    game.characters = [_character_from_story_settings(item) for item in story_settings["core_characters"]]
 
     db.add(game)
     db.commit()
     db.refresh(game)
     return game
+
+
+def _character_from_story_settings(item: dict[str, Any]) -> Character:
+    story_profile = {
+        key: str(item.get(key) or "")
+        for key in (
+            "dramatic_function",
+            "desire",
+            "fear",
+            "leverage",
+            "relationship_arc",
+            "public_limit",
+        )
+    }
+    visibility = str(item.get("visibility") or "visible")
+    return Character(
+        name=str(item.get("name") or "未命名角色"),
+        aliases=[str(alias) for alias in item.get("aliases") or []],
+        role=str(item.get("role") or "npc"),
+        identity=str(item.get("identity") or "") or None,
+        description=str(item.get("description") or "") or None,
+        appearance=str(item.get("appearance") or "") or None,
+        story_profile=story_profile,
+        portrait_prompt=str(item.get("portrait_prompt") or "") or None,
+        visibility=visibility,
+        is_visible=visibility == "visible",
+        source="story_settings",
+        sync_meta={"source": "story_settings.v2"},
+        manual_fields=[],
+    )

@@ -7,16 +7,13 @@ from typing import Any
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.models.game import Game
-from app.models.mode import Mode
 from app.models.turn import Turn
 from app.services.deepseek_client import DeepSeekError
 from app.services.json_utils import parse_json_object
-from app.services.lore_retriever import LoreRetrievalResult
 from app.services.model_router import ModelRouter
-from app.services.prompt_builder import PromptBuilder
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import state_v2_view
-from app.services.story_blueprint import build_story_blueprint
+from app.services.story_settings import StoryMaterialResult, build_runtime_story
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +23,7 @@ class StoryDirectorDecision(BaseModel):
     current_act: str = ""
     scene_objective: str = ""
     mode_recommendation: str = ""
-    active_lore_titles: list[str] = Field(default_factory=list)
+    active_material_titles: list[str] = Field(default_factory=list)
     allowed_reveals: list[str] = Field(default_factory=list)
     forbidden_reveals: list[str] = Field(default_factory=list)
     pacing_limit: str = ""
@@ -34,7 +31,7 @@ class StoryDirectorDecision(BaseModel):
     gm_instruction: str = ""
 
     @field_validator(
-        "active_lore_titles",
+        "active_material_titles",
         "allowed_reveals",
         "forbidden_reveals",
         "continuity_notes",
@@ -60,17 +57,17 @@ class StoryDirector:
         *,
         game: Game,
         player_input: str,
-        selected_mode: Mode | None,
+        selected_action_style: dict[str, Any] | None,
         recent_turns: list[Turn],
-        related_lore: list[LoreRetrievalResult],
+        related_materials: list[StoryMaterialResult],
         summaries: dict[str, Any],
     ) -> StoryDirectorDecision:
         payload = self._payload(
             game=game,
             player_input=player_input,
-            selected_mode=selected_mode,
+            selected_action_style=selected_action_style,
             recent_turns=recent_turns,
-            related_lore=related_lore,
+            related_materials=related_materials,
             summaries=summaries,
         )
         messages = [
@@ -88,60 +85,49 @@ class StoryDirector:
             return StoryDirectorDecision.model_validate(parsed)
         except (DeepSeekError, ValueError, ValidationError) as exc:
             logger.warning("Story director fell back for game %s: %s", game.id, exc)
-            return self._fallback_decision(game, player_input, selected_mode)
+            return self._fallback_decision(game, player_input, selected_action_style)
 
     def _payload(
         self,
         *,
         game: Game,
         player_input: str,
-        selected_mode: Mode | None,
+        selected_action_style: dict[str, Any] | None,
         recent_turns: list[Turn],
-        related_lore: list[LoreRetrievalResult],
+        related_materials: list[StoryMaterialResult],
         summaries: dict[str, Any],
     ) -> dict[str, Any]:
         config = game.config
+        runtime_story = build_runtime_story(
+            config,
+            game.state.state_json if game.state else {},
+            selected_action_style=selected_action_style,
+            related_materials=related_materials,
+        )
         return {
             "game": {
                 "title": game.title,
                 "genre": game.genre,
                 "description": game.description,
             },
-            "campaign_contract": PromptBuilder._campaign_contract_payload(config),
-            "story_blueprint": build_story_blueprint(
-                config,
-                game.state.state_json if game.state else {},
-            ),
-            "worldview": config.worldview if config else {},
-            "script_outline": config.script_outline if config else {},
-            "selected_mode": self._mode_payload(selected_mode),
+            "runtime_story": runtime_story,
+            "selected_action_style": selected_action_style or {},
             "current_state_v2": state_v2_view(game.state.state_json if game.state else {}),
             "memory_summaries": summaries,
             "recent_turns": [self._turn_payload(turn) for turn in recent_turns],
-            "related_lore": [
+            "related_story_materials": [
                 {
-                    "title": result.entry.title,
-                    "type": result.entry.type,
-                    "usage_note": result.entry.usage_note,
+                    "title": result.material.get("title"),
+                    "type": result.material.get("type"),
+                    "usage": result.material.get("usage"),
                     "retrieval": {
                         "score": result.score,
                         "matched_terms": result.matched_terms,
                     },
                 }
-                for result in related_lore
+                for result in related_materials
             ],
             "player_input": player_input,
-        }
-
-    @staticmethod
-    def _mode_payload(mode: Mode | None) -> dict[str, Any] | None:
-        if mode is None:
-            return None
-        return {
-            "name": mode.name,
-            "priority": mode.priority,
-            "injection": mode.injection,
-            "triggers": mode.triggers,
         }
 
     @staticmethod
@@ -158,14 +144,17 @@ class StoryDirector:
     def _fallback_decision(
         game: Game,
         player_input: str,
-        selected_mode: Mode | None,
+        selected_action_style: dict[str, Any] | None,
     ) -> StoryDirectorDecision:
-        contract = PromptBuilder._campaign_contract_payload(game.config)
-        blueprint = build_story_blueprint(
+        runtime_story = build_runtime_story(
             game.config,
             game.state.state_json if game.state else {},
+            selected_action_style=selected_action_style,
         )
-        current_act = blueprint.get("current_act") if isinstance(blueprint, dict) else {}
+        core = runtime_story.get("story_core") if isinstance(runtime_story, dict) else {}
+        if not isinstance(core, dict):
+            core = {}
+        current_act = runtime_story.get("current_act") if isinstance(runtime_story, dict) else {}
         if not isinstance(current_act, dict):
             current_act = {}
         return StoryDirectorDecision(
@@ -173,17 +162,17 @@ class StoryDirector:
             current_act=str(
                 current_act.get("id")
                 or current_act.get("name")
-                or contract.get("current_act")
+                or core.get("current_act")
                 or ""
             ),
             scene_objective=str(
                 current_act.get("objective")
                 or current_act.get("dramatic_question")
-                or contract.get("main_goal")
-                or contract.get("premise")
+                or core.get("main_goal")
+                or core.get("premise")
                 or ""
             ),
-            mode_recommendation=selected_mode.name if selected_mode else "",
+            mode_recommendation=str((selected_action_style or {}).get("name") or ""),
             allowed_reveals=_string_list(current_act.get("allowed_reveals")),
             forbidden_reveals=_string_list(current_act.get("forbidden_reveals")),
             pacing_limit=str(

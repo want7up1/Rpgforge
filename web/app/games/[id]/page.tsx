@@ -89,7 +89,10 @@ function GameDetailView({
   const router = useRouter();
   const longTermSummary = latestSummary(game, "long_term");
   const chapterSummary = latestSummary(game, "chapter");
-  const featuredLore = game.lore_entries.slice(0, 6);
+  const storySettings = asRecord(game.config?.story_settings);
+  const storyMaterials = asRecords(storySettings.story_material_library);
+  const actionStyles = asRecords(storySettings.action_style_rules);
+  const featuredMaterials = storyMaterials.slice(0, 6);
   const stateV2 = getStateV2FromGame(game);
   const blueprint = buildGameBlueprint(game);
   const hasTurns = (game.state?.current_turn ?? 0) > 0;
@@ -177,7 +180,7 @@ function GameDetailView({
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-4">
         <MetricCard label="等级" value={stateV2.protagonist_sheet.level} />
         <MetricCard label="回合" value={game.state?.current_turn ?? 0} />
-        <MetricCard label="世界资料" value={game.lore_entries.length} />
+        <MetricCard label="剧本素材" value={storyMaterials.length} />
         <MetricCard label="记忆摘要" value={game.summaries.length} />
       </section>
 
@@ -217,9 +220,9 @@ function GameDetailView({
       <section className="surface-panel">
         <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
-            <h2 className="surface-title">世界资料</h2>
+            <h2 className="surface-title">剧本素材库</h2>
             <p className="surface-subtle mt-1">
-              展示前 {featuredLore.length} 条，完整条目可在资料页查看。
+              展示前 {featuredMaterials.length} 条，完整条目可在资料页查看。
             </p>
           </div>
           <Link className="app-button" href={`/games/${game.id}/memory`}>
@@ -227,22 +230,22 @@ function GameDetailView({
           </Link>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {featuredLore.length === 0 ? (
-            <p className="text-sm text-[color:var(--muted)]">暂无世界资料。</p>
+          {featuredMaterials.length === 0 ? (
+            <p className="text-sm text-[color:var(--muted)]">暂无剧本素材。</p>
           ) : (
-            featuredLore.map((entry) => (
+            featuredMaterials.map((entry, index) => (
               <article
                 className="archive-card archive-card-accent app-long-card"
-                key={entry.id}
+                key={`${pickString(entry, "id") || pickString(entry, "title")}-${index}`}
               >
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="font-semibold">{entry.title}</h3>
+                  <h3 className="font-semibold">{pickString(entry, "title") || "未命名素材"}</h3>
                   <span className="app-pill">
-                    {entry.type || "unknown"} · {entry.priority || "medium"}
+                    {pickString(entry, "type") || "story_material"} · {pickString(entry, "priority") || "medium"}
                   </span>
                 </div>
                 <p className="app-wrap-text mt-3 max-h-40 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
-                  {entry.content}
+                  {pickString(entry, "content") || pickString(entry, "public_info")}
                 </p>
               </article>
             ))
@@ -253,21 +256,21 @@ function GameDetailView({
       <details className="surface-panel">
         <summary className="cursor-pointer surface-title">高级诊断</summary>
         <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-          <DiagnosticsPanel title="世界观" data={game.config?.worldview ?? {}} />
+          <DiagnosticsPanel title="story_settings v2" data={storySettings} />
           <section className="archive-card">
-            <h3 className="font-semibold">模式注入</h3>
-            {game.modes.length === 0 ? (
-              <p className="mt-3 text-sm text-[color:var(--muted)]">暂无模式。</p>
+            <h3 className="font-semibold">行动风格规则</h3>
+            {actionStyles.length === 0 ? (
+              <p className="mt-3 text-sm text-[color:var(--muted)]">暂无行动风格规则。</p>
             ) : (
               <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {game.modes.map((mode) => (
-                  <article className="archive-card" key={mode.id}>
+                {actionStyles.map((style, index) => (
+                  <article className="archive-card" key={`${pickString(style, "id") || pickString(style, "name")}-${index}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="font-semibold">{mode.name}</h4>
-                      <span className="app-pill">{mode.enabled ? "启用" : "停用"}</span>
+                      <h4 className="font-semibold">{pickString(style, "name") || "未命名规则"}</h4>
+                      <span className="app-pill">{style.enabled === false ? "停用" : "启用"}</span>
                     </div>
                     <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">
-                      {mode.triggers.join("、") || "无触发词"}
+                      {asList(style.triggers).join("、") || "无触发词"}
                     </p>
                   </article>
                 ))}
@@ -283,7 +286,7 @@ function GameDetailView({
         </summary>
         <div className="mt-4 grid gap-3">
           <p className="text-sm leading-6 text-[color:var(--muted)]">
-            删除会移除这局游戏的剧情、状态、角色、世界资料、记忆摘要和已上传立绘。
+            删除会移除这局游戏的剧情、状态、角色、剧本设定、记忆摘要和已上传立绘。
           </p>
           {deleteError ? <div className="app-alert">{deleteError}</div> : null}
           <button
@@ -688,4 +691,25 @@ function formatDateTime(value: string) {
   } catch {
     return value;
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+}
+
+function asList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+function pickString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  return typeof value === "string" ? value.trim() : "";
 }
