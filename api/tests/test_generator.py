@@ -7,7 +7,6 @@ from app.config import settings
 from app.main import app
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob
 from app.schemas.generator import (
-    GeneratedGameConfig,
     GeneratorChatRequest,
     GeneratorFinalizeRequest,
     GeneratorFinalizeResponse,
