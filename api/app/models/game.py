@@ -13,8 +13,6 @@ from app.db.session import Base
 
 if TYPE_CHECKING:
     from app.models.character import Character
-    from app.models.lore import LoreEntry
-    from app.models.mode import Mode
     from app.models.progress_save import GameProgressSave
     from app.models.setting_version import GameSettingVersion
     from app.models.state import GameState
@@ -52,14 +50,6 @@ class Game(Base):
         back_populates="game",
         cascade="all, delete-orphan",
         uselist=False,
-    )
-    lore_entries: Mapped[list[LoreEntry]] = relationship(
-        back_populates="game",
-        cascade="all, delete-orphan",
-    )
-    modes: Mapped[list[Mode]] = relationship(
-        back_populates="game",
-        cascade="all, delete-orphan",
     )
     turns: Mapped[list[Turn]] = relationship(
         back_populates="game",
@@ -102,15 +92,7 @@ class GameConfig(Base):
         nullable=False,
         unique=True,
     )
-    system_prompt: Mapped[str | None] = mapped_column(Text)
-    worldview: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    script_outline: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    generation_settings: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=dict,
-    )
-    generation_notes: Mapped[str | None] = mapped_column(Text)
+    story_settings: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

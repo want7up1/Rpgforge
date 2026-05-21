@@ -7,9 +7,8 @@ from app.models.game import Game
 from app.models.turn import Turn
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
-from app.services.prompt_builder import PromptBuilder
 from app.services.prompt_loader import load_prompt_template
-from app.services.story_blueprint import build_story_blueprint
+from app.services.story_settings import build_runtime_story
 
 
 class StateDeltaExtraction(BaseModel):
@@ -81,8 +80,7 @@ class StateExtractor:
                 "genre": game.genre,
                 "description": game.description,
             },
-            "campaign_contract": PromptBuilder._campaign_contract_payload(game.config),
-            "story_blueprint": build_story_blueprint(game.config, current_state),
+            "runtime_story": build_runtime_story(game.config, current_state),
             "current_state": current_state,
             "turn": {
                 "turn_number": turn.turn_number,

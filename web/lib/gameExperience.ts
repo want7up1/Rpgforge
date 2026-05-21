@@ -100,45 +100,44 @@ export function normalizeConfirmedRequirements(
 }
 
 export function buildGeneratedConfigBlueprint(config: GeneratedGameConfig): StoryBlueprintView {
+  const storySettings = asRecord(config.story_settings);
   return buildBlueprintFromParts({
     title: config.title,
     description: config.description ?? "",
-    worldview: asRecord(config.worldview),
-    script: asRecord(config.script_outline),
-    loreCount: config.lore_entries.length,
-    modeCount: config.modes.length
+    storySettings,
+    loreCount: asList(storySettings.story_material_library).length,
+    modeCount: asList(storySettings.action_style_rules).length
   });
 }
 
 export function buildGameBlueprint(game: GameDetail): StoryBlueprintView {
+  const storySettings = asRecord(game.config?.story_settings);
   return buildBlueprintFromParts({
     title: game.title,
     description: game.description ?? "",
-    worldview: asRecord(game.config?.worldview),
-    script: asRecord(game.config?.script_outline),
+    storySettings,
     stateJson: game.state?.state_json,
-    loreCount: game.lore_entries.length,
-    modeCount: game.modes.length
+    loreCount: asList(storySettings.story_material_library).length,
+    modeCount: asList(storySettings.action_style_rules).length
   });
 }
 
 function buildBlueprintFromParts({
   title,
   description,
-  worldview,
-  script,
+  storySettings,
   stateJson
 }: {
   title: string;
   description: string;
-  worldview: Record<string, unknown>;
-  script: Record<string, unknown>;
+  storySettings: Record<string, unknown>;
   stateJson?: Record<string, unknown>;
   loreCount: number;
   modeCount: number;
 }): StoryBlueprintView {
-  const campaign = asRecord(script.campaign_contract);
-  const acts = asList(script.acts);
+  const worldview = asRecord(storySettings.worldview);
+  const core = asRecord(storySettings.story_core);
+  const acts = asList(storySettings.act_plan);
   const stateRoot = asRecord(stateJson);
   const runtimeProgress = firstRecord([
     stateRoot.story_progress,
@@ -146,7 +145,7 @@ function buildBlueprintFromParts({
   ]);
   const currentActId =
     pickString(runtimeProgress, ["current_act", "act"]) ||
-    pickString(campaign, ["current_act", "act", "stage", "phase"]);
+    pickString(core, ["current_act", "act", "stage", "phase"]);
   const currentAct = findAct(acts, currentActId);
   const firstAct = asRecord(acts[0]);
 
@@ -154,7 +153,7 @@ function buildBlueprintFromParts({
     title,
     description,
     centralQuestion:
-      pickString(campaign, ["central_question"]) ||
+      pickString(core, ["central_mystery", "central_question"]) ||
       pickString(currentAct, ["dramatic_question"]),
     openingStage: pickString(worldview, ["setting", "opening_stage", "summary"]),
     currentAct: compactList([
@@ -164,17 +163,15 @@ function buildBlueprintFromParts({
     currentActGoal:
       pickString(currentAct, ["objective", "goal"]) ||
       pickString(firstAct, ["objective", "goal"]) ||
-      pickString(campaign, ["main_goal", "premise"]),
+      pickString(core, ["main_goal", "premise"]),
     mustPreserve: unique([
-      ...pickList(campaign, ["must_preserve"]),
-      ...pickList(asRecord(script.user_brief), ["must_include"])
+      ...pickList(core, ["must_preserve"])
     ]),
     mustNotBecome: unique([
-      ...pickList(campaign, ["must_not_become"]),
-      ...pickList(asRecord(script.user_brief), ["forbidden_content"]),
-      ...pickList(campaign, ["forbidden_drift"])
+      ...pickList(core, ["must_not_become"]),
+      ...pickList(core, ["forbidden_drift"])
     ]),
-    pressureClock: readableLines(script.pressure_clock).slice(0, 4)
+    pressureClock: readableLines(storySettings.main_quest_path).slice(0, 4)
   };
 }
 
@@ -219,14 +216,12 @@ export function buildTurnSettlement(turn: TurnRead): TurnSettlementView {
 }
 
 export function buildContractView(game: GameDetail): ContractView {
-  const config = game.config;
-  const script = asRecord(config?.script_outline);
-  const worldview = asRecord(config?.worldview);
-  const campaignContract = asRecord(script.campaign_contract);
-  const directorContract = asRecord(script.director_contract);
-  const storyContract = asRecord(script.story_contract);
-  const userBrief = normalizeConfirmedRequirements(script.user_brief, game.description ?? "");
-  const acts = asList(script.acts);
+  const storySettings = asRecord(game.config?.story_settings);
+  const profile = asRecord(storySettings.game_profile);
+  const worldview = asRecord(storySettings.worldview);
+  const storyCore = asRecord(storySettings.story_core);
+  const hardRules = asRecord(storySettings.hard_rules);
+  const acts = asList(storySettings.act_plan);
   const stateRoot = asRecord(game.state?.state_json);
   const runtimeProgress = firstRecord([
     stateRoot.story_progress,
@@ -234,7 +229,7 @@ export function buildContractView(game: GameDetail): ContractView {
   ]);
   const currentActId =
     pickString(runtimeProgress, ["current_act", "act"]) ||
-    pickString(campaignContract, ["current_act", "act", "stage", "phase"]);
+    pickString(storyCore, ["current_act", "act", "stage", "phase"]);
   const currentAct = findAct(acts, currentActId);
   const firstAct = asRecord(acts[0]);
 
@@ -243,31 +238,28 @@ export function buildContractView(game: GameDetail): ContractView {
       key: "brief",
       label: "故事种子",
       items: compactList([
-        userBrief.story_background,
-        userBrief.core_premise,
-        pickString(campaignContract, ["player_fantasy", "premise"]),
-        game.genre,
-        game.description
+        pickString(storyCore, ["premise"]),
+        pickString(storyCore, ["core_fantasy"]),
+        pickString(profile, ["genre"]),
+        pickString(profile, ["description"]) || game.description
       ])
     },
     {
       key: "question",
       label: "核心悬念",
       items: compactList([
-        pickString(campaignContract, ["central_question"]),
+        pickString(storyCore, ["central_mystery", "central_question"]),
         pickString(currentAct, ["dramatic_question"]),
-        pickString(script, ["central_question"])
       ])
     },
     {
       key: "goal",
       label: "主线目标",
       items: compactList([
-        pickString(campaignContract, ["main_goal", "core_goal", "objective", "goal", "campaign_goal"]),
+        pickString(storyCore, ["main_goal", "core_goal", "objective", "goal", "campaign_goal"]),
         pickString(currentAct, ["objective", "goal"]),
         pickString(firstAct, ["objective", "goal"]),
-        pickString(script, ["main_goal", "core_goal", "objective"]),
-        pickString(campaignContract, ["premise"])
+        pickString(storyCore, ["premise"])
       ])
     },
     {
@@ -276,16 +268,15 @@ export function buildContractView(game: GameDetail): ContractView {
       items: compactList([
         currentActId,
         pickString(currentAct, ["name", "title"]),
-        pickString(currentAct, ["objective", "goal"]),
-        pickString(directorContract, ["current_act", "act", "stage"])
+        pickString(currentAct, ["objective", "goal"])
       ])
     },
     {
       key: "must",
       label: "必须保留",
       items: compactList([
-        ...pickList(campaignContract, ["must_preserve"]),
-        ...userBrief.must_include,
+        ...pickList(storyCore, ["must_preserve"]),
+        ...pickList(hardRules, ["must_follow"]),
         ...pickList(currentAct, ["must_hit_beats"])
       ])
     },
@@ -293,17 +284,15 @@ export function buildContractView(game: GameDetail): ContractView {
       key: "guardrails",
       label: "禁止变成",
       items: compactList([
-        ...pickList(campaignContract, ["must_not_become"]),
-        ...userBrief.forbidden_content,
-        ...pickList(campaignContract, [
+        ...pickList(storyCore, ["must_not_become"]),
+        ...pickList(storyCore, [
           "forbidden_drift",
           "forbidden_deviations",
           "forbidden_points",
           "avoid",
           "must_not"
         ]),
-        ...pickList(directorContract, ["forbidden_deviations", "guardrails", "must_not", "avoid"]),
-        ...pickList(storyContract, ["forbidden_deviations", "must_not", "avoid"])
+        ...pickList(hardRules, ["must_not"])
       ])
     },
     {
@@ -311,24 +300,20 @@ export function buildContractView(game: GameDetail): ContractView {
       label: "叙事风格",
       items: compactList([
         pickString(worldview, ["tone", "mood"]),
-        ...userBrief.tone_preferences,
-        ...userBrief.playstyle_preferences,
-        pickString(storyContract, ["narrative_style", "style", "voice", "pacing"]),
-        pickString(directorContract, ["pacing", "narrative_focus", "style"]),
-        pickString(script, ["narrative_style", "style"]),
-        ...pickList(campaignContract, ["tone_do"]),
-        ...pickList(campaignContract, ["tone_dont"]),
-        ...pickList(campaignContract, ["pacing_rules"])
+        pickString(profile, ["tone"]),
+        pickString(storyCore, ["narrative_style", "style", "voice", "pacing"]),
+        ...pickList(storyCore, ["tone_do"]),
+        ...pickList(storyCore, ["tone_dont"]),
+        ...pickList(storyCore, ["pacing_rules"])
       ])
     },
     {
       key: "conflict",
       label: "关键 NPC / 关键冲突",
       items: compactList([
-        ...pickList(campaignContract, ["key_npcs", "important_npcs"]),
-        ...namesFromRelationshipArcs(pickList(campaignContract, ["relationship_arcs"])),
-        ...pickList(campaignContract, ["key_conflicts", "main_conflict"]),
-        ...pickList(storyContract, ["key_npcs", "important_npcs", "key_conflicts"]),
+        ...pickList(storyCore, ["key_npcs", "important_npcs"]),
+        ...namesFromRelationshipArcs(pickList(storyCore, ["relationship_arcs"])),
+        ...pickList(storyCore, ["key_conflicts", "main_conflict"]),
         ...pickList(worldview, ["key_npcs", "factions", "conflicts", "core_conflicts", "main_conflict"])
       ])
     }

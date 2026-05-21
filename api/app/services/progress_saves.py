@@ -16,6 +16,7 @@ from app.models.summary import Summary
 from app.models.turn import Turn
 from app.services.game_creator import build_default_initial_state
 from app.services.state_v2 import normalize_state_v2
+from app.services.story_settings import story_settings_from_config
 
 
 def create_progress_save(
@@ -163,6 +164,7 @@ def _restore_state_deltas(
                 turn_id=turn_id,
                 delta_json=delta_json,
                 status=status,
+                error_message=_optional_text(item.get("error_message")),
                 approved_at=_optional_datetime(item.get("approved_at")),
                 created_at=_datetime(item.get("created_at")),
                 updated_at=_datetime(item.get("updated_at")),
@@ -193,11 +195,8 @@ def _initial_state_for_restart(game: Game) -> dict[str, Any]:
 
 def _fallback_initial_state(game: Game) -> dict[str, Any]:
     state = build_default_initial_state(game.title, game.description)
-    worldview = (
-        game.config.worldview
-        if game.config and isinstance(game.config.worldview, dict)
-        else {}
-    )
+    story = story_settings_from_config(game.config)
+    worldview = story.get("worldview") if isinstance(story.get("worldview"), dict) else {}
     setting = _first_text(worldview.get("setting"), worldview.get("summary"))
     if setting:
         state["location"]["current"] = setting
@@ -274,6 +273,7 @@ def _state_delta_snapshot(delta: StateDelta) -> dict[str, Any]:
         "turn_id": str(delta.turn_id),
         "delta_json": deepcopy(delta.delta_json),
         "status": delta.status,
+        "error_message": delta.error_message,
         "approved_at": _isoformat(delta.approved_at),
         "created_at": _isoformat(delta.created_at),
         "updated_at": _isoformat(delta.updated_at),

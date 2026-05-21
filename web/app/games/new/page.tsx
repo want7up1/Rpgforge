@@ -262,7 +262,7 @@ export default function NewGamePage() {
             <p className="game-page-eyebrow">Adventure Forge</p>
             <h1 className="game-page-title">创建冒险</h1>
             <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--muted)]">
-              写一段故事背景、核心设定、禁止点和必须出现的内容；AI 会抽取创作简报，再补全世界资料、角色、状态和剧情导演。
+              写一段故事背景、核心设定、禁止点和必须出现的内容；AI 会抽取创作简报，再补全剧本设定、角色、状态和剧情导演。
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3 lg:min-w-96">
@@ -363,13 +363,13 @@ export default function NewGamePage() {
               <div className="generator-step">
                 <div>
                   <strong className="block text-[color:var(--foreground)]">确认冒险方向</strong>
-                  <span>确认关键设定，避免后续世界资料偏离最初想法。</span>
+                  <span>确认关键设定，避免后续剧本设定偏离最初想法。</span>
                 </div>
               </div>
               <div className="generator-step">
                 <div>
                   <strong className="block text-[color:var(--foreground)]">生成冒险世界</strong>
-                  <span>导演层会拆分任务，生成规则、世界书、角色、状态和剧情初始条件。</span>
+                  <span>导演层会拆分任务，生成剧本设定、角色、状态和剧情初始条件。</span>
                 </div>
               </div>
               <div className="generator-step">
@@ -423,8 +423,7 @@ export default function NewGamePage() {
                     </span>
                   </div>
                   <p className="text-[color:var(--muted)]">
-                    世界资料 {generatedConfig.lore_entries.length} 条，模式{" "}
-                    {generatedConfig.modes.length} 个
+                    story_settings v2 已生成
                   </p>
                 </div>
                 {generatedBlueprint ? (

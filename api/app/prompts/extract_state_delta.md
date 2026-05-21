@@ -9,10 +9,10 @@
 6. current_state.v2 是系统派生的结构化视图，不要输出 v2 更新；只输出下方状态变化提案字段。
 7. 量化状态只输出事件，不要直接决定 XP 数值、等级、技能熟练度百分比或关系分数；系统会按固定规则计算。
 8. 如果本回合没有使用能力、没有推进关系、没有获得经验或状态变化，对应事件数组保持空数组。
-9. story_blueprint 只用于判断本回合是否推进了当前幕、线索阶梯或压力时钟；不能因为蓝图存在就把未发生的未来剧情写入状态。
-10. story_blueprint.current_act.completion_anchors 是当前幕完成锚点；只有 GM 输出中已经明确发生并满足某个锚点 completion_signal 时，才把该锚点 ID 写入 story_progress_update.completed_anchors。
+9. runtime_story 只用于判断本回合是否推进了当前幕、主线轨迹或压力；不能因为设定存在就把未发生的未来剧情写入状态。
+10. runtime_story.current_act.completion_anchors 是当前幕完成锚点；只有 GM 输出中已经明确发生并满足某个锚点 completion_signal 时，才把该锚点 ID 写入 story_progress_update.completed_anchors。
 11. 如果当前幕仍有 required=true 的 completion_anchors 未完成，不要把 ready_for_next_act 写成 true，也不要推进到下一幕。
-12. 只有当 GM 输出明确写出当前幕目标已经完成、completion_signal 已经达成，或剧情已经自然转入 story_blueprint.next_act 时，才输出 story_progress_update.current_act。
+12. 只有当 GM 输出明确写出当前幕目标已经完成、completion_signal 已经达成，或剧情已经自然转入 runtime_story.next_act 时，才输出 story_progress_update.current_act。
 13. story_progress_update 只能推进运行时进度，不能修改剧本设定；不要跳幕，不要因为玩家意图或蓝图计划而提前推进。
 
 输出结构：

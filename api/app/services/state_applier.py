@@ -5,7 +5,7 @@ from app.models.state import GameState
 from app.models.turn import Turn
 from app.services.quantified_state import apply_quantified_state_events
 from app.services.state_v2 import normalize_state_v2
-from app.services.story_blueprint import completion_anchor_ids_for_act
+from app.services.story_settings import completion_anchor_ids_for_act, transition_target_for_act
 
 
 def apply_state_delta(
@@ -152,14 +152,14 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
         or update.get("next_act")
         or update.get("to_act")
     )
-    completed_acts = _act_list(update.get("completed_acts"))
+    pending_completed_acts = _act_list(update.get("completed_acts"))
     completed_act = _text(
         update.get("completed_act")
         or update.get("from_act")
         or update.get("previous_act")
     )
     if completed_act:
-        completed_acts.append(completed_act)
+        pending_completed_acts.append(completed_act)
     completed_anchors = _identity_list(
         update.get("completed_anchors")
         or update.get("completed_anchor_ids")
@@ -172,7 +172,12 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
     if completed_anchor:
         completed_anchors.append(completed_anchor)
     has_ready_update = "ready_for_next_act" in update
-    if not next_act and not completed_acts and not completed_anchors and not has_ready_update:
+    if (
+        not next_act
+        and not pending_completed_acts
+        and not completed_anchors
+        and not has_ready_update
+    ):
         return
 
     progress = state.setdefault("story_progress", {})
@@ -180,14 +185,15 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
         progress = {}
         state["story_progress"] = progress
 
-    previous_act = _text(progress.get("current_act") or progress.get("act"))
+    previous_act = _text(progress.get("current_act") or progress.get("act")) or (
+        _configured_current_act(config)
+    )
+    if previous_act and not _text(progress.get("current_act") or progress.get("act")):
+        progress["current_act"] = previous_act
     completed_target = progress.setdefault("completed_acts", [])
     if not isinstance(completed_target, list):
         completed_target = []
         progress["completed_acts"] = completed_target
-    for act in completed_acts:
-        if act and act not in completed_target:
-            completed_target.append(act)
 
     anchor_target = progress.setdefault("completed_anchors", [])
     if not isinstance(anchor_target, list):
@@ -217,7 +223,13 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
             )
         del anchor_history[:-30]
 
-    if next_act:
+    advance_allowed = _can_advance_to_act(config, previous_act, next_act, anchor_target)
+    if not next_act or next_act == previous_act or advance_allowed:
+        for act in pending_completed_acts:
+            if act and act not in completed_target:
+                completed_target.append(act)
+
+    if next_act and advance_allowed:
         progress["current_act"] = next_act
         progress["last_advance_turn"] = turn.turn_number
         reason = _text(update.get("advance_reason") or update.get("reason"))
@@ -286,6 +298,88 @@ def _computed_ready_for_next_act(
         return None
     completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
     return all(anchor_id in completed for anchor_id in required_anchor_ids)
+
+
+def _can_advance_to_act(
+    config: Any,
+    previous_act: str,
+    next_act: str,
+    completed_anchors: list[Any],
+) -> bool:
+    if not next_act:
+        return False
+    if next_act == previous_act:
+        return True
+    if not previous_act:
+        return not _script_acts(config) or _act_exists(config, next_act)
+
+    allowed_targets = _allowed_transition_targets(config, previous_act)
+    if allowed_targets and next_act not in allowed_targets:
+        return False
+    if not allowed_targets and _act_exists(config, previous_act):
+        return False
+
+    required_anchor_ids = completion_anchor_ids_for_act(config, previous_act, required_only=True)
+    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
+    return all(anchor_id in completed for anchor_id in required_anchor_ids)
+
+
+def _allowed_transition_targets(config: Any, current_act: str) -> set[str]:
+    targets: set[str] = set()
+    transition_target = transition_target_for_act(config, current_act)
+    if transition_target:
+        targets.add(transition_target)
+    adjacent_next = _adjacent_next_act(config, current_act)
+    if adjacent_next:
+        targets.add(adjacent_next)
+    return targets
+
+
+def _adjacent_next_act(config: Any, current_act: str) -> str:
+    acts = _script_acts(config)
+    for index, act in enumerate(acts):
+        if current_act not in _act_identifiers(act):
+            continue
+        for next_act in acts[index + 1:]:
+            next_id = _act_identity(next_act)
+            if next_id:
+                return next_id
+        return ""
+    return ""
+
+
+def _act_exists(config: Any, act_id: str) -> bool:
+    return any(act_id in _act_identifiers(act) for act in _script_acts(config))
+
+
+def _script_acts(config: Any) -> list[dict[str, Any]]:
+    settings = getattr(config, "story_settings", None)
+    if not isinstance(settings, dict):
+        return []
+    return [item for item in settings.get("act_plan") or [] if isinstance(item, dict)]
+
+
+def _configured_current_act(config: Any) -> str:
+    settings = getattr(config, "story_settings", None)
+    if not isinstance(settings, dict):
+        return ""
+    core = settings.get("story_core")
+    return _text(core.get("current_act")) if isinstance(core, dict) else ""
+
+
+def _act_identity(act: dict[str, Any]) -> str:
+    identifiers = _act_identifiers(act)
+    return identifiers[0] if identifiers else ""
+
+
+def _act_identifiers(act: dict[str, Any]) -> list[str]:
+    identifiers = [
+        _text(act.get("id")),
+        _text(act.get("key")),
+        _text(act.get("name")),
+        _text(act.get("title")),
+    ]
+    return [identifier for identifier in identifiers if identifier]
 
 
 def _text(value: Any) -> str:

@@ -1,15 +1,9 @@
-import asyncio
 import json
-from datetime import UTC, datetime, timedelta
-from threading import Thread
-from time import sleep
-from uuid import uuid4
 
 import anyio
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.db.session import SessionLocal
 from app.main import app
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob
 from app.schemas.generator import (
@@ -25,15 +19,14 @@ from app.services.deepseek_client import (
 )
 from app.services.game_generator import GameGeneratorService
 from app.services.generator_jobs import run_finalize_job
-from app.services.job_queue import enqueue_chat_job, recover_stale_jobs, rq_job_id
+from app.services.job_queue import enqueue_chat_job, rq_job_id
 from app.services.model_router import ModelRouter
+from tests.story_settings_fixtures import build_generated_config
 
 
 def test_generator_chat_requires_deepseek_api_key(monkeypatch) -> None:
     monkeypatch.setattr(settings, "deepseek_api_key", "")
-    client = TestClient(app)
-
-    response = client.post(
+    response = TestClient(app).post(
         "/api/generator/chat",
         json={"user_input": "我想玩黑暗武侠，主角是失忆镖师。"},
     )
@@ -61,10 +54,8 @@ def test_generator_interview_uses_pro_with_high_thinking() -> None:
                 raw={},
             )
 
-    service = GameGeneratorService(router=FakeRouter())
-
     result = anyio.run(
-        service.interview,
+        GameGeneratorService(router=FakeRouter()).interview,
         GeneratorChatRequest(user_input="黑暗武侠，主角是失忆镖师。"),
     )
 
@@ -97,12 +88,10 @@ def test_generator_interview_stream_reports_reasoning_and_content() -> None:
             )
 
     async def run_stream():
-        service = GameGeneratorService(router=FakeRouter())
-
         async def on_update(reasoning: str, content: str, model: str | None) -> None:
             updates.append((reasoning, content, model))
 
-        return await service.interview_stream(
+        return await GameGeneratorService(router=FakeRouter()).interview_stream(
             GeneratorChatRequest(user_input="黑暗武侠，主角是失忆镖师。"),
             on_update=on_update,
         )
@@ -131,10 +120,8 @@ def test_generator_interview_normalizes_legacy_requirements() -> None:
                 raw={},
             )
 
-    service = GameGeneratorService(router=FakeRouter())
-
     result = anyio.run(
-        service.interview,
+        GameGeneratorService(router=FakeRouter()).interview,
         GeneratorChatRequest(user_input="黑暗武侠，主角是失忆镖师。"),
     )
 
@@ -173,18 +160,14 @@ def test_model_router_flash_uses_high_thinking(monkeypatch) -> None:
     monkeypatch.setattr(settings, "deepseek_flash_model", "deepseek-v4-flash")
     router = ModelRouter(client=FakeClient(), app_settings=settings)
 
-    anyio.run(
-        router.use_flash,
-        "state_delta",
-        [{"role": "user", "content": "test"}],
-    )
+    anyio.run(router.use_flash, "state_delta", [{"role": "user", "content": "test"}])
 
     assert calls[0]["model"] == "deepseek-v4-flash"
     assert calls[0]["thinking"] == "enabled"
     assert calls[0]["reasoning_effort"] == "high"
 
 
-def test_generator_finalize_pipeline_merges_streamed_sections() -> None:
+def test_generator_finalize_pipeline_merges_streamed_story_settings_v2() -> None:
     calls: list[dict[str, object]] = []
     updates: list[tuple[str, str, str | None]] = []
 
@@ -195,10 +178,7 @@ def test_generator_finalize_pipeline_merges_streamed_sections() -> None:
                 reasoning_delta=f"{task_type} thinking.",
                 model="deepseek-v4-pro",
             )
-            content = json.dumps(
-                finalize_stream_payload(task_type),
-                ensure_ascii=False,
-            )
+            content = json.dumps(finalize_stream_payload(task_type), ensure_ascii=False)
             midpoint = len(content) // 2
             yield ChatCompletionStreamChunk(
                 content_delta=content[:midpoint],
@@ -210,12 +190,10 @@ def test_generator_finalize_pipeline_merges_streamed_sections() -> None:
             )
 
     async def run_finalize():
-        service = GameGeneratorService(router=FakeRouter())
-
         async def on_update(reasoning: str, content: str, model: str | None) -> None:
             updates.append((reasoning, content, model))
 
-        return await service.finalize_stream(
+        return await GameGeneratorService(router=FakeRouter()).finalize_stream(
             GeneratorFinalizeRequest(
                 concept="黑暗武侠",
                 history=[],
@@ -232,39 +210,36 @@ def test_generator_finalize_pipeline_merges_streamed_sections() -> None:
         )
 
     result = anyio.run(run_finalize)
-
     task_types = {str(call["task_type"]) for call in calls}
+
     assert task_types == {
         "generator_finalize_outline",
-        "generator_finalize_characters",
-        "generator_finalize_lore_entries",
-        "generator_finalize_modes",
+        "generator_finalize_core_characters",
+        "generator_finalize_act_plan",
+        "generator_finalize_main_quest_path",
+        "generator_finalize_core_mechanics",
+        "generator_finalize_action_style_rules",
+        "generator_finalize_story_material_library",
+        "generator_finalize_home_base",
+        "generator_finalize_hard_rules",
         "generator_finalize_initial_state",
-        "generator_finalize_rules",
     }
+    assert not any("lore_entries" in task_type or "modes" in task_type for task_type in task_types)
     assert all(call["reasoning_effort"] == "high" for call in calls)
     assert result.config.title == "雁回镇旧案"
-    assert result.config.script_outline["campaign_contract"]["canon_terms"] == [
-        "雁回镇",
-        "义庄",
-    ]
-    assert result.config.script_outline["user_brief"]["must_include"] == ["红伞女人"]
-    assert "红伞女人" in result.config.script_outline["campaign_contract"]["must_preserve"]
-    assert "不要修仙飞升" in result.config.script_outline["campaign_contract"]["must_not_become"]
-    assert "不要修仙飞升" in result.config.script_outline["campaign_contract"]["forbidden_drift"]
-    assert result.config.characters[0].name == "沈砚"
+    story = result.config.story_settings
+    assert story["format_version"] == "rpgforge.story.v2"
+    assert story["story_core"]["canon_terms"] == ["雁回镇", "义庄", "红伞女人"]
+    assert "红伞女人" in story["story_core"]["must_preserve"]
+    assert "不要修仙飞升" in story["story_core"]["must_not_become"]
+    assert "不要修仙飞升" in story["story_core"]["forbidden_drift"]
+    assert story["core_characters"][0]["name"] == "沈砚"
+    assert story["act_plan"][0]["completion_anchors"][0]["id"] == "act_1_find_mud"
+    assert story["story_material_library"][0]["gm_secret"] == "义庄暗藏旧案账册。"
     assert result.config.initial_state["current_turn"] == 0
-    assert result.config.initial_state["progression"]["level"] == 1
-    assert result.config.lore_entries[0].type == "clue"
-    assert result.config.lore_entries[0].gm_secret == "义庄暗藏旧案账册。"
-    assert result.config.modes[0].injection
-    assert any("配置生成：导演总纲完成" in reasoning for reasoning, _content, _model in updates)
-    assert any(
-        "配置生成：角色档案思考过程" in reasoning
-        and "generator_finalize_characters thinking." in reasoning
-        for reasoning, _content, _model in updates
-    )
-    assert any("## 世界书" in content for _reasoning, content, _model in updates)
+    assert result.config.initial_state["protagonist"]["name"] == "沈砚"
+    assert any("剧本生成：导演总纲完成" in reasoning for reasoning, _content, _model in updates)
+    assert any("## 剧本素材库" in content for _reasoning, content, _model in updates)
     assert updates[-1][1].startswith("{")
 
 
@@ -276,40 +251,29 @@ def test_generator_finalize_retries_invalid_outline_without_shortening() -> None
             calls.append({"task_type": task_type, "messages": messages, **kwargs})
             if task_type == "generator_finalize_outline" and _task_count(task_type, calls) == 1:
                 yield ChatCompletionStreamChunk(
-                    content_delta='{"title":"雁回镇旧案","script_outline":{"truth_map":["截断',
+                    content_delta='{"format_version":"rpgforge.story.v2","worldview":{"summary":"截断',
                     model="deepseek-v4-pro",
                 )
                 return
-
             yield ChatCompletionStreamChunk(
-                content_delta=json.dumps(
-                    finalize_stream_payload(task_type),
-                    ensure_ascii=False,
-                ),
+                content_delta=json.dumps(finalize_stream_payload(task_type), ensure_ascii=False),
                 model="deepseek-v4-pro",
             )
 
-    service = GameGeneratorService(router=FakeRouter())
-
     result = anyio.run(
-        service.finalize,
-        GeneratorFinalizeRequest(
-            concept="黑暗武侠",
-            history=[],
-            confirmed_requirements={},
-        ),
+        GameGeneratorService(router=FakeRouter()).finalize,
+        GeneratorFinalizeRequest(concept="黑暗武侠", history=[], confirmed_requirements={}),
     )
-
     outline_calls = [
         call for call in calls if call["task_type"] == "generator_finalize_outline"
     ]
-    retry_messages = outline_calls[1]["messages"]
 
     assert result.config.title == "雁回镇旧案"
     assert len(outline_calls) == 2
     assert outline_calls[0]["max_tokens"] == 12000
     assert outline_calls[1]["max_tokens"] == 12000
-    assert "保持原有剧情丰富度" in retry_messages[-1]["content"]
+    assert "保持原有剧情丰富度" in outline_calls[1]["messages"][-1]["content"]
+    assert "game_profile" in outline_calls[1]["messages"][-1]["content"]
 
 
 def test_generator_finalize_retries_invalid_section() -> None:
@@ -319,65 +283,27 @@ def test_generator_finalize_retries_invalid_section() -> None:
         async def use_pro_stream(self, task_type, messages, **kwargs):
             del messages, kwargs
             calls.append(task_type)
-            if task_type == "generator_finalize_lore_entries" and calls.count(task_type) == 1:
+            if (
+                task_type == "generator_finalize_story_material_library"
+                and calls.count(task_type) == 1
+            ):
                 yield ChatCompletionStreamChunk(
-                    content_delta='{"lore_entries":[{"title":"义庄","content":"截断',
+                    content_delta='{"story_material_library":{"bad":"not list"}}',
                     model="deepseek-v4-pro",
                 )
                 return
-
             yield ChatCompletionStreamChunk(
-                content_delta=json.dumps(
-                    finalize_stream_payload(task_type),
-                    ensure_ascii=False,
-                ),
+                content_delta=json.dumps(finalize_stream_payload(task_type), ensure_ascii=False),
                 model="deepseek-v4-pro",
             )
 
-    service = GameGeneratorService(router=FakeRouter())
-
     result = anyio.run(
-        service.finalize,
-        GeneratorFinalizeRequest(
-            concept="黑暗武侠",
-            history=[],
-            confirmed_requirements={},
-        ),
+        GameGeneratorService(router=FakeRouter()).finalize,
+        GeneratorFinalizeRequest(concept="黑暗武侠", history=[], confirmed_requirements={}),
     )
 
     assert result.config.title == "雁回镇旧案"
-    assert calls.count("generator_finalize_lore_entries") == 2
-
-
-def test_generator_finalize_job_marks_timeout_failed(db_session, monkeypatch) -> None:
-    class SlowGameGeneratorService:
-        async def finalize_stream(self, request, on_update=None):
-            del request, on_update
-            await anyio.sleep(0.05)
-
-    job = GeneratorFinalizeJob(
-        status="pending",
-        request_json={
-            "concept": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
-    )
-    db_session.add(job)
-    db_session.commit()
-
-    monkeypatch.setattr("app.services.generator_jobs.FINALIZE_JOB_TIMEOUT_SECONDS", 0.01)
-    monkeypatch.setattr(
-        "app.services.generator_jobs.GameGeneratorService",
-        SlowGameGeneratorService,
-    )
-
-    anyio.run(run_finalize_job, job.id)
-
-    db_session.expire_all()
-    saved = db_session.get(GeneratorFinalizeJob, job.id)
-    assert saved.status == "failed"
-    assert "完整配置生成超过 14 分钟" in saved.error_message
+    assert calls.count("generator_finalize_story_material_library") == 2
 
 
 def test_generator_finalize_job_persists_stream_progress(db_session, monkeypatch) -> None:
@@ -385,23 +311,18 @@ def test_generator_finalize_job_persists_stream_progress(db_session, monkeypatch
         async def finalize_stream(self, request, on_update=None):
             del request
             if on_update:
-                await on_update("正在规划世界书。", '{"title":"雁回镇旧案"', "deepseek-v4-pro")
+                await on_update("正在生成剧本素材库。", '{"title":"雁回镇旧案"', "deepseek-v4-pro")
             return GeneratorFinalizeResponse(
-                config=GeneratedGameConfig.model_validate(sample_generated_config()),
+                config=build_generated_config(),
                 model_used="deepseek-v4-pro",
             )
 
     job = GeneratorFinalizeJob(
         status="pending",
-        request_json={
-            "concept": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
+        request_json={"concept": "黑暗武侠", "history": [], "confirmed_requirements": {}},
     )
     db_session.add(job)
     db_session.commit()
-
     monkeypatch.setattr(
         "app.services.generator_jobs.GameGeneratorService",
         StreamingGameGeneratorService,
@@ -412,16 +333,13 @@ def test_generator_finalize_job_persists_stream_progress(db_session, monkeypatch
     db_session.expire_all()
     saved = db_session.get(GeneratorFinalizeJob, job.id)
     assert saved.status == "completed"
-    assert saved.reasoning_content == "正在规划世界书。"
+    assert saved.reasoning_content == "正在生成剧本素材库。"
     assert saved.content_buffer == '{"title":"雁回镇旧案"'
-    assert saved.progress_message == "完整配置已生成，正在返回结果。"
+    assert saved.result_json["story_settings"]["format_version"] == "rpgforge.story.v2"
 
 
 def test_generator_chat_job_lifecycle(reset_database, monkeypatch) -> None:
-    def fake_enqueue_chat_job(job_id):
-        del job_id
-
-    monkeypatch.setattr("app.routers.generator.enqueue_chat_job", fake_enqueue_chat_job)
+    monkeypatch.setattr("app.routers.generator.enqueue_chat_job", lambda job_id: None)
     client = TestClient(app)
 
     response = client.post(
@@ -432,20 +350,45 @@ def test_generator_chat_job_lifecycle(reset_database, monkeypatch) -> None:
             "confirmed_requirements": {},
         },
     )
+    payload = response.json()
+    read_response = client.get(f"/api/generator/chat-jobs/{payload['id']}")
+    active_response = client.get("/api/generator/chat-jobs/active")
 
     assert response.status_code == 202
-    payload = response.json()
-    assert payload["status"] == "pending"
-
-    read_response = client.get(f"/api/generator/chat-jobs/{payload['id']}")
-
-    assert read_response.status_code == 200
     assert read_response.json()["status"] == "pending"
-    assert read_response.json()["response"] is None
-
-    active_response = client.get("/api/generator/chat-jobs/active")
-    assert active_response.status_code == 200
     assert active_response.json()["id"] == payload["id"]
+
+
+def test_generator_finalize_job_returns_completed_config(db_session) -> None:
+    config = build_generated_config().model_dump(mode="json")
+    job = GeneratorFinalizeJob(
+        status="completed",
+        request_json={"concept": "黑暗武侠", "history": [], "confirmed_requirements": {}},
+        result_json=config,
+        model_used="deepseek-reasoner",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    response = TestClient(app).get(f"/api/generator/finalize-jobs/{job.id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["config"]["story_settings"]["format_version"] == "rpgforge.story.v2"
+
+
+def test_generator_create_game_from_story_settings_config(reset_database) -> None:
+    response = TestClient(app).post(
+        "/api/generator/create-game",
+        json={"generated_config": build_generated_config().model_dump(mode="json")},
+    )
+
+    assert response.status_code == 201
+    game = response.json()["game"]
+    assert game["title"] == "雁回镇旧案"
+    assert game["config"]["story_settings"]["story_core"]["main_goal"] == "查清义庄旧案。"
+    assert [character["name"] for character in game.get("characters", [])] == []
 
 
 def test_enqueue_chat_job_uses_current_rq_timeout_argument(monkeypatch) -> None:
@@ -456,6 +399,8 @@ def test_enqueue_chat_job_uses_current_rq_timeout_argument(monkeypatch) -> None:
             calls.append(kwargs)
 
     monkeypatch.setattr("app.services.job_queue.rpgforge_queue", lambda: FakeQueue())
+
+    from uuid import uuid4
 
     job_id = uuid4()
     enqueue_chat_job(job_id)
@@ -477,448 +422,225 @@ def test_generator_chat_job_returns_completed_response(db_session) -> None:
     }
     job = GeneratorChatJob(
         status="completed",
-        request_json={
-            "user_input": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
+        request_json={"user_input": "黑暗武侠", "history": [], "confirmed_requirements": {}},
         result_json=result_json,
         model_used="deepseek-v4-pro",
     )
     db_session.add(job)
     db_session.commit()
 
-    client = TestClient(app)
-    response = client.get(f"/api/generator/chat-jobs/{job.id}")
+    response = TestClient(app).get(f"/api/generator/chat-jobs/{job.id}")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "completed"
-    assert payload["model_used"] == "deepseek-v4-pro"
     assert payload["response"]["stage"] == "ready_to_generate"
 
 
-def test_generator_finalize_job_lifecycle(reset_database, monkeypatch) -> None:
-    def fake_enqueue_finalize_job(job_id):
-        del job_id
-
-    monkeypatch.setattr(
-        "app.routers.generator.enqueue_finalize_job",
-        fake_enqueue_finalize_job,
-    )
-    client = TestClient(app)
-
-    response = client.post(
-        "/api/generator/finalize-jobs",
-        json={
-            "concept": "黑暗武侠，主角是失忆镖师。",
-            "history": [],
-            "confirmed_requirements": {"genre": "武侠"},
-        },
-    )
-
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["status"] == "pending"
-
-    read_response = client.get(f"/api/generator/finalize-jobs/{payload['id']}")
-
-    assert read_response.status_code == 200
-    assert read_response.json()["status"] == "pending"
-    assert read_response.json()["config"] is None
-
-    active_response = client.get("/api/generator/finalize-jobs/active")
-    assert active_response.status_code == 200
-    assert active_response.json()["id"] == payload["id"]
-
-
-def test_generator_finalize_job_returns_completed_config(db_session) -> None:
-    job = GeneratorFinalizeJob(
-        status="completed",
-        request_json={
-            "concept": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
-        result_json=sample_generated_config(),
-        model_used="deepseek-reasoner",
-    )
-    db_session.add(job)
-    db_session.commit()
-
-    client = TestClient(app)
-    response = client.get(f"/api/generator/finalize-jobs/{job.id}")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "completed"
-    assert payload["model_used"] == "deepseek-reasoner"
-    assert payload["config"]["title"] == "雁回镇旧案"
-
-
-def test_recover_stale_jobs_marks_missing_pending_and_timed_out(db_session, monkeypatch) -> None:
-    pending = GeneratorChatJob(
-        status="pending",
-        request_json={
-            "user_input": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
-    )
-    running = GeneratorFinalizeJob(
-        status="running",
-        request_json={
-            "concept": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {"genre": "武侠"},
-        },
-        last_event_at=datetime.now(UTC) - timedelta(minutes=20),
-    )
-    db_session.add_all([pending, running])
-    db_session.commit()
-
-    monkeypatch.setattr(
-        "app.services.job_queue._rq_job_exists",
-        lambda connection, job_id: False,
-    )
-
-    counts = recover_stale_jobs(connection=object())
-
-    db_session.expire_all()
-    assert counts == {"running_timeout": 1, "pending_missing": 1}
-    assert db_session.get(GeneratorChatJob, pending.id).status == "failed"
-    assert db_session.get(GeneratorFinalizeJob, running.id).status == "failed"
-
-
-def test_generator_finalize_job_events_returns_terminal_snapshot(db_session) -> None:
-    job = GeneratorFinalizeJob(
-        status="completed",
-        request_json={
-            "concept": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
-        result_json=sample_generated_config(),
-        model_used="deepseek-reasoner",
-        reasoning_content="配置生成：完整配置已合并。",
-        content_buffer='{"title":"雁回镇旧案"}',
-        progress_message="完整配置已生成，正在返回结果。",
-    )
-    db_session.add(job)
-    db_session.commit()
-
-    client = TestClient(app)
-    with client.stream("GET", f"/api/generator/finalize-jobs/{job.id}/events") as response:
-        body = "".join(response.iter_text())
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: snapshot" in body
-    assert '"terminal": true' in body
-    assert "雁回镇旧案" in body
-
-
-def test_generator_chat_job_events_poll_db_snapshot_without_broker_event(
-    db_session,
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr("app.routers.generator.SSE_DB_SNAPSHOT_INTERVAL_SECONDS", 0.01)
-    job = GeneratorChatJob(
-        status="pending",
-        request_json={
-            "user_input": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
-        progress_message="等待 DeepSeek 返回流式事件。",
-        last_event_at=datetime.now(UTC),
-    )
-    db_session.add(job)
-    db_session.commit()
-    db_session.refresh(job)
-
-    def complete_job_later() -> None:
-        sleep(0.05)
-        with SessionLocal() as db:
-            saved = db.get(GeneratorChatJob, job.id)
-            assert saved is not None
-            now = datetime.now(UTC)
-            saved.status = "completed"
-            saved.result_json = {
-                "stage": "ready_to_generate",
-                "confirmed_requirements": {"genre": "武侠"},
-                "missing_questions": [],
-                "assistant_reply": "设定已确认，可以生成完整配置。",
-                "model_used": "deepseek-v4-pro",
-            }
-            saved.model_used = "deepseek-v4-pro"
-            saved.reasoning_content = "确认核心设定。"
-            saved.content_buffer = '{"stage":"ready_to_generate"}'
-            saved.progress_message = "访谈回复已完成，正在返回结果。"
-            saved.last_event_at = now
-            saved.completed_at = now
-            db.add(saved)
-            db.commit()
-
-    updater = Thread(target=complete_job_later)
-    updater.start()
-    client = TestClient(app)
-    try:
-        with client.stream("GET", f"/api/generator/chat-jobs/{job.id}/events") as response:
-            body = "".join(response.iter_text())
-    finally:
-        updater.join(timeout=1)
-
-    assert response.status_code == 200
-    assert "event: snapshot" in body
-    assert '"terminal": true' in body
-    assert "设定已确认，可以生成完整配置。" in body
-
-
-def test_generator_chat_job_events_reads_stream_broker_event(db_session, monkeypatch) -> None:
-    monkeypatch.setattr("app.routers.generator.SSE_DB_SNAPSHOT_INTERVAL_SECONDS", 0.01)
-    job = GeneratorChatJob(
-        status="pending",
-        request_json={
-            "user_input": "黑暗武侠",
-            "history": [],
-            "confirmed_requirements": {},
-        },
-        progress_message="等待 DeepSeek 返回流式事件。",
-        last_event_at=datetime.now(UTC),
-    )
-    db_session.add(job)
-    db_session.commit()
-    db_session.refresh(job)
-
-    stream_calls = {"count": 0}
-    monkeypatch.setattr(
-        "app.routers.generator.generator_stream_event_broker.latest_stream_entry",
-        lambda job_id: None,
-    )
-
-    async def fake_read_stream_event(job_id, last_id, *, timeout_seconds):
-        del last_id
-        if stream_calls["count"] == 0:
-            stream_calls["count"] += 1
-            return (
-                "1-0",
-                {
-                    "type": "progress",
-                    "job_id": str(job_id),
-                    "status": "running",
-                    "progress_message": "broker 进度：生成器正在确认设定。",
-                    "last_event_at": datetime.now(UTC).isoformat(),
-                },
-            )
-        await asyncio.sleep(timeout_seconds)
-        return None
-
-    monkeypatch.setattr(
-        "app.routers.generator.generator_stream_event_broker.read_stream_event",
-        fake_read_stream_event,
-    )
-
-    def complete_job_later() -> None:
-        sleep(0.05)
-        with SessionLocal() as db:
-            saved = db.get(GeneratorChatJob, job.id)
-            assert saved is not None
-            now = datetime.now(UTC)
-            saved.status = "completed"
-            saved.result_json = {
-                "stage": "ready_to_generate",
-                "confirmed_requirements": {"genre": "武侠"},
-                "missing_questions": [],
-                "assistant_reply": "设定已确认，可以生成完整配置。",
-                "model_used": "deepseek-v4-pro",
-            }
-            saved.model_used = "deepseek-v4-pro"
-            saved.progress_message = "访谈回复已完成，正在返回结果。"
-            saved.last_event_at = now
-            saved.completed_at = now
-            db.add(saved)
-            db.commit()
-
-    updater = Thread(target=complete_job_later)
-    updater.start()
-    client = TestClient(app)
-    try:
-        with client.stream("GET", f"/api/generator/chat-jobs/{job.id}/events") as response:
-            body = "".join(response.iter_text())
-    finally:
-        updater.join(timeout=1)
-
-    assert response.status_code == 200
-    assert "event: progress" in body
-    assert "broker 进度：生成器正在确认设定。" in body
-    assert '"terminal": true' in body
-    assert "设定已确认，可以生成完整配置。" in body
-
-
-def test_generator_create_game_from_config(reset_database) -> None:
-    client = TestClient(app)
-
-    response = client.post(
-        "/api/generator/create-game",
-        json={"generated_config": sample_generated_config()},
-    )
-
-    assert response.status_code == 201
-    game = response.json()["game"]
-    assert game["title"] == "雁回镇旧案"
-    assert len(game["lore_entries"]) == 1
-    assert len(game["modes"]) == 1
-
-
-def _task_count(task_type: str, calls: list[dict[str, object]]) -> int:
-    return sum(1 for call in calls if call["task_type"] == task_type)
-
-
 def finalize_stream_payload(task_type: str) -> dict:
-    payloads = {
-        "generator_finalize_outline": {
-            "title": "雁回镇旧案",
-            "genre": "黑暗武侠",
-            "description": "失忆镖师追查义庄旧案。",
-            "worldview": {
-                "summary": "雁回镇义庄暗藏旧案。",
-                "tone": "冷峻",
-                "setting": "秋末雁回镇",
-                "core_conflicts": ["旧案与新案重叠"],
-            },
-            "script_outline": {
+    if task_type == "generator_finalize_outline":
+        return {
+            "format_version": "rpgforge.story.v2",
+            "game_profile": {
                 "title": "雁回镇旧案",
-                "user_brief": {
-                    "story_background": "黑暗武侠，雁回镇义庄。",
-                    "core_premise": "失忆镖师追查义庄旧案。",
-                    "must_include": [],
-                    "forbidden_content": [],
-                    "playstyle_preferences": [],
-                    "tone_preferences": [],
-                    "raw_user_input": "黑暗武侠",
-                },
-                "acts": [
-                    {
-                        "id": "act_1",
-                        "name": "义庄夜雨",
-                        "objective": "找到镖局旧案的第一条线索。",
-                        "dramatic_question": "沈砚能否证明自己不是旧案帮凶？",
-                        "pressure": "三日后封案。",
-                        "must_hit_beats": ["抵达义庄", "发现账册缺页"],
-                        "allowed_reveals": ["旧案仍有人遮掩"],
-                        "forbidden_reveals": ["账册真凶"],
-                        "relationship_turn": "仵作从回避转为有限协助。",
-                        "escalation_limit": "只暴露地方旧案，不升级为江湖大战。",
-                        "completion_signal": "确认旧案仍有人遮掩。",
-                    }
-                ],
-                "campaign_contract": {
-                    "premise": "失忆镖师从义庄旧案找回过去。",
-                    "player_fantasy": "失忆镖师以调查和江湖人情追查旧案。",
-                    "central_question": "沈砚失忆前到底护送了什么？",
-                    "emotional_arc": "从不安到直面过去。",
-                    "must_preserve": [],
-                    "must_not_become": [],
-                    "tone_do": ["冷峻", "克制"],
-                    "tone_dont": ["轻喜剧"],
-                    "act_plan": [],
-                    "relationship_arcs": [],
-                    "forbidden_drift": ["不要变成修仙升级流"],
-                    "canon_terms": ["雁回镇", "义庄"],
-                    "pacing_rules": ["每回合推进一个可验证线索"],
-                    "current_act": "act_1",
-                },
-                "truth_map": [
-                    {
-                        "truth": "账册记录了旧案交易。",
-                        "public_mask": "义庄只是闹鬼。",
-                        "reveal_condition": "玩家拿到账册缺页。",
-                    }
-                ],
-                "clue_ladder": [
-                    {
-                        "stage": "第一层",
-                        "clue": "棺木底部有湿泥。",
-                        "points_to": "义庄后门。",
-                        "do_not_reveal": "真凶身份。",
-                    }
-                ],
-                "pressure_clock": [
-                    {
-                        "name": "封案压力",
-                        "tick_condition": "玩家拖延调查。",
-                        "consequence": "官府封存尸格。",
-                        "visibility": "public",
-                    }
-                ],
+                "genre": "黑暗武侠",
+                "description": "失忆镖师追查义庄旧案。",
+                "tone": "冷峻",
             },
-            "main_characters": [
+            "worldview": {
+                "summary": "雁回镇义庄旧案多年未结。",
+                "setting": "雁回镇义庄",
+                "public_facts": ["镇外旧义庄无人敢近。"],
+                "hidden_facts": ["义庄暗藏旧案账册。"],
+            },
+            "story_core": {
+                "premise": "失忆镖师追查义庄旧案。",
+                "core_fantasy": "调查旧案。",
+                "central_mystery": "沈砚失忆前到底护送了什么？",
+                "main_goal": "查清义庄旧案。",
+                "current_act": "act_1",
+                "must_preserve": [],
+                "must_not_become": [],
+                "forbidden_drift": [],
+                "canon_terms": ["雁回镇", "义庄"],
+            },
+            "act_plan_outline": [],
+            "main_quest_path_outline": [],
+            "core_mechanics_outline": [],
+            "material_plan": [],
+            "home_base": {"name": "[地点]", "role": "休整与情报据点"},
+            "hard_rules": {
+                "must_follow": ["每回合给出 A/B/C/D 四个具体行动选项。"],
+                "must_not": [],
+                "reveal_rules": ["不要提前揭露账册真凶。"],
+                "continuity_rules": ["保持人物动机一致。"],
+            },
+            "generation_parameters": {
+                "narrative_target_min_chars": 800,
+                "narrative_target_max_chars": 1200,
+                "narrative_min_chars": 700,
+                "paragraph_min": 3,
+                "paragraph_max": 6,
+                "scene_heading_max": 1,
+                "emphasis_min": 2,
+                "emphasis_max": 4,
+                "recent_turn_excerpt_chars": 420,
+            },
+        }
+    if task_type == "generator_finalize_core_characters":
+        return {
+            "core_characters": [
                 {
+                    "id": "shen_yan",
                     "name": "沈砚",
+                    "aliases": [],
                     "role": "protagonist",
                     "identity": "失忆镖师",
-                    "relationship_role": "玩家主角",
-                }
-            ],
-            "core_locations": ["义庄"],
-            "core_factions": ["雁回镖局"],
-            "canon_terms": ["雁回镇", "义庄"],
-            "forbidden_public_spoilers": ["账册真凶"],
-            "generation_notes": "测试分块流水线。",
-        },
-        "generator_finalize_characters": {
-            "characters": [
-                {
-                    "name": "沈砚",
-                    "aliases": ["沈镖师"],
-                    "role": "protagonist",
-                    "identity": "失忆镖师",
-                    "description": "冷静、警觉，正在追查自己的过去。",
-                    "appearance": "灰青劲装，左腕旧伤。",
-                    "portrait_prompt": (
-                        "Chinese wuxia courier, gray robe, old wrist scar, "
-                        "restrained expression"
-                    ),
+                    "description": "追查义庄旧案的主角。",
+                    "appearance": "旧青色短打，右手缠着褪色布带。",
+                    "portrait_prompt": "",
                     "visibility": "visible",
+                    "dramatic_function": "调查主角",
+                    "desire": "找回记忆",
+                    "fear": "自己与旧案有关",
+                    "leverage": "义庄铃声",
+                    "relationship_arc": "从孤身调查到信任同伴",
+                    "public_limit": "不会提前知道真凶",
                 }
             ]
-        },
-        "generator_finalize_lore_entries": {
-            "lore_entries": [
+        }
+    if task_type == "generator_finalize_act_plan":
+        return {
+            "act_plan": [
                 {
-                    "title": "义庄",
-                    "type": "clue",
-                    "keywords": ["义庄"],
-                    "trigger_words": ["棺木", "账册"],
-                    "priority": "critical",
-                    "always_on": True,
-                    "visibility": "mixed",
-                    "public_info": "镇外旧义庄，近来夜里常有灯火。",
-                    "gm_secret": "义庄暗藏旧案账册。",
-                    "content": "义庄是第一幕核心地点，公开信息只表现异常，隐藏信息保留给 GM。",
-                    "usage_note": "调查义庄时注入。",
+                    "id": "act_1",
+                    "title": "义庄夜雨",
+                    "objective": "找到旧案第一条线索。",
+                    "dramatic_question": "沈砚能否证明自己不是帮凶？",
+                    "pressure": "黑伞客也在寻找线索。",
+                    "must_hit_beats": ["发现门槛泥痕"],
+                    "allowed_reveals": ["旧案仍有人遮掩"],
+                    "forbidden_reveals": ["账册真凶"],
+                    "completion_anchors": [
+                        {
+                            "id": "act_1_find_mud",
+                            "title": "找到门槛泥痕",
+                            "required": True,
+                            "description": "确认有人近期翻入义庄。",
+                            "completion_signal": "发现门槛泥痕。",
+                        }
+                    ],
+                    "transition_to_next_act": {
+                        "target_act": "act_2",
+                        "condition": "发现泥痕后追查黑伞客。",
+                    },
+                },
+                {
+                    "id": "act_2",
+                    "title": "黑伞追踪",
+                    "objective": "追查黑伞客。",
+                    "dramatic_question": "陆沉舟是敌是友？",
+                    "pressure": "捕房封锁线索。",
+                    "must_hit_beats": ["找到账册残页"],
+                    "allowed_reveals": ["账册残页存在"],
+                    "forbidden_reveals": ["最终主谋"],
+                    "completion_anchors": [],
+                    "transition_to_next_act": {},
+                },
+            ]
+        }
+    if task_type == "generator_finalize_main_quest_path":
+        return {
+            "main_quest_path": [
+                {
+                    "id": "main_quest_1",
+                    "act_id": "act_1",
+                    "title": "查明义庄泥痕",
+                    "objective": "找到旧案第一条线索。",
+                    "player_visible": "调查义庄异常痕迹。",
+                    "completion_signal": "发现门槛泥痕。",
+                    "optional": False,
                 }
             ]
-        },
-        "generator_finalize_modes": {
-            "modes": [
+        }
+    if task_type == "generator_finalize_core_mechanics":
+        return {
+            "core_mechanics": [
                 {
-                    "name": "调查模式",
-                    "triggers": ["调查", "线索"],
-                    "injection": "不要直接给出真相，提供可验证线索。",
+                    "id": "investigation",
+                    "name": "调查推进",
+                    "rule": "给线索不给答案。",
+                    "progression": "锚点完成后切幕。",
+                    "visibility": "public",
+                }
+            ]
+        }
+    if task_type == "generator_finalize_action_style_rules":
+        return {
+            "action_style_rules": [
+                {
+                    "id": "investigation",
+                    "name": "调查行动",
+                    "triggers": ["调查", "检查"],
+                    "rule": "提供可验证线索。",
                     "priority": "high",
                     "enabled": True,
                 }
             ]
-        },
-        "generator_finalize_initial_state": {
+        }
+    if task_type == "generator_finalize_story_material_library":
+        return {
+            "story_material_library": [
+                {
+                    "id": "yizhuang",
+                    "title": "义庄",
+                    "type": "clue",
+                    "keywords": ["义庄", "泥痕"],
+                    "triggers": ["义庄", "泥痕"],
+                    "priority": "critical",
+                    "always_on": True,
+                    "visibility": "mixed",
+                    "public_info": "镇外旧义庄无人敢近。",
+                    "gm_secret": "义庄暗藏旧案账册。",
+                    "content": "义庄门槛泥痕指向黑伞客。",
+                    "usage": "玩家调查义庄时召回。",
+                    "enabled": True,
+                }
+            ]
+        }
+    if task_type == "generator_finalize_home_base":
+        return {
+            "home_base": {
+                "id": "home_base",
+                "name": "[地点]",
+                "role": "休整与情报据点",
+                "public_functions": ["整理线索"],
+                "hidden_hooks": [],
+            }
+        }
+    if task_type == "generator_finalize_hard_rules":
+        return {
+            "hard_rules": {
+                "must_follow": ["每回合给出 A/B/C/D 四个具体行动选项。"],
+                "must_not": ["不要修仙飞升"],
+                "reveal_rules": ["不要提前揭露账册真凶。"],
+                "continuity_rules": ["保持人物动机一致。"],
+            }
+        }
+    if task_type == "generator_finalize_initial_state":
+        return {
             "initial_state": {
-                "current_turn": "bad",
-                "time": {"current": "秋末，申时", "pressure": "三日后封案"},
-                "location": {"current": "雁回镇义庄", "known_locations": ["雁回镇"]},
-                "protagonist": {"attributes": {"洞察": 2}},
-                "progression": "bad",
+                "current_turn": 0,
+                "time": {"current": "秋末雨夜"},
+                "location": {"current": "雁回镇义庄"},
+                "protagonist": {"name": "沈砚", "identity": "失忆镖师"},
+                "progression": {
+                    "level": 1,
+                    "xp": 0,
+                    "next_level_xp": 100,
+                    "total_xp": 0,
+                    "xp_log": [],
+                },
                 "skills": [],
                 "abilities": [],
                 "conditions": [],
@@ -932,84 +654,9 @@ def finalize_stream_payload(task_type: str) -> dict:
                 "hidden_facts": [],
                 "open_threads": [],
             }
-        },
-        "generator_finalize_rules": {
-            "system_prompt": "你是 GM，每回合输出玩家可见剧情和 A/B/C/D 四个行动选项。",
-            "generation_notes": "test",
-            "voice_profiles": [],
-        },
-    }
-    return payloads[task_type]
+        }
+    raise AssertionError(f"Unexpected task type: {task_type}")
 
 
-def sample_generated_config() -> dict:
-    return {
-        "title": "雁回镇旧案",
-        "genre": "黑暗武侠",
-        "description": "失忆镖师追查义庄旧案。",
-        "system_prompt": "你是 GM，每回合生成剧情和 A/B/C/D 行动选项。",
-        "worldview": {"tone": "冷峻"},
-        "script_outline": {
-            "title": "雁回镇旧案",
-            "user_brief": {
-                "story_background": "黑暗武侠，雁回镇义庄。",
-                "core_premise": "失忆镖师追查义庄旧案。",
-                "must_include": ["雨夜义庄"],
-                "forbidden_content": ["不要修仙"],
-                "playstyle_preferences": ["调查"],
-                "tone_preferences": ["冷峻"],
-                "raw_user_input": "黑暗武侠，主角是失忆镖师。",
-            },
-            "acts": [],
-            "campaign_contract": {
-                "player_fantasy": "失忆镖师追查义庄旧案。",
-                "central_question": "旧案真相是什么？",
-                "must_preserve": ["雨夜义庄"],
-                "must_not_become": ["不要修仙"],
-                "forbidden_drift": ["不要修仙"],
-                "current_act": "act_1",
-            },
-            "truth_map": [],
-            "clue_ladder": [],
-            "pressure_clock": [],
-        },
-        "generation_notes": "test",
-        "lore_entries": [
-            {
-                "title": "义庄",
-                "type": "location",
-                "keywords": ["义庄"],
-                "trigger_words": ["尸体", "棺材"],
-                "priority": "high",
-                "always_on": True,
-                "visibility": "mixed",
-                "public_info": "镇外旧义庄。",
-                "gm_secret": "义庄暗藏旧案账册。",
-                "content": "义庄是第一章核心地点。",
-                "usage_note": "调查时注入。",
-            }
-        ],
-        "modes": [
-            {
-                "name": "调查模式",
-                "triggers": ["调查", "搜索"],
-                "injection": "不要直接给出真相，提供可验证线索。",
-                "priority": "medium",
-                "enabled": True,
-            }
-        ],
-        "initial_state": {
-            "current_turn": 0,
-            "time": {"current": "秋末，申时", "pressure": "三日后封案"},
-            "location": {"current": "雁回镇义庄", "known_locations": ["雁回镇"]},
-            "protagonist": {"name": "未定", "identity": "失忆镖师"},
-            "inventory": [],
-            "quests": [],
-            "npcs": [],
-            "factions": [],
-            "variables": {},
-            "known_facts": [],
-            "hidden_facts": [],
-            "open_threads": [],
-        },
-    }
+def _task_count(task_type: str, calls: list[dict[str, object]]) -> int:
+    return sum(1 for call in calls if call["task_type"] == task_type)

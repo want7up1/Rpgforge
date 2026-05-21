@@ -102,7 +102,7 @@ def test_model_router_uses_saved_task_model_routes(db_session) -> None:
             "task_model_routes": {
                 "state_delta_extract": "pro",
                 "generator_finalize": "flash",
-                "generator_finalize_lore_entries": "flash",
+                "generator_finalize_story_material_library": "flash",
             },
         },
     )
@@ -121,7 +121,7 @@ def test_model_router_uses_saved_task_model_routes(db_session) -> None:
     )
     anyio.run(
         router.use_pro,
-        "generator_finalize_lore_entries",
+        "generator_finalize_story_material_library",
         [{"role": "user", "content": "test"}],
     )
 

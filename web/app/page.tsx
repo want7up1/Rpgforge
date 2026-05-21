@@ -180,7 +180,7 @@ function EmptyLauncher() {
         <p className="text-sm font-bold text-[color:var(--gold)]">RPGForge</p>
         <h1 className="mt-2 text-3xl font-black sm:text-5xl">开始第一场冒险</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[color:var(--muted)]">
-          输入一个世界想法，确认设定后生成世界资料、角色、状态和初始剧情。
+          输入一个世界想法，确认设定后生成剧本设定、角色、状态和初始剧情。
         </p>
       </div>
       <Link className="app-button app-button-primary w-full sm:w-fit" href="/games/new">

@@ -5,9 +5,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.character import Character
-from app.models.game import Game, GameConfig
-from app.models.lore import LoreEntry
-from app.models.mode import Mode
+from app.models.game import Game
+from app.services.story_settings import story_settings_from_config
 
 
 def script_export_filename(title: str) -> str:
@@ -16,21 +15,7 @@ def script_export_filename(title: str) -> str:
 
 
 def export_game_script_markdown(game: Game) -> str:
-    config = game.config
-    worldview = _record(config.worldview if config else {})
-    script_outline = _record(config.script_outline if config else {})
-    lore_entries = sorted(
-        list(game.lore_entries),
-        key=lambda entry: (
-            not bool(entry.is_active),
-            _priority_order(entry.priority),
-            entry.title,
-        ),
-    )
-    modes = sorted(
-        list(game.modes),
-        key=lambda mode: (not mode.enabled, _priority_order(mode.priority), mode.name),
-    )
+    story_settings = story_settings_from_config(game.config)
     characters = sorted(
         list(game.characters),
         key=lambda character: (_character_role_order(character.role), character.name),
@@ -40,8 +25,8 @@ def export_game_script_markdown(game: Game) -> str:
         f"# {_text(game.title)}",
         "",
         (
-            "> RPGForge 剧本导出。本文只包含故事框架、世界设定、角色档案、"
-            "世界资料和模式规则，不包含已游玩回合、玩家行动历史、状态结算、"
+            "> RPGForge story_settings v2 剧本导出。本文只包含故事设定源，"
+            "不包含已游玩回合、玩家行动历史、状态结算、"
             "记忆摘要或 AI 思考过程。"
         ),
         "",
@@ -52,14 +37,17 @@ def export_game_script_markdown(game: Game) -> str:
     ]
 
     _append_basic_info(lines, game)
-    _append_worldview(lines, worldview)
-    _append_story_blueprint(lines, script_outline)
-    _append_script_contracts(lines, script_outline)
-    _append_act_structure(lines, script_outline)
+    _append_section(lines, "世界观", story_settings.get("worldview"))
+    _append_section(lines, "故事核心", story_settings.get("story_core"))
     _append_characters(lines, characters)
-    _append_lore(lines, lore_entries)
-    _append_modes(lines, modes)
-    _append_advanced(lines, config)
+    _append_section(lines, "五幕主线", story_settings.get("act_plan"))
+    _append_section(lines, "主线任务轨迹", story_settings.get("main_quest_path"))
+    _append_section(lines, "核心机制", story_settings.get("core_mechanics"))
+    _append_section(lines, "行动风格规则", story_settings.get("action_style_rules"))
+    _append_section(lines, "剧本素材库", story_settings.get("story_material_library"))
+    _append_section(lines, "[地点]", story_settings.get("home_base"))
+    _append_section(lines, "强制规则", story_settings.get("hard_rules"))
+    _append_section(lines, "生成参数", story_settings.get("generation_parameters"))
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -77,101 +65,15 @@ def _append_basic_info(lines: list[str], game: Game) -> None:
     )
 
 
-def _append_worldview(lines: list[str], worldview: dict[str, Any]) -> None:
-    lines.extend(["## 世界观", ""])
-    if not worldview:
-        lines.extend(["未记录。", ""])
-        return
-    lines.extend(_render_mapping(worldview))
+def _append_section(lines: list[str], title: str, value: Any) -> None:
+    lines.extend([f"## {title}", ""])
+    if isinstance(value, dict):
+        lines.extend(_render_mapping(value) or ["未记录。"])
+    elif isinstance(value, list):
+        lines.extend(_render_list(value, indent=0) or ["未记录。"])
+    else:
+        lines.append(_text(value) or "未记录。")
     lines.append("")
-
-
-def _append_story_blueprint(lines: list[str], script_outline: dict[str, Any]) -> None:
-    user_brief = _record(script_outline.get("user_brief"))
-    truth_map = script_outline.get("truth_map")
-    clue_ladder = script_outline.get("clue_ladder")
-    pressure_clock = script_outline.get("pressure_clock")
-    if not user_brief and not truth_map and not clue_ladder and not pressure_clock:
-        return
-
-    lines.extend(["## 创作简报与编剧蓝图", ""])
-    if user_brief:
-        lines.extend(["### 用户创作简报", ""])
-        lines.extend(_render_mapping(user_brief))
-        lines.append("")
-    if truth_map:
-        lines.extend(["### 真相地图", ""])
-        lines.extend(_render_list(_as_list(truth_map), indent=0))
-        lines.append("")
-    if clue_ladder:
-        lines.extend(["### 线索阶梯", ""])
-        lines.extend(_render_list(_as_list(clue_ladder), indent=0))
-        lines.append("")
-    if pressure_clock:
-        lines.extend(["### 压力时钟", ""])
-        lines.extend(_render_list(_as_list(pressure_clock), indent=0))
-        lines.append("")
-
-
-def _append_script_contracts(lines: list[str], script_outline: dict[str, Any]) -> None:
-    lines.extend(["## 核心设定与剧本契约", ""])
-    contracts = [
-        ("campaign_contract", "战役契约"),
-        ("director_contract", "剧情导演契约"),
-        ("story_contract", "叙事契约"),
-    ]
-    found = False
-    for key, label in contracts:
-        contract = _record(script_outline.get(key))
-        lines.extend([f"### {label}", ""])
-        if contract:
-            found = True
-            lines.extend(_render_mapping(contract))
-        else:
-            lines.append("未记录。")
-        lines.append("")
-
-    extras = {
-        key: value
-        for key, value in script_outline.items()
-        if key not in {
-            "acts",
-            "campaign_contract",
-            "director_contract",
-            "story_contract",
-            "user_brief",
-            "truth_map",
-            "clue_ladder",
-            "pressure_clock",
-            "_character_profiles",
-        }
-    }
-    if extras:
-        found = True
-        lines.extend(["### 其他剧本设定", ""])
-        lines.extend(_render_mapping(extras))
-        lines.append("")
-
-    if not found:
-        lines.extend(["当前没有结构化剧本契约。", ""])
-
-
-def _append_act_structure(lines: list[str], script_outline: dict[str, Any]) -> None:
-    lines.extend(["## 幕结构与主线框架", ""])
-    acts = script_outline.get("acts")
-    if not isinstance(acts, list) or not acts:
-        lines.extend(["未记录。", ""])
-        return
-
-    for index, act in enumerate(acts, start=1):
-        act_record = _record(act)
-        title = _first_text(act_record, ("title", "name", "id", "key")) or f"第 {index} 幕"
-        lines.extend([f"### {title}", ""])
-        if act_record:
-            lines.extend(_render_mapping(act_record))
-        else:
-            lines.append(_text(act))
-        lines.append("")
 
 
 def _append_characters(lines: list[str], characters: list[Character]) -> None:
@@ -201,98 +103,6 @@ def _append_characters(lines: list[str], characters: list[Character]) -> None:
             lines.extend(["**编剧字段**", ""])
             lines.extend(_render_mapping(story_profile))
             lines.append("")
-
-
-def _append_lore(lines: list[str], entries: list[LoreEntry]) -> None:
-    active_entries = [entry for entry in entries if entry.is_active]
-    archived_entries = [entry for entry in entries if not entry.is_active]
-
-    lines.extend(["## 世界资料 / 世界书", ""])
-    if not active_entries:
-        lines.extend(["暂无启用世界资料。", ""])
-    for entry in active_entries:
-        _append_lore_entry(lines, entry)
-
-    if archived_entries:
-        lines.extend(["### 已归档世界资料（不进入当前 GM 上下文）", ""])
-        for entry in archived_entries:
-            lines.extend([f"- {_text(entry.title)}（{_text(entry.type)}）"])
-        lines.append("")
-
-
-def _append_lore_entry(lines: list[str], entry: LoreEntry) -> None:
-    lines.extend(
-        [
-            f"### {_text(entry.title)}",
-            "",
-            f"- 类型：{_text(entry.type)}",
-            f"- 优先级：{_text(entry.priority)}",
-            f"- 可见性：{_text(entry.visibility)}",
-            f"- 常驻注入：{'是' if entry.always_on else '否'}",
-            f"- 关键词：{_list_inline(entry.keywords)}",
-            f"- 触发词：{_list_inline(entry.trigger_words)}",
-            "",
-            "**公开信息**",
-            "",
-            _text(entry.public_info),
-            "",
-            "**GM 秘密**",
-            "",
-            _text(entry.gm_secret),
-            "",
-            "**完整内容**",
-            "",
-            _text(entry.content),
-            "",
-            "**使用说明**",
-            "",
-            _text(entry.usage_note),
-            "",
-        ]
-    )
-
-
-def _append_modes(lines: list[str], modes: list[Mode]) -> None:
-    lines.extend(["## 模式注入 / 机制规则", ""])
-    if not modes:
-        lines.extend(["未记录。", ""])
-        return
-
-    for mode in modes:
-        lines.extend(
-            [
-                f"### {_text(mode.name)}",
-                "",
-                f"- 状态：{'启用' if mode.enabled else '停用'}",
-                f"- 优先级：{_text(mode.priority)}",
-                f"- 触发词：{_list_inline(mode.triggers)}",
-                "",
-                "**注入内容**",
-                "",
-                _text(mode.injection),
-                "",
-            ]
-        )
-
-
-def _append_advanced(lines: list[str], config: GameConfig | None) -> None:
-    lines.extend(["## 附录：高级 GM 指令", ""])
-    if not config:
-        lines.extend(["未记录。", ""])
-        return
-
-    lines.extend(
-        [
-            "### System Prompt",
-            "",
-            _text(config.system_prompt),
-            "",
-            "### 生成备注",
-            "",
-            _text(config.generation_notes),
-            "",
-        ]
-    )
 
 
 def _render_mapping(mapping: dict[str, Any], *, indent: int = 0) -> list[str]:

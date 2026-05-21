@@ -190,7 +190,7 @@ export default function CharactersPage() {
           <section className="grid gap-4">
             {state.characters.length === 0 ? (
               <div className="surface-panel text-sm leading-6 text-[color:var(--muted)]">
-                暂无角色档案。可以点击“同步角色”从当前游戏状态和世界书中建立档案。
+                暂无角色档案。可以点击“同步角色”从当前游戏状态和剧本设定中建立档案。
               </div>
             ) : groupedCharacters.length === 0 ? (
               <div className="surface-panel text-sm leading-6 text-[color:var(--muted)]">

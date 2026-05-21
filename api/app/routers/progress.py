@@ -35,8 +35,6 @@ def _game_query(game_id: UUID):
         .options(
             selectinload(Game.config),
             selectinload(Game.state),
-            selectinload(Game.lore_entries),
-            selectinload(Game.modes),
             selectinload(Game.summaries),
             selectinload(Game.characters),
         )
@@ -224,8 +222,6 @@ def _game_detail_response(game: Game) -> GameDetail:
         updated_at=game.updated_at,
         config=game.config,
         state=game.state,
-        lore_entries=list(game.lore_entries),
-        modes=list(game.modes),
         summaries=list(game.summaries),
         turns=[],
     )

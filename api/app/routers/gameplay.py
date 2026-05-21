@@ -14,6 +14,12 @@ from app.schemas.turn import TurnCreate, TurnJobCreateResponse, TurnJobRead, Tur
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
 from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
 from app.services.job_queue import enqueue_turn_job, reconcile_turn_job_liveness
+from app.services.state_rebuilder import rebuild_game_state
+from app.services.state_settlement import (
+    StateSettlementError,
+    StateSettlementService,
+    record_failed_turn_state_delta,
+)
 from app.services.turn_stream_events import format_sse_event, turn_stream_event_broker
 
 router = APIRouter(prefix="/api/games/{game_id}/turns", tags=["gameplay"])
@@ -113,6 +119,7 @@ async def create_turn(
             detail="已有回合任务或状态维护正在运行，请等待完成后再继续。",
         )
     try:
+        await _ensure_state_settled_or_409(db, game)
         return await service.run_turn(db, game, payload)
     except DeepSeekConfigurationError as exc:
         raise HTTPException(
@@ -138,7 +145,7 @@ async def create_turn_job(
     payload: TurnCreate,
     db: Session = DB_DEPENDENCY,
 ) -> TurnJobCreateResponse:
-    get_game_or_404_for_gameplay(db, game_id)
+    game = get_game_or_404_for_gameplay(db, game_id)
     blocking_job = _active_turn_job(db, game_id)
     if blocking_job is not None:
         raise HTTPException(
@@ -151,6 +158,7 @@ async def create_turn_job(
             status_code=status.HTTP_409_CONFLICT,
             detail="上一回合状态维护仍在进行，请等待状态提取完成后再继续。",
         )
+    await _ensure_state_settled_or_409(db, game)
     job = TurnJob(
         game_id=game_id,
         status="pending",
@@ -202,6 +210,19 @@ def _active_turn_job(db: Session, game_id: UUID) -> TurnJob | None:
     return job
 
 
+async def _ensure_state_settled_or_409(db: Session, game: Game) -> None:
+    try:
+        changed = await StateSettlementService().ensure_settled(db, game)
+    except StateSettlementError as exc:
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    if changed:
+        db.commit()
+
+
 def _active_turn_maintenance_job(db: Session, game_id: UUID) -> TurnJob | None:
     job = db.scalars(
         select(TurnJob)
@@ -236,6 +257,12 @@ def _mark_state_extract_stale(db: Session, job: TurnJob) -> None:
     job.maintenance_completed_at = now
     job.last_event_at = now
     db.add(job)
+    if job.turn_id is not None:
+        game = db.scalars(gameplay_game_query(job.game_id)).first()
+        turn = db.get(Turn, job.turn_id)
+        if game is not None and turn is not None:
+            record_failed_turn_state_delta(db, game=game, turn=turn, error=message)
+            rebuild_game_state(db, game)
     db.commit()
 
 
