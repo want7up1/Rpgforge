@@ -11,6 +11,7 @@ from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
 from app.schemas.turn import TurnCreate, TurnJobRead
+from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekError
 from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
 from app.services.turn_stream_events import turn_stream_event_broker
@@ -47,6 +48,8 @@ class StreamState(TypedDict):
 
 
 async def run_turn_job(job_id: UUID) -> None:
+    # 设置 trace contextvar，让 ModelRouter 知道当前 LLM 调用归属哪个回合。
+    set_trace_context("turn", job_id)
     stream_state: StreamState = {
         "reasoning": "",
         "content": "",
