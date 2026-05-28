@@ -17,7 +17,8 @@
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | 阶段 1（1.1/1.2/1.3）+ 3.1 完成。trace→golden→judge→dashboard 闭环可用 |
-| 下一步建议 | 阶段 2.1 Agent 抽象基类（架构层，无 DB 迁移） |
+| ⚠️ 验证状态 | Round 1–6 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
+| 下一步建议 | 先跑 §9 验证；之后阶段 2.1 Agent 抽象基类（架构层，无 DB 迁移） |
 
 ---
 
@@ -519,3 +520,83 @@ ORDER BY rewrite_rate DESC;
 - 新发现的"不做"决策追加到 §4。
 - 关键常量调整后同步 §5.2 的值。
 - 本文件本身的目录结构（编号章节）保持稳定，方便 Claude 用章节号引用。
+
+---
+
+## 9. 容器验证清单（Round 1–6 待验证）
+
+> ⚠️ Round 1–6 全部在**本地无 Postgres** 环境下开发，只做了 `py_compile` + 前端 `tsc/lint` 静态检查。
+> **首次部署后必须按本清单在容器内验证**，确认迁移、表、endpoint、AI 链路都正常。
+
+### 9.1 迁移 + 启动
+
+```bash
+docker compose up -d --build api worker web
+docker compose exec api alembic upgrade head     # 应升到 20260528_0027
+docker compose exec api alembic current           # 确认 head
+```
+
+预期新增 3 张表：`agent_traces`、`turn_evaluations`，以及 `turn_jobs` 上 5 个新列。
+
+```bash
+docker compose exec postgres psql -U rpg -d rpgforge -c "\d agent_traces"
+docker compose exec postgres psql -U rpg -d rpgforge -c "\d turn_evaluations"
+docker compose exec postgres psql -U rpg -d rpgforge -c "\d turn_jobs" | grep -E "director_used_fallback|drift_severity|rewrite_triggered|extractor_failed|turn_runtime_inputs"
+```
+
+### 9.2 后端测试
+
+```bash
+docker compose exec api pytest tests/ -x -q
+```
+
+重点确认 `test_gameplay.py` 全过（Round 1 改了 PromptBuilder / StoryDirector / DriftValidator 的签名，但都向后兼容）。
+
+### 9.3 trace 落库（玩一回合后）
+
+```bash
+# 玩一回合，然后：
+docker compose exec api python -c "
+from app.db.session import SessionLocal
+from app.models.agent_trace import AgentTrace
+from sqlalchemy import select, func
+with SessionLocal() as db:
+    n = db.scalar(select(func.count(AgentTrace.id)))
+    print('agent_traces rows:', n)
+    for t in db.scalars(select(AgentTrace).order_by(AgentTrace.created_at.desc()).limit(6)):
+        print(t.agent, t.status, t.latency_ms, 'ms', t.model)
+"
+```
+
+预期：一回合产生 story_director / gm_runtime（可能 + gm_runtime_rewrite）/ drift_validator / state_extractor 等多条 trace。
+
+### 9.4 telemetry 字段
+
+```bash
+docker compose exec postgres psql -U rpg -d rpgforge -c \
+  "SELECT director_used_fallback, drift_severity, rewrite_triggered, extractor_failed FROM turn_jobs ORDER BY created_at DESC LIMIT 5;"
+```
+
+### 9.5 admin API（需要 SETTINGS_ADMIN_TOKEN）
+
+```bash
+TOKEN=<你的 token>
+curl -s -H "X-Settings-Admin-Token: $TOKEN" http://localhost:3000/api/admin/stats/recent-turns | python -m json.tool
+curl -s -H "X-Settings-Admin-Token: $TOKEN" "http://localhost:3000/api/admin/traces?limit=5" | python -m json.tool
+```
+
+浏览器打开 `http://localhost:3000/admin`，填 token，确认卡片和 trace 表渲染。
+
+### 9.6 LLM-as-Judge（消耗 quota，可选）
+
+```bash
+GAME_ID=<某个游戏 id>
+docker compose exec api python -m scripts.judge_turn --game-id $GAME_ID --last 1 --yes
+curl -s -H "X-Settings-Admin-Token: $TOKEN" \
+  http://localhost:3000/api/admin/games/$GAME_ID/evaluations | python -m json.tool
+```
+
+### 9.7 验证后
+
+全部通过后，把本节标题改为"Round 1–6 已验证（日期）"，并在 §0 移除待验证警告。
+若发现问题，记录到 §7 已知遗留疑点或新开 Round 修复。
