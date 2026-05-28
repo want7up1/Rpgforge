@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any
 
@@ -9,6 +10,8 @@ from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
 from app.services.prompt_loader import load_prompt_template
 from app.services.story_settings import build_runtime_story
+
+STATE_EXTRACTOR_TIMEOUT_SECONDS = 150.0
 
 
 class StateDeltaExtraction(BaseModel):
@@ -72,9 +75,15 @@ class StateExtractor:
     def __init__(self, router: ModelRouter | None = None) -> None:
         self.router = router or ModelRouter()
 
-    async def extract(self, game: Game, turn: Turn) -> dict[str, Any]:
+    async def extract(
+        self,
+        game: Game,
+        turn: Turn,
+        director_decision: dict[str, Any] | None = None,
+        drift_findings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         current_state = game.state.state_json if game.state else {}
-        payload = {
+        payload: dict[str, Any] = {
             "game": {
                 "title": game.title,
                 "genre": game.genre,
@@ -89,20 +98,66 @@ class StateExtractor:
                 "visible_summary": turn.visible_summary,
             },
         }
+        # 上游 Director / Drift 的提示信号：让 extractor 重点关注它们提到的连续性/冲突项。
+        director_hints = _director_hints(director_decision)
+        if director_hints:
+            payload["director_hints"] = director_hints
+        drift_hints = _drift_hints(drift_findings)
+        if drift_hints:
+            payload["drift_hints"] = drift_hints
         messages = [
             {"role": "system", "content": load_prompt_template("extract_state_delta.md")},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False, default=str)},
         ]
-        result = await self.router.use_flash(
-            "state_delta_extract",
-            messages,
-            json_mode=True,
-            max_tokens=4096,
-            reasoning_effort=None,
-            respect_route=False,
-        )
+        try:
+            result = await asyncio.wait_for(
+                self.router.use_flash(
+                    "state_delta_extract",
+                    messages,
+                    json_mode=True,
+                    max_tokens=4096,
+                    reasoning_effort=None,
+                    respect_route=False,
+                ),
+                timeout=STATE_EXTRACTOR_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise StateExtractorValidationError(
+                f"状态提取超过 {int(STATE_EXTRACTOR_TIMEOUT_SECONDS)} 秒。"
+            ) from exc
         try:
             parsed = parse_json_object(result.content)
             return StateDeltaExtraction.model_validate(parsed).model_dump()
         except (ValueError, ValidationError) as exc:
             raise StateExtractorValidationError(str(exc)) from exc
+
+
+def _director_hints(decision: dict[str, Any] | None) -> dict[str, Any]:
+    """从 director_decision 抽 extractor 实际能用上的提示字段。"""
+    if not isinstance(decision, dict):
+        return {}
+    hints: dict[str, Any] = {}
+    for key in ("continuity_notes", "active_material_titles", "forbidden_reveals"):
+        value = decision.get(key)
+        if isinstance(value, list) and value:
+            hints[key] = value
+    for key in ("scene_objective", "current_act", "pacing_limit"):
+        value = decision.get(key)
+        if isinstance(value, str) and value.strip():
+            hints[key] = value
+    return hints
+
+
+def _drift_hints(findings: dict[str, Any] | None) -> dict[str, Any]:
+    """从 drift_validation 抽 extractor 需要关注的状态冲突。"""
+    if not isinstance(findings, dict):
+        return {}
+    hints: dict[str, Any] = {}
+    for key in ("state_conflicts", "contract_violations", "issues"):
+        value = findings.get(key)
+        if isinstance(value, list) and value:
+            hints[key] = value
+    severity = findings.get("severity")
+    if isinstance(severity, str) and severity.strip():
+        hints["severity"] = severity
+    return hints

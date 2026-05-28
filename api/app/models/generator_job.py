@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -103,6 +103,13 @@ class TurnJob(Base):
     maintenance_error: Mapped[str | None] = mapped_column(Text)
     maintenance_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     maintenance_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Telemetry：记录每回合 Agent 链路的降级 / 重写 / 失败情况。
+    director_used_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    drift_severity: Mapped[str | None] = mapped_column(String(32))
+    rewrite_triggered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    extractor_failed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Director 决策 + Drift 校验结果，供 maintenance 阶段的 StateExtractor 复用。
+    turn_runtime_inputs: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     stream_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_event_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

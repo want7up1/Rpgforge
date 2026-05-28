@@ -139,7 +139,11 @@ def delete_game_progress_save(
     game_id: UUID,
     save_id: UUID,
     db: Session = DB_DEPENDENCY,
-) -> None:
+):
+    # 注意：不要给本函数加 `-> None` 返回注解。本模块顶部有
+    # `from __future__ import annotations`，会把 `-> None` 变成字符串 "None"，
+    # FastAPI 0.115.x 将其 eval 成 NoneType 并误判为 response_model，导致
+    # "Status code 204 must not have a response body" 在 import 时直接崩溃。
     _get_game_or_404(db, game_id)
     progress_save = _get_progress_save_or_404(db, game_id, save_id)
     db.delete(progress_save)
