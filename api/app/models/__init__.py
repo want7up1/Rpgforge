@@ -1,3 +1,4 @@
+from app.models.agent_trace import AgentTrace
 from app.models.character import Character
 from app.models.game import Game, GameConfig
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob, TurnJob
@@ -8,8 +9,10 @@ from app.models.state import GameState
 from app.models.state_delta import StateDelta
 from app.models.summary import Summary
 from app.models.turn import Turn
+from app.models.turn_evaluation import TurnEvaluation
 
 __all__ = [
+    "AgentTrace",
     "Game",
     "Character",
     "GameConfig",
@@ -22,5 +25,6 @@ __all__ = [
     "StateDelta",
     "Summary",
     "Turn",
+    "TurnEvaluation",
     "TurnJob",
 ]

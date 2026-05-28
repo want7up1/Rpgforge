@@ -1,4 +1,27 @@
-# RPGForge Project Guide
+# ⚠️ 已归档文档 — 仅供历史参考
+
+**此文档是 2026-05-11 项目启动时写给 Codex / GPT-5.5 的初版蓝图，多处与当前实现不符，请勿据此编写代码或制定方案。**
+
+已知不一致项（不完全列表）：
+
+- **数据库表**：文中描述的 `lore_entries`、`modes` 表已在迁移 `20260521_0024` 中被 drop。
+- **API 路由**：§10.5 / §10.6 列出的 `/api/games/{id}/lore`、`/api/games/{id}/modes` 等接口现在不存在。
+- **前端页面**：§11.4 "世界书管理页面"、§11.5 "模式注入页面" 已不存在。
+- **状态变更流程**：§6.7 描述的"pending → 人工确认"已改为 `state_delta_auto_apply` 自动应用。
+- **TTS 模块**：§5 / §9.10 / §9.11 / §9.12 / §10.7 描述的 MiMo TTS 设计从未实现。
+- **状态结构**：§6.5 与实际 `state_v2` schema 不一致。
+
+**当前权威信息源（按优先级）：**
+
+1. 代码本身（特别是 `api/app/services/`、`api/app/models/`、`api/app/routers/`、`api/migrations/`）
+2. `docs/AI_STORY_RUNTIME_GUIDE.md` — AI 剧情生成依据，与代码对应度高
+3. `docs/ARCHITECTURE.md` — 当前架构
+4. `docs/OPTIMIZATION_PLAN.md` — 工作驾驶舱与决策记录
+5. `docs/API.md` / `CONFIGURATION.md` / `DEPLOYMENT.md` — 配置参考
+
+---
+
+# RPGForge Project Guide（原始内容，历史参考）
 
 > 面向：GPT-5.5 / Codex / 开发 Agent
 > 项目类型：Docker 部署的 Web 版 AI 文字 RPG 剧本生成与运行系统

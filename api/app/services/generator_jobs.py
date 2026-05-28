@@ -13,6 +13,7 @@ from app.schemas.generator import (
     GeneratorFinalizeJobRead,
     GeneratorFinalizeRequest,
 )
+from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekError
 from app.services.game_generator import GameGeneratorService, ModelOutputValidationError
 from app.services.generator_stream_events import generator_stream_event_broker
@@ -29,6 +30,7 @@ class StreamState(TypedDict):
 
 
 async def run_finalize_job(job_id: UUID) -> None:
+    set_trace_context("generator_finalize", job_id)
     stream_state: StreamState = {"reasoning": "", "content": "", "model": None}
 
     with SessionLocal() as db:

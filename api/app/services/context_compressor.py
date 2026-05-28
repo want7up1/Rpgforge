@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -20,6 +21,8 @@ from app.services.prompt_loader import load_prompt_template
 from app.services.story_settings import build_runtime_story
 
 logger = logging.getLogger(__name__)
+
+CONTEXT_COMPRESSOR_TIMEOUT_SECONDS = 180.0
 
 
 class ContextCompressionOutput(BaseModel):
@@ -270,12 +273,22 @@ class ContextCompressor:
         existing_summaries: dict[str, Any],
     ) -> ContextCompressionOutput:
         try:
-            return await self._compress_with_model(
-                game=game,
-                turn=turn,
-                state_delta_json=state_delta_json,
-                existing_summaries=existing_summaries,
+            return await asyncio.wait_for(
+                self._compress_with_model(
+                    game=game,
+                    turn=turn,
+                    state_delta_json=state_delta_json,
+                    existing_summaries=existing_summaries,
+                ),
+                timeout=CONTEXT_COMPRESSOR_TIMEOUT_SECONDS,
             )
+        except TimeoutError:
+            logger.warning(
+                "Context compression timed out after %.0fs for turn %s; using fallback.",
+                CONTEXT_COMPRESSOR_TIMEOUT_SECONDS,
+                turn.id,
+            )
+            return self._fallback_summary(turn, state_delta_json, existing_summaries)
         except (DeepSeekError, ValidationError, ValueError) as exc:
             logger.warning("Context compression fell back for turn %s: %s", turn.id, exc)
             return self._fallback_summary(turn, state_delta_json, existing_summaries)

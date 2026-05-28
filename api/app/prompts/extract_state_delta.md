@@ -14,6 +14,8 @@
 11. 如果当前幕仍有 required=true 的 completion_anchors 未完成，不要把 ready_for_next_act 写成 true，也不要推进到下一幕。
 12. 只有当 GM 输出明确写出当前幕目标已经完成、completion_signal 已经达成，或剧情已经自然转入 runtime_story.next_act 时，才输出 story_progress_update.current_act。
 13. story_progress_update 只能推进运行时进度，不能修改剧本设定；不要跳幕，不要因为玩家意图或蓝图计划而提前推进。
+14. 如果 payload 中存在 director_hints，优先扫描其中 continuity_notes、forbidden_reveals、scene_objective 提到的人物、物品、地点、关系，把 GM 输出中明确发生的对应变化写入相应状态字段；不要因为 hints 提到就凭空写入未发生的变化。
+15. 如果 payload 中存在 drift_hints.state_conflicts，逐项检查 GM 输出是否仍存在该冲突：若已修正，无需输出任何额外修复；若 GM 写出了与 current_state 冲突的细节，请把"以 current_state 为准"的最小校正写入对应字段，不要新增矛盾。
 
 输出结构：
 {

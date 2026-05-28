@@ -11,22 +11,38 @@ from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
 from app.schemas.turn import TurnCreate, TurnJobRead
+from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekError
-from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
+from app.services.gameplay import (
+    STAGE_COMPLETED,
+    STAGE_DRIFT_VALIDATION,
+    STAGE_GM_RUNTIME,
+    STAGE_PERSIST_TURN,
+    STAGE_PREPARE_CONTEXT,
+    STAGE_RETRIEVE_MEMORY,
+    STAGE_STORY_DIRECTOR,
+    GameplayService,
+    GameplayValidationError,
+    gameplay_game_query,
+)
 from app.services.turn_stream_events import turn_stream_event_broker
 
-TURN_JOB_TIMEOUT_SECONDS = 14 * 60
+# 单回合最坏情况：Director(90s) + GM 首次(360s) + Validator(90s) + GM 重写(360s) = 900s。
+# 加上 prepare/retrieve/persist 的 IO 开销，整体 18 min 留余量。
+TURN_JOB_TIMEOUT_SECONDS = 18 * 60
 STREAM_WRITE_INTERVAL_SECONDS = 0.8
 STREAM_WRITE_MIN_CHARS = 512
 logger = logging.getLogger(__name__)
+# stage id 单一来源在 gameplay.py（STAGE_* 常量）；这里只补中文展示 label。
+# 顺序即进度条顺序，新增/调整 stage 时改这一处即可（gameplay 那边加常量）。
 TURN_JOB_STAGES: tuple[tuple[str, str], ...] = (
-    ("prepare_context", "准备上下文"),
-    ("retrieve_memory", "检索资料"),
-    ("story_director", "剧情导演"),
-    ("gm_runtime", "剧情生成"),
-    ("drift_validation", "偏离校验"),
-    ("persist_turn", "写入回合"),
-    ("completed", "完成"),
+    (STAGE_PREPARE_CONTEXT, "准备上下文"),
+    (STAGE_RETRIEVE_MEMORY, "检索资料"),
+    (STAGE_STORY_DIRECTOR, "剧情导演"),
+    (STAGE_GM_RUNTIME, "剧情生成"),
+    (STAGE_DRIFT_VALIDATION, "偏离校验"),
+    (STAGE_PERSIST_TURN, "写入回合"),
+    (STAGE_COMPLETED, "完成"),
 )
 TURN_JOB_STAGE_LABELS = dict(TURN_JOB_STAGES)
 TURN_JOB_STAGE_INDEXES = {
@@ -45,12 +61,14 @@ class StreamState(TypedDict):
 
 
 async def run_turn_job(job_id: UUID) -> None:
+    # 设置 trace contextvar，让 ModelRouter 知道当前 LLM 调用归属哪个回合。
+    set_trace_context("turn", job_id)
     stream_state: StreamState = {
         "reasoning": "",
         "content": "",
         "narrative": "",
         "model": None,
-        "stage": "prepare_context",
+        "stage": STAGE_PREPARE_CONTEXT,
         "stage_started_at": None,
     }
 
@@ -65,7 +83,7 @@ async def run_turn_job(job_id: UUID) -> None:
         job.content_buffer = ""
         job.narrative_buffer = ""
         job.progress_message = "正在准备剧情上下文与导演决策..."
-        _set_job_stage(job, "prepare_context", now)
+        _set_job_stage(job, STAGE_PREPARE_CONTEXT, now)
         stream_state["stage_started_at"] = job.stage_started_at
         job.stream_started_at = now
         job.last_event_at = now
@@ -92,7 +110,6 @@ async def run_turn_job(job_id: UUID) -> None:
             stream_state["content"] = content
             stream_state["narrative"] = narrative
             stream_state["model"] = model
-            _set_stream_stage(stream_state, "gm_runtime")
             reset_buffers = (
                 len(reasoning) < last_published_reasoning_length
                 or len(content) < last_published_content_length
@@ -146,11 +163,25 @@ async def run_turn_job(job_id: UUID) -> None:
                 reset_buffers=reset_buffers,
             )
 
-        async def on_progress(message: str) -> None:
-            _set_stream_stage(
-                stream_state,
-                _infer_turn_stage(message, current_stage=stream_state["stage"]),
+        async def on_stage(stage: str) -> None:
+            _set_stream_stage(stream_state, stage)
+            label = TURN_JOB_STAGE_LABELS.get(stage, "处理中")
+            # 只 publish broker 给前端即时 stage 切换信号。DB 写入交给紧随其后的
+            # on_progress 或 on_update，避免每次 stage 切换都打开一次 SessionLocal
+            # 后又被 200ms 内的 on_progress 覆盖一次。
+            _publish_turn_progress(
+                job_id,
+                status="running",
+                message=f"进入阶段：{label}",
+                model=stream_state["model"],
+                reasoning_length=len(stream_state["reasoning"]),
+                content_length=len(stream_state["content"]),
+                narrative=stream_state["narrative"],
+                stage=stream_state["stage"],
+                stage_started_at=stream_state["stage_started_at"],
             )
+
+        async def on_progress(message: str) -> None:
             _publish_turn_progress(
                 job_id,
                 status="running",
@@ -188,6 +219,7 @@ async def run_turn_job(job_id: UUID) -> None:
                 game,
                 request,
                 on_progress=on_progress,
+                on_stage=on_stage,
             )
 
         runtime_output, model_used = await asyncio.wait_for(
@@ -195,10 +227,12 @@ async def run_turn_job(job_id: UUID) -> None:
                 context,
                 on_update=on_update,
                 on_progress=on_progress,
+                on_stage=on_stage,
             ),
             timeout=TURN_JOB_TIMEOUT_SECONDS,
         )
 
+        await on_stage(STAGE_PERSIST_TURN)
         await on_progress("GM 回复已完成，正在写入回合。")
         with SessionLocal() as db:
             turn = service.persist_runtime_turn(
@@ -211,7 +245,7 @@ async def run_turn_job(job_id: UUID) -> None:
     except TimeoutError:
         _mark_job_failed(
             job_id,
-            "回合生成超过 14 分钟，已停止。请缩短输入或稍后重试。",
+            f"回合生成超过 {TURN_JOB_TIMEOUT_SECONDS // 60} 分钟，已停止。请缩短输入或稍后重试。",
             stream_state,
         )
         return
@@ -240,8 +274,14 @@ async def run_turn_job(job_id: UUID) -> None:
         job.maintenance_error = None
         job.maintenance_started_at = None
         job.maintenance_completed_at = None
-        _set_job_stage(job, "completed", now)
-        stream_state["stage"] = "completed"
+        # 写入 telemetry，并把 director/drift 结果留给 maintenance 阶段的 StateExtractor。
+        job.director_used_fallback = context.telemetry.director_used_fallback
+        job.drift_severity = context.telemetry.drift_severity
+        job.rewrite_triggered = context.telemetry.rewrite_triggered
+        job.extractor_failed = False
+        job.turn_runtime_inputs = context.telemetry.to_runtime_inputs() or None
+        _set_job_stage(job, STAGE_COMPLETED, now)
+        stream_state["stage"] = STAGE_COMPLETED
         stream_state["stage_started_at"] = job.stage_started_at
         job.last_event_at = now
         job.completed_at = now
@@ -464,6 +504,10 @@ def _publish_turn_snapshot(
         maintenance_error=job.maintenance_error,
         maintenance_started_at=job.maintenance_started_at,
         maintenance_completed_at=job.maintenance_completed_at,
+        director_used_fallback=job.director_used_fallback,
+        drift_severity=job.drift_severity,
+        rewrite_triggered=job.rewrite_triggered,
+        extractor_failed=job.extractor_failed,
         stream_started_at=job.stream_started_at,
         last_event_at=job.last_event_at,
     )
@@ -514,20 +558,6 @@ def _turn_stage_event_payload(stage: str, stage_started_at: datetime | None) -> 
         "stage_total": TURN_JOB_STAGE_TOTAL,
         "stage_started_at": stage_started_at.isoformat() if stage_started_at else None,
     }
-
-
-def _infer_turn_stage(message: str, *, current_stage: str) -> str:
-    if "写入回合" in message or "GM 回复已完成" in message:
-        return "persist_turn"
-    if "偏离校验" in message or "校验" in message:
-        return "drift_validation"
-    if "书写剧情" in message or "剧情正文" in message or "重新生成" in message:
-        return "gm_runtime"
-    if "导演" in message or "规划" in message:
-        return "story_director"
-    if "检索" in message or "摘要" in message or "剧本素材" in message:
-        return "retrieve_memory"
-    return current_stage or "prepare_context"
 
 
 def _turn_progress_message(reasoning: str, content: str, narrative: str) -> str:
