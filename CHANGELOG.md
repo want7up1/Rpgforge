@@ -6,6 +6,12 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 8 — 纯函数单元测试 (2026-05-28)
+
+**Added**
+
+- `tests/test_agent_infra.py`：覆盖 `extract_usage` / `JudgeResult` clamp / `_filter_materials_by_director` / `_enforce_hard_forbidden_reveals`（含 must_hit_beats 回归）/ `_director_hints` / `_drift_hints`。不依赖 DB。
+
 ### Round 7 — stage 常量统一 + dashboard trace 详情 (2026-05-28)
 
 **Changed**
