@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 7 — stage 常量统一 + dashboard trace 详情 |
+| 最近一轮 | Round 8 — 纯函数单元测试 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | 阶段 1 + 3.1（含 trace 详情）+ §7.8 完成。AI 质量闭环可用 |
-| ⚠️ 验证状态 | Round 1–7 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
-| 下一步建议 | 先跑 §9 验证。2.1 Agent 抽象已评估为当前 ROI 负（见下），暂缓 |
+| 当前阶段 | 阶段 1 + 3.1 + §7.8 + 基础设施单测完成。AI 质量闭环可用 |
+| ⚠️ 验证状态 | Round 1–8 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
+| 下一步建议 | 先跑 §9 验证。2.1 Agent 抽象暂缓（ROI 负）；AI 行为调优等 trace 数据 |
 
 ---
 
@@ -99,6 +99,19 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 8 (2026-05-28) — 纯函数单元测试
+
+给 Round 1-7 新增的 correctness-critical 纯函数补回归测试。零生产代码改动。
+
+- `tests/test_agent_infra.py`（不依赖 DB，不用 db_session fixture）覆盖：
+  - `agent_traces.extract_usage`：token usage 抽取的各分支
+  - `turn_judge.JudgeResult` clamp：1-5 边界 + 非法值
+  - `gameplay._filter_materials_by_director`：空集退全集语义、部分匹配、空白清理
+  - `gameplay._enforce_hard_forbidden_reveals`：merge / 去重 / **must_hit_beats 不被并入（回归保护）**
+  - `state_extractor._director_hints` / `_drift_hints`：字段抽取与空值丢弃
+
+**注意**：本地无 psycopg 无法跑，仅 `py_compile` 通过 + 人工逐条对齐实现。容器内 `pytest tests/test_agent_infra.py` 是首次真实验证（已纳入 §9.2）。
 
 ### Round 7 (2026-05-28) — 收尾：stage 常量统一 + dashboard trace 详情
 
@@ -387,7 +400,7 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
 | 引入 LangChain / LlamaIndex / Agent 框架 | 当前 5 个 Agent 用 Pydantic schema + asyncio.wait_for 已经够灵活；框架反而难 debug |
 | 上 Kubernetes / 微服务 | 单机 Docker Compose 可支撑预估 1000 DAU；过早架构化 |
 | 把 StateApplier 重构成 event sourcing | 当前"LLM 提案 + 代码应用"分层已经够清晰 |
-| 堆单元测试覆盖率 | 真正的"测试"是阶段 1.2 golden replay；Python 单测不能反映 AI 质量 |
+| 堆单元测试覆盖率 | 真正的"测试"是阶段 1.2 golden replay；Python 单测不能反映 AI 质量。**例外**：correctness-critical 的纯函数（telemetry 抽取、硬底线 merge、must_hit_beats 回归、hints 抽取）值得测——它们是数据正确性的基础，且能锁定回归。见 `tests/test_agent_infra.py`。区别在于"测数据正确性"而非"刷覆盖率" |
 | 给每个 Agent 加重试 | DriftValidator 已经在 fallback 中放行，重试只会增加成本；除非 trace 显示真实重试收益 |
 | 阶段 2.1 Agent 抽象基类（暂缓，非永久放弃） | 当前没有要新增的 agent，抽象的唯一收益"加新 agent 省事"无处兑现。各 agent 的 fallback 差异大（Director 本地决策 / Validator 放行 / Extractor 抛错 / Compressor 拼接），强行统一反而降低可读性。在"无法本地跑测试 + 自主无人审查"下做核心链路大重构 ROI 为负。**触发条件**：真要加第 6 个 agent，或能在容器里跑回归测试时，再做 |
 | 凭感觉改 AI 行为（material 过滤强度 / director hints / drift 阈值，§7.2/7.5/7.3） | trace 基础设施刚建好、还没有真实数据。这些都标注为"等数据再定"。先收集 trace + judge 评分，用数据驱动，而不是继续猜 |
