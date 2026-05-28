@@ -13,11 +13,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 1 — AI Agent 链路重构 |
+| 最近一轮 | Round 3 — 阶段 1.1 LLM trace 落表 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | Round 1 完成；阶段 0（止血）待启动 |
-| 下一步建议 | 阶段 0 三件小事 → 阶段 1.1 trace 落表 |
+| 当前阶段 | 阶段 1.1 完成；阶段 1.2 golden replay 待启动 |
+| 下一步建议 | 阶段 1.2 golden replay → 1.3 LLM-as-Judge |
 
 ---
 
@@ -80,6 +80,59 @@ docker compose restart api worker
 ```
 
 旧 TurnJob 行的新列由 server_default 自动填 `false`/`null`，无需手工回填。
+
+### Round 2 (2026-05-28) — 阶段 0 止血
+
+紧接 Round 1 完成"必修尾巴"。无新增 DB 迁移、无新增依赖。
+
+**改动清单**：
+
+| # | 主题 | 关键文件 |
+|---|---|---|
+| 0.1 | `TURN_JOB_TIMEOUT_SECONDS` 14 min → 18 min；超时文案改用常量计算 | turn_jobs.py |
+| 0.2 | `_enforce_hard_forbidden_reveals` 拆出 `must_hit_beats`（语义错误，是"必须发生"不是"禁止揭露"） | gameplay.py |
+| 0.3 | `on_stage` 不再写 DB，只 publish broker；DB 持久化交给紧随其后的 on_progress / on_update。单回合 SessionLocal 数减半 | turn_jobs.py |
+
+**部署须知**：纯代码改动，重启 api + worker 即可。
+
+```bash
+docker compose restart api worker
+```
+
+### Round 3 (2026-05-28) — 阶段 1.1 LLM trace 落表
+
+第一次让 AI 链路"可观察"。代码改动量适中、新增一张表 + 一个 admin 路由前缀。
+
+**新增**
+
+- 迁移 `20260528_0026_agent_traces.py`：`agent_traces` 表 + 3 个索引（job / agent+created / status+created）。
+- `app/models/agent_trace.py`：`AgentTrace` ORM。
+- `app/services/agent_traces.py`：`TraceContext` + ContextVar + `record_trace()` + DeepSeek usage 提取。**所有 trace 写入失败都被吞掉，不影响主回合。**
+- `app/routers/admin.py`：`/api/admin/traces` 列表、单条详情、按 turn_job 聚合三个 endpoint，受 `X-Settings-Admin-Token` 保护。
+
+**修改**
+
+- `app/services/model_router.py`：所有四个调用方法（`use_flash` / `use_flash_stream` / `use_pro` / `use_pro_stream`）都改走内部 `_call_chat` / `_stream_chat`，包装 trace 钩子。
+- `app/services/turn_jobs.py` / `turn_maintenance_jobs.py` / `generator_jobs.py` / `generator_chat_jobs.py`：每个 RQ 任务入口调用 `set_trace_context()`。
+- `app/main.py`：注册 admin router。
+
+**部署须知**
+
+```bash
+docker compose exec api alembic upgrade head    # 创建 agent_traces 表
+docker compose restart api worker
+```
+
+**用法**
+
+```bash
+# 列表
+curl -H "X-Settings-Admin-Token: $TOKEN" http://localhost:3000/api/admin/traces?limit=20
+
+# 单回合所有 LLM 调用
+curl -H "X-Settings-Admin-Token: $TOKEN" \
+  http://localhost:3000/api/admin/turn-jobs/$JOB_ID/traces
+```
 
 ---
 
@@ -159,21 +212,25 @@ prepare_context(1) → retrieve_memory(2) → story_director(3) → gm_runtime(4
 
 Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值明确。
 
-- [ ] **0.1 TurnJob 整体 timeout 对齐**：当前 `TURN_JOB_TIMEOUT_SECONDS = 14*60 = 840s`，但单回合最坏情况 `Director(90) + GM(360) + Validator(90) + GM重写(360) = 900s` > 840s。要么把整体提到 18 min，要么把 GM 单次降到 300s。文件：`turn_jobs.py:18`。
+- [x] **0.1 TurnJob 整体 timeout 对齐**：`TURN_JOB_TIMEOUT_SECONDS` 已提到 `18 * 60 = 1080s`，覆盖最坏情况 900s + IO 开销。超时文案同步使用常量计算。文件：`turn_jobs.py:18`。
 
-- [ ] **0.2 `must_hit_beats` 从硬注入中拆出**：当前 `_enforce_hard_forbidden_reveals` 把 `current_act.must_hit_beats`（"必须发生的剧情节点"）也当成 forbidden_reveals merge 进去，语义错误，会误杀正常剧情。只保留 `forbidden_reveals + forbidden_drift + must_not_become`。文件：`gameplay.py::_enforce_hard_forbidden_reveals`。
+- [x] **0.2 `must_hit_beats` 从硬注入中拆出**：`_enforce_hard_forbidden_reveals` 只 merge `forbidden_reveals + forbidden_drift + must_not_become`，注释中说明 `must_hit_beats` 是"必须发生"语义，不能并入禁止列表。
 
-- [ ] **0.3 turn_jobs 的 SessionLocal 合并**：当前 `turn_jobs.py` 内开了 19 次 `SessionLocal()`，每次 stage 切换/progress 更新都新开。改成显式划阶段后合并到 ~5 次。注意 RQ 异步任务不能跨 await 复用同一 session，所以是"段内合并"不是"全任务复用"。文件：`turn_jobs.py`。
+- [x] **0.3 turn_jobs SessionLocal 优化**：审计后实际只有 9 个 SessionLocal 入口（之前 19 是把 turn_maintenance_jobs 算进去了）。机械合并风险高（长事务锁），收益低。改为单点优化：`on_stage` 只 publish broker、不再写 DB —— 紧随其后的 `on_progress` 会写一遍 DB，删除冗余写入。单回合 SessionLocal 次数减半。文件：`turn_jobs.py::on_stage`。
 
 ### 阶段 1 — AI 质量基础设施（2-4 周）
 
 **这是当前项目的命脉。没有这一阶段，所有后续 AI 优化都是凭感觉。**
 
-- [ ] **1.1 LLM 调用 trace**
-  - 新表 `agent_traces`：`id, turn_job_id, agent, model, prompt_messages JSONB, output_text, tokens_input, tokens_output, latency_ms, telemetry JSONB, created_at`
-  - 每个 Agent 内部钩子写入（在 `asyncio.wait_for` 包之外，包含 fallback 的情况）
-  - `/api/admin/traces?turn_job_id=...` 返回该回合所有 Agent 的完整 trace
-  - 注意：不要把 trace 写到 `turn_jobs.turn_runtime_inputs` —— 那个字段是 maintenance 用的小载荷
+- [x] **1.1 LLM 调用 trace**（Round 3, 2026-05-28）
+  - 新表 `agent_traces`（迁移 `20260528_0026`）：弱关联 `(job_kind, job_id)` 到上游 job；存完整 `prompt_messages JSONB` + `output_text` + `reasoning_text` + token usage + latency + status + extras。
+  - `ModelRouter._call_chat` / `_stream_chat` 包装层统一写 trace；每次调用结束（成功/失败/empty）都同步落 1 条记录；写入失败被吞掉不影响主回合。
+  - ContextVar 在 RQ worker 任务入口（`run_turn_job` / `run_turn_maintenance_job` / `run_chat_job` / `run_finalize_job`）set 一次，下游 LLM 调用自动归属。
+  - 新增 `/api/admin/*` 路由（受 `X-Settings-Admin-Token` 保护）：
+    - `GET /api/admin/traces?job_id=&agent=&status=&limit=` — 列表（不带 prompt/output 全文）
+    - `GET /api/admin/traces/{trace_id}` — 单条完整内容
+    - `GET /api/admin/turn-jobs/{job_id}/traces` — 一个回合的所有 trace 按时间正序
+  - 已知边界：流式调用 DeepSeek 默认不返回 usage，所以 GM 流式的 tokens_* 会是 None。可接受。
 
 - [ ] **1.2 Golden 用例集 + replay 脚本**
   - `tests/golden/turns/` 目录存 N 个固化输入（game config + state + player_input + 真实 LLM 输出）

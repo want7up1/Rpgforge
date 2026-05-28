@@ -1,3 +1,4 @@
+from app.models.agent_trace import AgentTrace
 from app.models.character import Character
 from app.models.game import Game, GameConfig
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob, TurnJob
@@ -10,6 +11,7 @@ from app.models.summary import Summary
 from app.models.turn import Turn
 
 __all__ = [
+    "AgentTrace",
     "Game",
     "Character",
     "GameConfig",

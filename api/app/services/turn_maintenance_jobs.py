@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
+from app.services.agent_traces import set_trace_context
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
 from app.services.game_activity import touch_game
@@ -25,6 +26,8 @@ MEMORY_SUMMARY_INTERVAL_TURNS = 4
 
 
 async def run_turn_maintenance_job(job_id: UUID) -> None:
+    # maintenance trace 也归到原 turn job 下，便于在 trace 视图里看到完整一回合的所有 LLM 调用。
+    set_trace_context("turn", job_id)
     if not _mark_maintenance_running(
         job_id,
         stage="state_extract",
