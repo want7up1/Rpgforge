@@ -13,7 +13,18 @@ from app.models.turn import Turn
 from app.schemas.turn import TurnCreate, TurnJobRead
 from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekError
-from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
+from app.services.gameplay import (
+    STAGE_COMPLETED,
+    STAGE_DRIFT_VALIDATION,
+    STAGE_GM_RUNTIME,
+    STAGE_PERSIST_TURN,
+    STAGE_PREPARE_CONTEXT,
+    STAGE_RETRIEVE_MEMORY,
+    STAGE_STORY_DIRECTOR,
+    GameplayService,
+    GameplayValidationError,
+    gameplay_game_query,
+)
 from app.services.turn_stream_events import turn_stream_event_broker
 
 # 单回合最坏情况：Director(90s) + GM 首次(360s) + Validator(90s) + GM 重写(360s) = 900s。
@@ -22,14 +33,16 @@ TURN_JOB_TIMEOUT_SECONDS = 18 * 60
 STREAM_WRITE_INTERVAL_SECONDS = 0.8
 STREAM_WRITE_MIN_CHARS = 512
 logger = logging.getLogger(__name__)
+# stage id 单一来源在 gameplay.py（STAGE_* 常量）；这里只补中文展示 label。
+# 顺序即进度条顺序，新增/调整 stage 时改这一处即可（gameplay 那边加常量）。
 TURN_JOB_STAGES: tuple[tuple[str, str], ...] = (
-    ("prepare_context", "准备上下文"),
-    ("retrieve_memory", "检索资料"),
-    ("story_director", "剧情导演"),
-    ("gm_runtime", "剧情生成"),
-    ("drift_validation", "偏离校验"),
-    ("persist_turn", "写入回合"),
-    ("completed", "完成"),
+    (STAGE_PREPARE_CONTEXT, "准备上下文"),
+    (STAGE_RETRIEVE_MEMORY, "检索资料"),
+    (STAGE_STORY_DIRECTOR, "剧情导演"),
+    (STAGE_GM_RUNTIME, "剧情生成"),
+    (STAGE_DRIFT_VALIDATION, "偏离校验"),
+    (STAGE_PERSIST_TURN, "写入回合"),
+    (STAGE_COMPLETED, "完成"),
 )
 TURN_JOB_STAGE_LABELS = dict(TURN_JOB_STAGES)
 TURN_JOB_STAGE_INDEXES = {
@@ -55,7 +68,7 @@ async def run_turn_job(job_id: UUID) -> None:
         "content": "",
         "narrative": "",
         "model": None,
-        "stage": "prepare_context",
+        "stage": STAGE_PREPARE_CONTEXT,
         "stage_started_at": None,
     }
 
@@ -70,7 +83,7 @@ async def run_turn_job(job_id: UUID) -> None:
         job.content_buffer = ""
         job.narrative_buffer = ""
         job.progress_message = "正在准备剧情上下文与导演决策..."
-        _set_job_stage(job, "prepare_context", now)
+        _set_job_stage(job, STAGE_PREPARE_CONTEXT, now)
         stream_state["stage_started_at"] = job.stage_started_at
         job.stream_started_at = now
         job.last_event_at = now
@@ -219,7 +232,7 @@ async def run_turn_job(job_id: UUID) -> None:
             timeout=TURN_JOB_TIMEOUT_SECONDS,
         )
 
-        await on_stage("persist_turn")
+        await on_stage(STAGE_PERSIST_TURN)
         await on_progress("GM 回复已完成，正在写入回合。")
         with SessionLocal() as db:
             turn = service.persist_runtime_turn(
@@ -267,8 +280,8 @@ async def run_turn_job(job_id: UUID) -> None:
         job.rewrite_triggered = context.telemetry.rewrite_triggered
         job.extractor_failed = False
         job.turn_runtime_inputs = context.telemetry.to_runtime_inputs() or None
-        _set_job_stage(job, "completed", now)
-        stream_state["stage"] = "completed"
+        _set_job_stage(job, STAGE_COMPLETED, now)
+        stream_state["stage"] = STAGE_COMPLETED
         stream_state["stage_started_at"] = job.stage_started_at
         job.last_event_at = now
         job.completed_at = now
