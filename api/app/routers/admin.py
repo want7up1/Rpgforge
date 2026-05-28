@@ -112,3 +112,26 @@ def get_turn_job_traces(job_id: UUID, db: Session = DB_DEPENDENCY) -> list[Agent
         .order_by(AgentTrace.created_at.asc())
     )
     return list(db.scalars(stmt).all())
+
+
+@router.get("/golden", response_model=list[AgentTraceSummary])
+def list_golden_traces(
+    db: Session = DB_DEPENDENCY,
+    *,
+    label: str | None = Query(default=None, description="good / bad / neutral；省略则返回所有有 label 的"),
+    agent: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[AgentTrace]:
+    """返回已被 `scripts/label_trace.py` 标记的 golden 集合。
+
+    label / note 写在 `extras` JSONB 字段，所以用 JSON 操作符查询。
+    """
+    stmt = select(AgentTrace).order_by(AgentTrace.created_at.desc()).limit(limit)
+    # extras->>'label' IS NOT NULL  /  extras->>'label' = :label
+    if label is not None:
+        stmt = stmt.where(AgentTrace.extras["label"].astext == label)
+    else:
+        stmt = stmt.where(AgentTrace.extras["label"].astext.isnot(None))
+    if agent is not None:
+        stmt = stmt.where(AgentTrace.agent == agent)
+    return list(db.scalars(stmt).all())

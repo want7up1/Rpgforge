@@ -13,11 +13,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 3 — 阶段 1.1 LLM trace 落表 |
+| 最近一轮 | Round 4 — 阶段 1.2 Golden replay 工具 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | 阶段 1.1 完成；阶段 1.2 golden replay 待启动 |
-| 下一步建议 | 阶段 1.2 golden replay → 1.3 LLM-as-Judge |
+| 当前阶段 | 阶段 1.2 完成；阶段 1.3 LLM-as-Judge 待启动 |
+| 下一步建议 | 阶段 1.3 LLM-as-Judge → 阶段 3.1 dashboard |
 
 ---
 
@@ -97,6 +97,43 @@ docker compose restart api worker
 
 ```bash
 docker compose restart api worker
+```
+
+### Round 4 (2026-05-28) — 阶段 1.2 Golden replay 工具
+
+第一版 golden 工作流：不引入新表，复用 `agent_traces` 当快照源。
+
+**新增**
+
+- `api/scripts/replay_trace.py`：按 trace_id / turn_job_id / agent 重发历史调用，对比旧/新输出。`job_kind="replay"` 隔离 trace。
+- `api/scripts/diff_traces.py`：纯比对两条历史 trace（不发请求）。改 prompt 前后跑两轮，diff 即评估。
+- `api/scripts/label_trace.py`：把 trace 标记为 golden（`extras.label` + `extras.note`）。
+- `GET /api/admin/golden?label=&agent=`：列已标记的 golden。
+
+**部署**：纯脚本和 router 改动，重启 api 即可（worker 不依赖）。
+
+```bash
+docker compose restart api
+```
+
+**典型用法**
+
+```bash
+# 进 api 容器
+docker compose exec api bash
+
+# 列最近 trace 找候选
+curl -s -H "X-Settings-Admin-Token: $TOKEN" \
+  http://localhost:8000/api/admin/traces?agent=gm_runtime&limit=10
+
+# 把好回合标记为 golden
+python -m scripts.label_trace <TRACE_ID> --label good --note "经典调查回合"
+
+# 改 prompt 后跑一遍新回合，再对比新旧
+python -m scripts.diff_traces --agent gm_runtime --last 2 --show-prompt
+
+# 重放历史回合，看当前代码会怎么写
+python -m scripts.replay_trace --turn-job-id <UUID> --agent gm_runtime
 ```
 
 ### Round 3 (2026-05-28) — 阶段 1.1 LLM trace 落表
@@ -232,10 +269,13 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
     - `GET /api/admin/turn-jobs/{job_id}/traces` — 一个回合的所有 trace 按时间正序
   - 已知边界：流式调用 DeepSeek 默认不返回 usage，所以 GM 流式的 tokens_* 会是 None。可接受。
 
-- [ ] **1.2 Golden 用例集 + replay 脚本**
-  - `tests/golden/turns/` 目录存 N 个固化输入（game config + state + player_input + 真实 LLM 输出）
-  - `scripts/replay_traces.py --prompt <branch>` 用任意 prompt/model 版本跑一遍，输出 diff
-  - 评估指标：narrative embedding cosine（用本地小模型）+ option 集合 Jaccard
+- [x] **1.2 Golden 用例集 + replay 脚本**（Round 4, 2026-05-28）
+  - **第一版**：复用 `agent_traces` 表作为 golden 数据源，不引入新表/新 fixture。每条历史 trace 自带完整 prompt + 输出，天然是"快照"。
+  - `api/scripts/replay_trace.py`：按 trace_id / turn_job_id / agent 重发当前 ModelRouter，对比旧/新 output（unified diff + latency + token）。replay 的新 trace 归到 `job_kind="replay"` 不污染生产视图。
+  - `api/scripts/diff_traces.py`：不发请求，纯比对两条历史 trace（手动 ID 或按 agent 取最近 N 条）。CI 友好。
+  - `api/scripts/label_trace.py`：把 trace 升级为 golden，标签写入 `extras.label` (good/bad/neutral) + `extras.note`，不需要新加表列。
+  - `GET /api/admin/golden?label=&agent=&limit=`：列出已标记的 golden 集合。
+  - 评估指标：当前只用 unified diff + 长度/latency/token 对比。embedding cosine / Jaccard 等量化指标留给后续——先看人工标注规模有多大再决定是否需要自动化指标。
 
 - [ ] **1.3 LLM-as-Judge 自动评分**
   - 用 Pro 模型对 GM 输出按维度打分：剧本一致性 / 状态一致性 / 节奏 / 文采 / 新意 / 安全性

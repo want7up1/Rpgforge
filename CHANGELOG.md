@@ -6,6 +6,15 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 4 — 阶段 1.2 Golden replay 工具 (2026-05-28)
+
+**Added**
+
+- `api/scripts/replay_trace.py`：按 trace_id / turn_job_id / agent 重放历史 LLM 调用，比对旧/新输出。
+- `api/scripts/diff_traces.py`：纯比对两条历史 trace（不发请求）。
+- `api/scripts/label_trace.py`：把 trace 标记为 golden（`extras.label` + `extras.note`）。
+- `GET /api/admin/golden`：列已标记的 golden 集合。
+
 ### Round 3 — 阶段 1.1 LLM trace 落表 (2026-05-28)
 
 **Added**
