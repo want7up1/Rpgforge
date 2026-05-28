@@ -141,6 +141,41 @@ docker compose up -d --build api worker web
 docker compose ps
 ```
 
+## Observability & AI Quality
+
+Every LLM call (story director, GM, drift validator, state extractor, context
+compressor, judge, generator) is recorded in the `agent_traces` table with its
+full prompt, output, token usage, latency, and status. Per-turn telemetry flags
+(`director_used_fallback`, `drift_severity`, `rewrite_triggered`,
+`extractor_failed`) live on `turn_jobs`.
+
+Admin dashboard (token-gated by `SETTINGS_ADMIN_TOKEN`):
+
+- Open `/admin` in the browser, enter the admin token.
+- Aggregate cards: fallback / rewrite / extractor-failure rates, drift severity
+  distribution, per-agent average latency, average judge score.
+- Recent LLM calls table — click any row for the full prompt / reasoning / output.
+- Judge score query by game id.
+
+Admin API (require `X-Settings-Admin-Token`):
+
+- `GET /api/admin/stats/recent-turns`
+- `GET /api/admin/traces`, `GET /api/admin/traces/{id}`
+- `GET /api/admin/turn-jobs/{job_id}/traces`
+- `GET /api/admin/golden`, `GET /api/admin/games/{game_id}/evaluations`
+- `POST /api/admin/turns/{turn_id}/evaluate`
+
+CLI tools (run inside the api container, e.g. `docker compose exec api ...`):
+
+```bash
+python -m scripts.replay_trace --turn-job-id <UUID>   # replay a turn's LLM calls
+python -m scripts.diff_traces --agent gm_runtime --last 2  # compare two traces (no API cost)
+python -m scripts.label_trace <TRACE_ID> --label good      # mark a trace as a golden case
+python -m scripts.judge_turn --game-id <UUID> --last 1     # LLM-as-Judge score a turn
+```
+
+See [Optimization Plan](docs/OPTIMIZATION_PLAN.md) for the full design and roadmap.
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
