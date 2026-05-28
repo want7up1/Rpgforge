@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 12 — TurnJudge 测试 |
+| 最近一轮 | Round 14 — compressor + extractor 测试（测试线收尾） |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | AI 质量闭环完整 + 新基础设施有测试覆盖。Round 1–12 本地 pgvector 实测 **81 tests pass** |
-| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、81 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | 基础扎实。可继续补核心 agent 测试（drift/director/compressor）；大 feature（2.2/3.2/3.3/4.x）建议有真实 trace 数据后再推进 |
+| 当前阶段 | AI 质量闭环完整 + 核心链路全测试覆盖。Round 1–14 本地 pgvector 实测 **91 tests pass** |
+| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、91 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
+| 下一步建议 | 测试加固线已收尾。剩余为大 feature/高风险重构（2.2/3.2/3.3/4.x），建议有真实 trace 数据 + 人工审查后再推进 |
 
 ---
 
@@ -99,6 +99,16 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 14 (2026-05-28) — context_compressor + state_extractor 测试
+
+`tests/test_state_pipeline.py`：compressor `_trim_text` / `_fallback_summary`（幕后信息进 hidden_summary 不混入可见）；extractor 把精简后的 director_hints/drift_hints 注入 payload、无 hints 时不加 key。本地 pgvector 全套 **91 passed**。
+
+测试加固线收尾：6 个核心 agent（director/gm 间接/drift/extractor/compressor/judge）+ telemetry/trace/admin 均有覆盖。
+
+### Round 13 (2026-05-28) — DriftValidator + StoryDirector 测试
+
+`tests/test_turn_agents.py`（fake router）：drift approved 不重写 / major 触发重写 / LLM 失败 fallback 不重写；director 正常解析（used_fallback=False）/ LLM 失败 fallback（used_fallback=True）。本地 pgvector 全套 **86 passed**。
 
 ### Round 12 (2026-05-28) — TurnJudge 测试
 

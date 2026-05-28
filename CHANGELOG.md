@@ -6,6 +6,18 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 14 — context_compressor + state_extractor 测试 (2026-05-28)
+
+**Added**
+
+- `tests/test_state_pipeline.py`：compressor `_trim_text` / `_fallback_summary`、extractor hints 注入与省略。全套 91 passed。
+
+### Round 13 — DriftValidator + StoryDirector 测试 (2026-05-28)
+
+**Added**
+
+- `tests/test_turn_agents.py`：fake router 测 drift 重写判定 + fallback、director 解析 + fallback。全套 86 passed。
+
 ### Round 12 — TurnJudge 测试 (2026-05-28)
 
 **Added**
