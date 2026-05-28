@@ -7,17 +7,21 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.agent_trace import AgentTrace
+from app.models.turn_evaluation import TurnEvaluation
 from app.routers.settings import verify_settings_token
+from app.services.turn_judge import TurnJudgeError, evaluate_turn
 
 router = APIRouter(
     prefix="/api/admin",
@@ -97,9 +101,10 @@ def get_trace(trace_id: UUID, db: Session = DB_DEPENDENCY) -> AgentTrace:
     """单条 trace 详情，含 prompt_messages 和 output 全文。"""
     trace = db.get(AgentTrace, trace_id)
     if trace is None:
-        from fastapi import HTTPException, status as http_status
-
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Trace not found.")
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="Trace not found.",
+        )
     return trace
 
 
@@ -110,6 +115,76 @@ def get_turn_job_traces(job_id: UUID, db: Session = DB_DEPENDENCY) -> list[Agent
         select(AgentTrace)
         .where(AgentTrace.job_kind == "turn", AgentTrace.job_id == job_id)
         .order_by(AgentTrace.created_at.asc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+class TurnEvaluationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    turn_id: UUID
+    game_id: UUID
+    canon_fidelity: int | None
+    state_consistency: int | None
+    pacing: int | None
+    prose_quality: int | None
+    freshness: int | None
+    safety: int | None
+    overall_score: Decimal | None
+    rationale: dict[str, Any] | None
+    judge_model: str | None
+    trace_id: UUID | None
+    status: str
+    error_message: str | None
+    created_at: datetime
+
+
+@router.post("/turns/{turn_id}/evaluate", response_model=TurnEvaluationRead)
+async def trigger_turn_evaluation(
+    turn_id: UUID,
+    db: Session = DB_DEPENDENCY,
+) -> TurnEvaluation:
+    """对指定回合手动触发 LLM-as-Judge 评分。
+
+    评分本身会消耗 LLM quota；只有显式调用此接口才会跑，不会在 maintenance 中自动触发。
+    """
+    try:
+        return await evaluate_turn(db, turn_id)
+    except TurnJudgeError as exc:
+        raise HTTPException(
+            status_code=http_status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/turns/{turn_id}/evaluations", response_model=list[TurnEvaluationRead])
+def list_turn_evaluations(
+    turn_id: UUID,
+    db: Session = DB_DEPENDENCY,
+) -> list[TurnEvaluation]:
+    """一个 turn 的所有历史评分（一个 turn 可以多次评，便于对比 prompt 改动）。"""
+    stmt = (
+        select(TurnEvaluation)
+        .where(TurnEvaluation.turn_id == turn_id)
+        .order_by(TurnEvaluation.created_at.desc())
+    )
+    return list(db.scalars(stmt).all())
+
+
+@router.get("/games/{game_id}/evaluations", response_model=list[TurnEvaluationRead])
+def list_game_evaluations(
+    game_id: UUID,
+    db: Session = DB_DEPENDENCY,
+    *,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[TurnEvaluation]:
+    """一个游戏最近 N 次评分（按 created_at 倒序）。"""
+    stmt = (
+        select(TurnEvaluation)
+        .where(TurnEvaluation.game_id == game_id)
+        .order_by(TurnEvaluation.created_at.desc())
+        .limit(limit)
     )
     return list(db.scalars(stmt).all())
 

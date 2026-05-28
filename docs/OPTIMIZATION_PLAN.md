@@ -13,11 +13,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 4 — 阶段 1.2 Golden replay 工具 |
+| 最近一轮 | Round 5 — 阶段 1.3 LLM-as-Judge |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | 阶段 1.2 完成；阶段 1.3 LLM-as-Judge 待启动 |
-| 下一步建议 | 阶段 1.3 LLM-as-Judge → 阶段 3.1 dashboard |
+| 当前阶段 | 阶段 1.1 / 1.2 / 1.3 全部完成。AI 质量基础设施初版闭环 |
+| 下一步建议 | 阶段 3.1 dashboard（让 telemetry + 评分可视化） |
 
 ---
 
@@ -97,6 +97,35 @@ docker compose restart api worker
 
 ```bash
 docker compose restart api worker
+```
+
+### Round 5 (2026-05-28) — 阶段 1.3 LLM-as-Judge
+
+**新增**
+
+- 迁移 `20260528_0027_turn_evaluations.py`：`turn_evaluations` 表，6 维评分 + overall + rationale + trace_id 回链 + status。
+- `app/models/turn_evaluation.py`、`app/services/turn_judge.py`、`app/prompts/turn_judge.md`。
+- `api/scripts/judge_turn.py`：CLI 触发，支持单 turn / 最近 N 个 / 全部。
+- admin endpoints：`POST /turns/{turn_id}/evaluate`、`GET /turns/{turn_id}/evaluations`、`GET /games/{game_id}/evaluations`。
+
+**保守 opt-in**：不在 maintenance 中自动跑——judge 自身消耗 Pro quota。任何评分都需要显式调用（CLI 或 admin API）。
+
+**部署**
+
+```bash
+docker compose exec api alembic upgrade head    # 创建 turn_evaluations 表
+docker compose restart api worker
+```
+
+**典型用法**
+
+```bash
+# 评最近一个回合
+python -m scripts.judge_turn --game-id <UUID> --last 1
+
+# 看一个游戏的评分趋势
+curl -H "X-Settings-Admin-Token: $TOKEN" \
+  http://localhost:8000/api/admin/games/$GAME_ID/evaluations
 ```
 
 ### Round 4 (2026-05-28) — 阶段 1.2 Golden replay 工具
@@ -277,10 +306,16 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
   - `GET /api/admin/golden?label=&agent=&limit=`：列出已标记的 golden 集合。
   - 评估指标：当前只用 unified diff + 长度/latency/token 对比。embedding cosine / Jaccard 等量化指标留给后续——先看人工标注规模有多大再决定是否需要自动化指标。
 
-- [ ] **1.3 LLM-as-Judge 自动评分**
-  - 用 Pro 模型对 GM 输出按维度打分：剧本一致性 / 状态一致性 / 节奏 / 文采 / 新意 / 安全性
-  - 异步触发（maintenance 之后），结果存 `agent_evaluations`
-  - 与 telemetry 关联：能回答"重写率上升时 GM 文采是否下降"
+- [x] **1.3 LLM-as-Judge 自动评分**（Round 5, 2026-05-28）
+  - **保守 opt-in**：不在 maintenance 自动跑（避免偷烧 quota）；通过 admin endpoint 或 CLI 手动触发。
+  - 新表 `turn_evaluations`（迁移 `20260528_0027`）：6 维评分（canon_fidelity / state_consistency / pacing / prose_quality / freshness / safety）+ overall_score + rationale + trace_id 回链。
+  - `app/services/turn_judge.py::evaluate_turn(db, turn_id)`：一次评分 = 一次 Pro 调用（task_type=`turn_judge`，可路由）。失败仍落库（status="error"）。
+  - prompt：`app/prompts/turn_judge.md`，每维 1-5、必须给 rationale。
+  - `POST /api/admin/turns/{turn_id}/evaluate` — 手动触发
+  - `GET /api/admin/turns/{turn_id}/evaluations` — 历史评分（一个 turn 可多次评）
+  - `GET /api/admin/games/{game_id}/evaluations` — 按游戏聚合
+  - `api/scripts/judge_turn.py`：CLI 批量评分（`--turn-id` / `--game-id --last N` / `--game-id --all`）。
+  - 与 trace 关联：judge 调用本身归到 `agent_traces.job_kind="judge", job_id=turn_id`，不污染主回合视图。
 
 ### 阶段 2 — 架构层重构（3-6 周）
 
