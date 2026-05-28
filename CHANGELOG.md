@@ -6,6 +6,15 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 9 — dashboard 评分查询视图 (2026-05-28)
+
+**Added**
+
+- `/admin` 新增 Judge 评分查询区块：输入 game id 查看该游戏所有回合评分（overall + 6 维 + 状态）。
+- `web/lib/api.ts`：`fetchGameEvaluations` / `triggerTurnEvaluation` 及 `TurnEvaluationRead` 类型。
+
+纯前端，复用 Round 5 的 `GET /api/admin/games/{id}/evaluations`。
+
 ### Round 8 — 纯函数单元测试 (2026-05-28)
 
 **Added**

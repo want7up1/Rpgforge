@@ -709,3 +709,43 @@ export async function fetchTurnJobTraces(
     { headers: adminHeaders(token) }
   );
 }
+
+export type TurnEvaluationRead = {
+  id: string;
+  turn_id: string;
+  game_id: string;
+  canon_fidelity: number | null;
+  state_consistency: number | null;
+  pacing: number | null;
+  prose_quality: number | null;
+  freshness: number | null;
+  safety: number | null;
+  overall_score: number | null;
+  rationale: Record<string, string> | null;
+  judge_model: string | null;
+  trace_id: string | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+};
+
+export async function fetchGameEvaluations(
+  token: string,
+  gameId: string,
+  limit = 100
+): Promise<TurnEvaluationRead[]> {
+  return requestJson<TurnEvaluationRead[]>(
+    `/api/admin/games/${gameId}/evaluations?limit=${limit}`,
+    { headers: adminHeaders(token) }
+  );
+}
+
+export async function triggerTurnEvaluation(
+  token: string,
+  turnId: string
+): Promise<TurnEvaluationRead> {
+  return requestJson<TurnEvaluationRead>(
+    `/api/admin/turns/${turnId}/evaluate`,
+    { method: "POST", headers: adminHeaders(token) }
+  );
+}

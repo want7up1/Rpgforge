@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 8 — 纯函数单元测试 |
+| 最近一轮 | Round 9 — dashboard 评分查询视图 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | 阶段 1 + 3.1 + §7.8 + 基础设施单测完成。AI 质量闭环可用 |
-| ⚠️ 验证状态 | Round 1–8 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
-| 下一步建议 | 先跑 §9 验证。2.1 Agent 抽象暂缓（ROI 负）；AI 行为调优等 trace 数据 |
+| 当前阶段 | AI 质量闭环（stats→trace→judge）UI 完整可见。阶段 1 + 3.1 + §7.8 + 单测完成 |
+| ⚠️ 验证状态 | Round 1–9 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
+| 下一步建议 | 强烈建议先部署 + 跑 §9 验证再继续。剩余项（2.2/3.2/3.3/4.x）多为高风险或大 feature，宜在有真实数据 + 容器验证后推进 |
 
 ---
 
@@ -99,6 +99,12 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 9 (2026-05-28) — dashboard 评分查询视图
+
+`/admin` 加 Judge 评分查询：输入 game id → 该游戏所有回合评分表（overall + 6 维）。纯前端，复用 `GET /api/admin/games/{id}/evaluations`。`web/lib/api.ts` 加 `fetchGameEvaluations` / `triggerTurnEvaluation`。tsc + lint 通过。
+
+至此 AI 质量闭环在 UI 上完整可见：概览 stats → trace 列表+详情 → judge 评分。
 
 ### Round 8 (2026-05-28) — 纯函数单元测试
 

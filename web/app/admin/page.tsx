@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import {
+  fetchGameEvaluations,
   fetchRecentTraces,
   fetchRecentTurnStats,
   fetchTraceDetail,
   type AgentTraceDetail,
   type AgentTraceSummary,
-  type RecentTurnStats
+  type RecentTurnStats,
+  type TurnEvaluationRead
 } from "@/lib/api";
 
 // 与 /settings 页面共用同一个 token，方便用户只配一次。
@@ -34,6 +36,11 @@ export default function AdminPage() {
   const [detail, setDetail] = useState<AgentTraceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  // 评分查询
+  const [evalGameId, setEvalGameId] = useState("");
+  const [evals, setEvals] = useState<TurnEvaluationRead[]>([]);
+  const [evalLoading, setEvalLoading] = useState(false);
+  const [evalError, setEvalError] = useState("");
 
   // 加载逻辑放进 effect 内部的 async 函数，所有 setState 都在 await 之后，
   // 避免 react-hooks/set-state-in-effect 警告。
@@ -93,6 +100,26 @@ export default function AdminPage() {
       setDetailError(err instanceof Error ? err.message : String(err));
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function handleLoadEvals() {
+    if (!token || !evalGameId.trim()) {
+      setEvalError("请填写 token 和 game id。");
+      return;
+    }
+    setEvalLoading(true);
+    setEvalError("");
+    try {
+      const data = await fetchGameEvaluations(token, evalGameId.trim());
+      setEvals(data);
+      if (data.length === 0) {
+        setEvalError("该游戏暂无评分。可用 scripts/judge_turn.py 生成。");
+      }
+    } catch (err) {
+      setEvalError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEvalLoading(false);
     }
   }
 
@@ -310,6 +337,72 @@ export default function AdminPage() {
             )}
           </section>
         )}
+
+        <section className="mt-8">
+          <h2 className="mb-2 text-lg font-semibold">Judge 评分查询</h2>
+          <div className="mb-3 flex items-end gap-2">
+            <div className="flex-1">
+              <label className="block text-xs text-gray-500 mb-1">Game ID</label>
+              <input
+                type="text"
+                className="w-full rounded border border-gray-300 px-2 py-1 font-mono"
+                value={evalGameId}
+                onChange={(e) => setEvalGameId(e.target.value)}
+                placeholder="游戏 UUID"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleLoadEvals()}
+              className="rounded border border-gray-300 px-3 py-1"
+              disabled={evalLoading}
+            >
+              查询
+            </button>
+          </div>
+          {evalError && <p className="text-amber-600 text-xs">{evalError}</p>}
+          {evals.length > 0 && (
+            <div className="overflow-x-auto rounded border border-gray-200">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-left">
+                  <tr>
+                    <th className="px-2 py-1">时间</th>
+                    <th className="px-2 py-1">overall</th>
+                    <th className="px-2 py-1">忠实</th>
+                    <th className="px-2 py-1">状态一致</th>
+                    <th className="px-2 py-1">节奏</th>
+                    <th className="px-2 py-1">文笔</th>
+                    <th className="px-2 py-1">新意</th>
+                    <th className="px-2 py-1">安全</th>
+                    <th className="px-2 py-1">状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evals.map((ev) => (
+                    <tr
+                      key={ev.id}
+                      className={ev.status === "success" ? "" : "bg-red-50 text-red-700"}
+                    >
+                      <td className="px-2 py-1 font-mono">
+                        {new Date(ev.created_at).toLocaleString()}
+                      </td>
+                      <td className="px-2 py-1 font-mono font-semibold">
+                        {ev.overall_score ?? "—"}
+                      </td>
+                      <td className="px-2 py-1 font-mono">{ev.canon_fidelity ?? "—"}</td>
+                      <td className="px-2 py-1 font-mono">{ev.state_consistency ?? "—"}</td>
+                      <td className="px-2 py-1 font-mono">{ev.pacing ?? "—"}</td>
+                      <td className="px-2 py-1 font-mono">{ev.prose_quality ?? "—"}</td>
+                      <td className="px-2 py-1 font-mono">{ev.freshness ?? "—"}</td>
+                      <td className="px-2 py-1 font-mono">{ev.safety ?? "—"}</td>
+                      <td className="px-2 py-1">{ev.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </main>
     </AppShell>
   );
