@@ -9,6 +9,7 @@ from app.models.state import GameState
 from app.models.state_delta import StateDelta
 from app.models.summary import Summary
 from app.models.turn import Turn
+from app.models.turn_evaluation import TurnEvaluation
 
 __all__ = [
     "AgentTrace",
@@ -24,5 +25,6 @@ __all__ = [
     "StateDelta",
     "Summary",
     "Turn",
+    "TurnEvaluation",
     "TurnJob",
 ]

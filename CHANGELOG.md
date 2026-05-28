@@ -6,6 +6,20 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 5 — 阶段 1.3 LLM-as-Judge (2026-05-28)
+
+**Added**
+
+- 迁移 `20260528_0027`：`turn_evaluations` 表，6 维评分（canon_fidelity / state_consistency / pacing / prose_quality / freshness / safety）+ overall_score + rationale + 关联到原始 trace。
+- `app/services/turn_judge.py` + `app/prompts/turn_judge.md`。
+- admin endpoints：`POST /turns/{turn_id}/evaluate`、`GET /turns/{turn_id}/evaluations`、`GET /games/{game_id}/evaluations`。
+- `api/scripts/judge_turn.py`：CLI 触发（单 turn / 最近 N / 全部）。
+
+**Notes**
+
+- 评分本身消耗 Pro LLM 调用。**默认不自动跑**，必须显式触发（admin API 或 CLI）。
+- judge 调用归到 `agent_traces.job_kind="judge"`，不污染主回合的 trace 视图。
+
 ### Round 4 — 阶段 1.2 Golden replay 工具 (2026-05-28)
 
 **Added**

@@ -33,6 +33,7 @@ AGENT_LABEL: dict[str, str] = {
     "generator_interview": "generator_interview",
     "generate_config_outline": "generator_outline",
     "generate_config_section": "generator_section",
+    "turn_judge": "turn_judge",
 }
 
 
