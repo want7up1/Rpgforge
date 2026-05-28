@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 14 — compressor + extractor 测试（测试线收尾） |
+| 最近一轮 | Round 15 — 流式 JSON 解析测试（测试线完成） |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | AI 质量闭环完整 + 核心链路全测试覆盖。Round 1–14 本地 pgvector 实测 **91 tests pass** |
-| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、91 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | 测试加固线已收尾。剩余为大 feature/高风险重构（2.2/3.2/3.3/4.x），建议有真实 trace 数据 + 人工审查后再推进 |
+| 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
+| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、102 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
+| 下一步建议 | 测试加固线已完成。剩余为大 feature/高风险重构（2.2/3.2/3.3/4.x），**需人工审查 + 真实 trace 数据**，不适合无人自主推进 |
 
 ---
 
@@ -99,6 +99,12 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 15 (2026-05-28) — 流式 JSON 解析测试
+
+`tests/test_stream_parse.py`（11 个，纯函数无需 DB）：`extract_partial_json_string_field` 的完整/未闭合/转义引号/换行/unicode/字段缺失/非字符串/unicode 转义中途断裂等。这是流式回合实时显示 narrative 的核心。本地全套 **102 passed**。
+
+**测试加固线完成**：从会话开始的 ~50 个测试增长到 102 个，覆盖所有新增基础设施 + 核心 agent 链路 + 流式解析。
 
 ### Round 14 (2026-05-28) — context_compressor + state_extractor 测试
 
