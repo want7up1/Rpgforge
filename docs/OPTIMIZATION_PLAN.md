@@ -509,7 +509,7 @@ ORDER BY rewrite_rate DESC;
 
 7. **Stage 数量与前端约定**：`stage_total=7`。未来加 stage 需要同步 `gameplay.py::STAGE_*` + `turn_jobs.py::TURN_JOB_STAGES` + 前端进度条。
 
-8. **`TURN_JOB_STAGES` 与 `gameplay.py::STAGE_*` 重复定义**：两处字符串必须保持同步。理想做法是把 STAGE_* 提到一个公共模块，gameplay 和 turn_jobs 都引入。
+8. ~~**`TURN_JOB_STAGES` 与 `gameplay.py::STAGE_*` 重复定义**~~（已解决 Round 7, 2026-05-28）：turn_jobs 现在 import gameplay 的 `STAGE_*` 常量构造 `TURN_JOB_STAGES`，stage id 单一来源在 gameplay.py，turn_jobs 只补中文 label。turn_jobs 内所有裸 stage 字符串也替换为常量（保留 `job.status="completed"` 和 `event_type="completed"`，它们不是 stage）。
 
 ---
 
