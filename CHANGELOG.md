@@ -6,6 +6,16 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 6 — 阶段 3.1 Telemetry Dashboard (2026-05-28)
+
+**Added**
+
+- 后端 `GET /api/admin/stats/recent-turns`：聚合最近 N 个 completed turn job 的 telemetry（fallback / rewrite / extractor 失败率、drift severity 分布、各 agent 平均 latency、评分均值）。
+- 前端 `web/app/admin/page.tsx`：管理监控页，聚合卡片 + 最近 30 条 trace 表，阈值超标高亮。
+- `web/lib/api.ts`：admin API 客户端函数与类型。
+
+**Access**：浏览器 `/admin`，使用与设置页相同的 `SETTINGS_ADMIN_TOKEN`。
+
 ### Round 5 — 阶段 1.3 LLM-as-Judge (2026-05-28)
 
 **Added**
