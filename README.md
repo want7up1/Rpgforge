@@ -147,7 +147,8 @@ docker compose ps
 - [Configuration](docs/CONFIGURATION.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [API Overview](docs/API.md)
-- [Project Guide](docs/PROJECT_GUIDE.md)
+- [AI Story Runtime Guide](docs/AI_STORY_RUNTIME_GUIDE.md)
+- [Optimization Plan](docs/OPTIMIZATION_PLAN.md)
 
 ## Security
 
