@@ -38,7 +38,7 @@ sys.path.insert(0, ".")
 from app.db.session import SessionLocal  # noqa: E402
 from app.models.agent_trace import AgentTrace  # noqa: E402
 from app.services.agent_traces import set_trace_context  # noqa: E402
-from app.services.deepseek_client import DeepSeekClient, DeepSeekError  # noqa: E402
+from app.services.deepseek_client import DeepSeekError  # noqa: E402
 from app.services.model_router import ModelRouter  # noqa: E402
 
 

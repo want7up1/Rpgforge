@@ -12,7 +12,6 @@ from app.services.model_router import ModelRouter
 from app.services.state_extractor import StateExtractor
 from tests.story_settings_fixtures import build_generated_config
 
-
 # ---------- context_compressor 纯逻辑 ----------
 
 def test_trim_text_short_unchanged() -> None:

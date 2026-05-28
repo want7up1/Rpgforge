@@ -2,18 +2,20 @@
 
 需要 `X-Settings-Admin-Token` header 才能访问（生产模式如果未配置 token 会拒绝）。
 当前只暴露 LLM trace 查询，方便排查 AI 链路问题。
+
+注意：本模块**不要**加 `from __future__ import annotations`。它会让 FastAPI 依赖参数
+（Query 等）的注解变成字符串，既触发 ruff B008，也可能让 FastAPI 误解析（参见
+progress.py 的 204 历史 bug）。
 """
 
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -22,7 +24,6 @@ from app.models.generator_job import TurnJob
 from app.models.turn_evaluation import TurnEvaluation
 from app.routers.settings import verify_settings_token
 from app.services.turn_judge import TurnJudgeError, evaluate_turn
-from sqlalchemy import func
 
 router = APIRouter(
     prefix="/api/admin",
@@ -77,12 +78,11 @@ class AgentTraceSummary(BaseModel):
 @router.get("/traces", response_model=list[AgentTraceSummary])
 def list_traces(
     db: Session = DB_DEPENDENCY,
-    *,
-    job_id: UUID | None = Query(default=None, description="按上游 job_id 过滤"),
-    job_kind: str | None = Query(default=None, description="turn / generator_chat / generator_finalize"),
-    agent: str | None = Query(default=None, description="按 agent 名字过滤"),
-    status_eq: str | None = Query(default=None, alias="status"),
-    limit: int = Query(default=50, ge=1, le=500),
+    job_id: Annotated[UUID | None, Query(description="按上游 job_id 过滤")] = None,
+    job_kind: Annotated[str | None, Query(description="job 类型过滤")] = None,
+    agent: Annotated[str | None, Query(description="按 agent 名字过滤")] = None,
+    status_eq: Annotated[str | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> list[AgentTrace]:
     """返回最近 N 条 trace 的轻量列表（不含 prompt/output 全文）。"""
     stmt = select(AgentTrace).order_by(AgentTrace.created_at.desc()).limit(limit)
@@ -180,7 +180,6 @@ def list_turn_evaluations(
 def list_game_evaluations(
     game_id: UUID,
     db: Session = DB_DEPENDENCY,
-    *,
     limit: int = Query(default=100, ge=1, le=500),
 ) -> list[TurnEvaluation]:
     """一个游戏最近 N 次评分（按 created_at 倒序）。"""
@@ -212,7 +211,6 @@ class RecentTurnStats(BaseModel):
 @router.get("/stats/recent-turns", response_model=RecentTurnStats)
 def stats_recent_turns(
     db: Session = DB_DEPENDENCY,
-    *,
     limit: int = Query(default=100, ge=1, le=500),
 ) -> RecentTurnStats:
     """聚合最近 N 个已完成 turn job 的 telemetry，以及对应回合的评分均值。"""
@@ -303,8 +301,7 @@ def stats_recent_turns(
 @router.get("/golden", response_model=list[AgentTraceSummary])
 def list_golden_traces(
     db: Session = DB_DEPENDENCY,
-    *,
-    label: str | None = Query(default=None, description="good / bad / neutral；省略则返回所有有 label 的"),
+    label: str | None = Query(default=None, description="good/bad/neutral，空=全部"),
     agent: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> list[AgentTrace]:
