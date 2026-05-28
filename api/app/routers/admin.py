@@ -19,9 +19,11 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.agent_trace import AgentTrace
+from app.models.generator_job import TurnJob
 from app.models.turn_evaluation import TurnEvaluation
 from app.routers.settings import verify_settings_token
 from app.services.turn_judge import TurnJudgeError, evaluate_turn
+from sqlalchemy import func
 
 router = APIRouter(
     prefix="/api/admin",
@@ -187,6 +189,113 @@ def list_game_evaluations(
         .limit(limit)
     )
     return list(db.scalars(stmt).all())
+
+
+class RecentTurnStats(BaseModel):
+    """最近 N 回合的 telemetry + 评分聚合。"""
+
+    sample_size: int
+    director_fallback_count: int
+    director_fallback_rate: float
+    rewrite_count: int
+    rewrite_rate: float
+    extractor_failed_count: int
+    extractor_failed_rate: float
+    drift_severity_distribution: dict[str, int]
+    avg_overall_score: float | None
+    evaluations_count: int
+    avg_latency_ms_by_agent: dict[str, float]
+
+
+@router.get("/stats/recent-turns", response_model=RecentTurnStats)
+def stats_recent_turns(
+    db: Session = DB_DEPENDENCY,
+    *,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> RecentTurnStats:
+    """聚合最近 N 个已完成 turn job 的 telemetry，以及对应回合的评分均值。"""
+    # 1. 最近 N 个 completed turn job
+    jobs = list(
+        db.scalars(
+            select(TurnJob)
+            .where(TurnJob.status == "completed")
+            .order_by(TurnJob.created_at.desc())
+            .limit(limit)
+        ).all()
+    )
+    sample_size = len(jobs)
+    if sample_size == 0:
+        return RecentTurnStats(
+            sample_size=0,
+            director_fallback_count=0,
+            director_fallback_rate=0.0,
+            rewrite_count=0,
+            rewrite_rate=0.0,
+            extractor_failed_count=0,
+            extractor_failed_rate=0.0,
+            drift_severity_distribution={},
+            avg_overall_score=None,
+            evaluations_count=0,
+            avg_latency_ms_by_agent={},
+        )
+
+    director_fallback = sum(1 for j in jobs if j.director_used_fallback)
+    rewrite = sum(1 for j in jobs if j.rewrite_triggered)
+    extractor_failed = sum(1 for j in jobs if j.extractor_failed)
+
+    severity_dist: dict[str, int] = {}
+    for j in jobs:
+        key = j.drift_severity or "skipped"
+        severity_dist[key] = severity_dist.get(key, 0) + 1
+
+    # 2. 对应回合的评分均值
+    turn_ids = [j.turn_id for j in jobs if j.turn_id]
+    avg_score: float | None = None
+    evaluations_count = 0
+    if turn_ids:
+        score_row = db.execute(
+            select(
+                func.avg(TurnEvaluation.overall_score),
+                func.count(TurnEvaluation.id),
+            ).where(
+                TurnEvaluation.turn_id.in_(turn_ids),
+                TurnEvaluation.status == "success",
+            )
+        ).first()
+        if score_row is not None:
+            avg_raw, count_raw = score_row
+            evaluations_count = int(count_raw or 0)
+            avg_score = float(avg_raw) if avg_raw is not None else None
+
+    # 3. 这些 turn job 关联的 LLM 调用 latency 均值（按 agent）
+    job_ids = [j.id for j in jobs]
+    latency_rows = db.execute(
+        select(
+            AgentTrace.agent,
+            func.avg(AgentTrace.latency_ms),
+        ).where(
+            AgentTrace.job_kind == "turn",
+            AgentTrace.job_id.in_(job_ids),
+            AgentTrace.status == "success",
+        ).group_by(AgentTrace.agent)
+    ).all()
+    avg_latency: dict[str, float] = {
+        agent: round(float(avg or 0), 1) for agent, avg in latency_rows
+    }
+
+    return RecentTurnStats(
+        sample_size=sample_size,
+        director_fallback_count=director_fallback,
+        director_fallback_rate=round(director_fallback / sample_size, 4),
+        rewrite_count=rewrite,
+        rewrite_rate=round(rewrite / sample_size, 4),
+        extractor_failed_count=extractor_failed,
+        extractor_failed_rate=round(extractor_failed / sample_size, 4),
+        drift_severity_distribution=severity_dist,
+        avg_overall_score=round(avg_score, 3) if avg_score is not None else None,
+        evaluations_count=evaluations_count,
+        avg_latency_ms_by_agent=avg_latency,
+    )
 
 
 @router.get("/golden", response_model=list[AgentTraceSummary])

@@ -13,11 +13,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 5 — 阶段 1.3 LLM-as-Judge |
+| 最近一轮 | Round 6 — 阶段 3.1 Telemetry Dashboard |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | 阶段 1.1 / 1.2 / 1.3 全部完成。AI 质量基础设施初版闭环 |
-| 下一步建议 | 阶段 3.1 dashboard（让 telemetry + 评分可视化） |
+| 当前阶段 | 阶段 1（1.1/1.2/1.3）+ 3.1 完成。trace→golden→judge→dashboard 闭环可用 |
+| 下一步建议 | 阶段 2.1 Agent 抽象基类（架构层，无 DB 迁移） |
 
 ---
 
@@ -98,6 +98,26 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 6 (2026-05-28) — 阶段 3.1 Telemetry Dashboard
+
+让 trace + telemetry + 评分**可视化**。AI 质量基础设施从"可查询"升级到"可一眼看"。
+
+**新增**
+
+- 后端：`GET /api/admin/stats/recent-turns?limit=` 聚合 endpoint（`RecentTurnStats`）。
+- 前端：`web/app/admin/page.tsx` —— token 输入（复用 `rpgforge.settingsAdminToken`）+ 聚合卡片 + 最近 30 条 trace 表。
+- `web/lib/api.ts`：新增 `fetchRecentTurnStats` / `fetchRecentTraces` / `fetchTraceDetail` / `fetchTurnJobTraces` 及类型。
+
+**部署**：前端 + 后端都改了，需重新构建。
+
+```bash
+docker compose up -d --build api web
+```
+
+**访问**：浏览器打开 `/admin`，填入 `SETTINGS_ADMIN_TOKEN`（与设置页同一个）。
+
+**阈值高亮**：director_fallback > 10% / rewrite > 20% / extractor_failed > 5% 卡片变琥珀色，便于一眼发现异常。
 
 ### Round 5 (2026-05-28) — 阶段 1.3 LLM-as-Judge
 
@@ -327,7 +347,7 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
 
 ### 阶段 3 — 前端 + UX（穿插进行）
 
-- [ ] **3.1 telemetry dashboard**：`/admin` 页面展示最近 100 回合的 director_fallback / drift_severity / rewrite / extractor_failed 分布；P50/P95 时长；当前模型路由配置。
+- [x] **3.1 telemetry dashboard**（Round 6, 2026-05-28）：后端 `GET /api/admin/stats/recent-turns` 聚合最近 N 个 completed turn job 的 director_fallback / rewrite / extractor_failed 率 + drift severity 分布 + 各 agent 平均 latency + 评分均值；前端 `web/app/admin/page.tsx` 展示聚合卡片（阈值超标变琥珀）+ 最近 30 条 trace 表。直接访问 `/admin`。未做 P50/P95 和图表（先用数字表，等真实数据）。
 
 - [ ] **3.2 玩家可见回溯**：当 `drift_severity ∈ {major, critical}` 或玩家不满意时，让玩家"回到上一回合"或"切换到 v2 版本"。需要在 `persist_runtime_turn` 时保留所有版本（带原稿改写就是 v1/v2）。
 

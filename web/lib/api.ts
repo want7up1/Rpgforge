@@ -613,3 +613,99 @@ export async function updateDeepSeekSettings(
     body: JSON.stringify(payload)
   });
 }
+
+// ---------- Admin (telemetry / trace / judge) ----------
+// 所有 admin endpoint 需要 X-Settings-Admin-Token header。
+
+export type RecentTurnStats = {
+  sample_size: number;
+  director_fallback_count: number;
+  director_fallback_rate: number;
+  rewrite_count: number;
+  rewrite_rate: number;
+  extractor_failed_count: number;
+  extractor_failed_rate: number;
+  drift_severity_distribution: Record<string, number>;
+  avg_overall_score: number | null;
+  evaluations_count: number;
+  avg_latency_ms_by_agent: Record<string, number>;
+};
+
+export type AgentTraceSummary = {
+  id: string;
+  job_kind: string | null;
+  job_id: string | null;
+  agent: string;
+  task_type: string;
+  model: string | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  tokens_reasoning: number | null;
+  latency_ms: number;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+};
+
+export type AgentTraceDetail = AgentTraceSummary & {
+  prompt_messages: Array<{ role: string; content: string }> | null;
+  output_text: string | null;
+  reasoning_text: string | null;
+  extras: Record<string, unknown> | null;
+};
+
+function adminHeaders(token: string): HeadersInit {
+  return { "X-Settings-Admin-Token": token };
+}
+
+export async function fetchRecentTurnStats(
+  token: string,
+  limit = 100
+): Promise<RecentTurnStats> {
+  return requestJson<RecentTurnStats>(
+    `/api/admin/stats/recent-turns?limit=${limit}`,
+    { headers: adminHeaders(token) }
+  );
+}
+
+export async function fetchRecentTraces(
+  token: string,
+  params: {
+    limit?: number;
+    agent?: string;
+    status?: string;
+    jobKind?: string;
+    jobId?: string;
+  } = {}
+): Promise<AgentTraceSummary[]> {
+  const query = new URLSearchParams();
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.agent) query.set("agent", params.agent);
+  if (params.status) query.set("status", params.status);
+  if (params.jobKind) query.set("job_kind", params.jobKind);
+  if (params.jobId) query.set("job_id", params.jobId);
+  const qs = query.toString();
+  return requestJson<AgentTraceSummary[]>(
+    `/api/admin/traces${qs ? `?${qs}` : ""}`,
+    { headers: adminHeaders(token) }
+  );
+}
+
+export async function fetchTraceDetail(
+  token: string,
+  traceId: string
+): Promise<AgentTraceDetail> {
+  return requestJson<AgentTraceDetail>(`/api/admin/traces/${traceId}`, {
+    headers: adminHeaders(token)
+  });
+}
+
+export async function fetchTurnJobTraces(
+  token: string,
+  jobId: string
+): Promise<AgentTraceDetail[]> {
+  return requestJson<AgentTraceDetail[]>(
+    `/api/admin/turn-jobs/${jobId}/traces`,
+    { headers: adminHeaders(token) }
+  );
+}
