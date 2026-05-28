@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 11 — admin 集成测试 + 修序列化 |
+| 最近一轮 | Round 12 — TurnJudge 测试 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | AI 质量闭环完整 + admin endpoint 有集成测试。Round 1–11 本地 pgvector 实测 **77 tests pass** |
-| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、77 pytest（含 8 admin 集成）、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | 基础扎实。剩余项（2.2/3.2/3.3/4.x）多为高风险或大 feature，建议有真实 trace 数据后再推进 |
+| 当前阶段 | AI 质量闭环完整 + 新基础设施有测试覆盖。Round 1–12 本地 pgvector 实测 **81 tests pass** |
+| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、81 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
+| 下一步建议 | 基础扎实。可继续补核心 agent 测试（drift/director/compressor）；大 feature（2.2/3.2/3.3/4.x）建议有真实 trace 数据后再推进 |
 
 ---
 
@@ -99,6 +99,10 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 12 (2026-05-28) — TurnJudge 测试
+
+`tests/test_turn_judge.py`（fake router，不发真实 LLM）：overall 平均值 fallback、显式 overall、`evaluate_turn` 成功落库、LLM 失败落 error 行。本地 pgvector 全套 **81 passed**。
 
 ### Round 11 (2026-05-28) — admin endpoint 集成测试 + 修 overall_score 序列化
 

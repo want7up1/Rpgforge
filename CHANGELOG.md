@@ -6,6 +6,12 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 12 — TurnJudge 测试 (2026-05-28)
+
+**Added**
+
+- `tests/test_turn_judge.py`：fake router 测 JudgeResult overall 平均值 fallback、显式 overall、evaluate_turn 成功落库、LLM 失败时落 error 行。本地 pgvector 全套 81 passed。
+
 ### Round 11 — admin 集成测试 + 修序列化 (2026-05-28)
 
 **Added**
