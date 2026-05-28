@@ -112,8 +112,13 @@ class TurnJudge:
             raise TurnJudgeError(f"Failed to parse judge output: {exc}") from exc
 
         # 如果模型没给 overall_score 或给的不对，用 6 维平均值兜底。
-        scores = [getattr(judge_result, d) for d in DIMENSIONS if getattr(judge_result, d) is not None]
-        if scores and (judge_result.overall_score is None or not _is_valid_overall(judge_result.overall_score)):
+        scores = [
+            getattr(judge_result, d)
+            for d in DIMENSIONS
+            if getattr(judge_result, d) is not None
+        ]
+        overall = judge_result.overall_score
+        if scores and (overall is None or not _is_valid_overall(overall)):
             judge_result.overall_score = round(sum(scores) / len(scores), 2)
 
         return judge_result

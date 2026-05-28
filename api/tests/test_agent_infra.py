@@ -11,7 +11,6 @@ from app.services.story_director import StoryDirectorDecision
 from app.services.story_settings import StoryMaterialResult
 from app.services.turn_judge import JudgeResult
 
-
 # ---------- agent_traces.extract_usage ----------
 
 def test_extract_usage_none_and_empty() -> None:
