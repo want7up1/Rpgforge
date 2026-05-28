@@ -6,6 +6,8 @@ import { AppShell } from "@/components/AppShell";
 import {
   fetchRecentTraces,
   fetchRecentTurnStats,
+  fetchTraceDetail,
+  type AgentTraceDetail,
   type AgentTraceSummary,
   type RecentTurnStats
 } from "@/lib/api";
@@ -28,6 +30,10 @@ export default function AdminPage() {
   const [limit, setLimit] = useState<number>(100);
   // 手动刷新的计数器：bump 一下触发重新加载。
   const [reloadTick, setReloadTick] = useState(0);
+  // trace 详情面板
+  const [detail, setDetail] = useState<AgentTraceDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
 
   // 加载逻辑放进 effect 内部的 async 函数，所有 setState 都在 await 之后，
   // 避免 react-hooks/set-state-in-effect 警告。
@@ -73,6 +79,21 @@ export default function AdminPage() {
       return;
     }
     setReloadTick((n) => n + 1);
+  }
+
+  async function handleOpenTrace(traceId: string) {
+    if (!token) return;
+    setDetailLoading(true);
+    setDetailError("");
+    setDetail(null);
+    try {
+      const data = await fetchTraceDetail(token, traceId);
+      setDetail(data);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDetailLoading(false);
+    }
   }
 
   return (
@@ -220,11 +241,10 @@ export default function AdminPage() {
                   {traces.map((t) => (
                     <tr
                       key={t.id}
-                      className={
-                        t.status === "success"
-                          ? ""
-                          : "bg-red-50 text-red-700"
-                      }
+                      onClick={() => void handleOpenTrace(t.id)}
+                      className={`cursor-pointer hover:bg-gray-100 ${
+                        t.status === "success" ? "" : "bg-red-50 text-red-700"
+                      } ${detail?.id === t.id ? "bg-blue-50" : ""}`}
                     >
                       <td className="px-2 py-1 font-mono">
                         {new Date(t.created_at).toLocaleTimeString()}
@@ -244,6 +264,50 @@ export default function AdminPage() {
                 </tbody>
               </table>
             </div>
+            <p className="mt-1 text-xs text-gray-400">点击任意行查看完整 prompt / output。</p>
+          </section>
+        )}
+
+        {(detailLoading || detailError || detail) && (
+          <section className="mt-6">
+            <h2 className="mb-2 text-lg font-semibold">Trace 详情</h2>
+            {detailLoading && <p className="text-gray-500">加载中…</p>}
+            {detailError && <p className="text-red-600">错误：{detailError}</p>}
+            {detail && (
+              <div className="space-y-4 rounded border border-gray-200 p-4">
+                <div className="text-xs text-gray-500">
+                  <span className="font-mono">{detail.id}</span> · {detail.agent} ·{" "}
+                  {detail.model ?? "—"} · {detail.status} · {detail.latency_ms} ms
+                  {detail.error_message ? (
+                    <span className="text-red-600"> · {detail.error_message}</span>
+                  ) : null}
+                </div>
+                {(detail.prompt_messages ?? []).map((m, i) => (
+                  <div key={i}>
+                    <div className="text-xs font-semibold text-gray-500">
+                      message[{i}] · {m.role}
+                    </div>
+                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
+                      {m.content}
+                    </pre>
+                  </div>
+                ))}
+                {detail.reasoning_text ? (
+                  <div>
+                    <div className="text-xs font-semibold text-gray-500">reasoning</div>
+                    <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-amber-50 p-2 text-xs">
+                      {detail.reasoning_text}
+                    </pre>
+                  </div>
+                ) : null}
+                <div>
+                  <div className="text-xs font-semibold text-gray-500">output</div>
+                  <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
+                    {detail.output_text ?? "(empty)"}
+                  </pre>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </main>

@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 6 — 阶段 3.1 Telemetry Dashboard |
+| 最近一轮 | Round 7 — stage 常量统一 + dashboard trace 详情 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | 阶段 1（1.1/1.2/1.3）+ 3.1 完成。trace→golden→judge→dashboard 闭环可用 |
-| ⚠️ 验证状态 | Round 1–6 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
-| 下一步建议 | 先跑 §9 验证；之后阶段 2.1 Agent 抽象基类（架构层，无 DB 迁移） |
+| 当前阶段 | 阶段 1 + 3.1（含 trace 详情）+ §7.8 完成。AI 质量闭环可用 |
+| ⚠️ 验证状态 | Round 1–7 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
+| 下一步建议 | 先跑 §9 验证。2.1 Agent 抽象已评估为当前 ROI 负（见下），暂缓 |
 
 ---
 
@@ -98,6 +98,19 @@ docker compose restart api worker
 
 ```bash
 docker compose restart api worker
+```
+
+### Round 7 (2026-05-28) — 收尾：stage 常量统一 + dashboard trace 详情
+
+两件低风险、可静态验证的收尾。**刻意不动需要 trace 数据才能决策的 AI 行为项**（§7.2/§7.5）。
+
+- **§7.8 stage 常量统一**：turn_jobs import gameplay 的 `STAGE_*` 构造 `TURN_JOB_STAGES`，裸字符串全替换为常量（保留非 stage 的 `job.status` / `event_type`）。纯重构。
+- **3.1c dashboard trace 详情**：`/admin` 点击 trace 行展开完整 prompt_messages / reasoning / output（复用 `GET /api/admin/traces/{id}`）。纯前端，tsc + lint 通过。
+
+**部署**：重新构建 web（后端 turn_jobs 改动需重启）。
+
+```bash
+docker compose up -d --build api worker web
 ```
 
 ### Round 6 (2026-05-28) — 阶段 3.1 Telemetry Dashboard
@@ -376,6 +389,8 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
 | 把 StateApplier 重构成 event sourcing | 当前"LLM 提案 + 代码应用"分层已经够清晰 |
 | 堆单元测试覆盖率 | 真正的"测试"是阶段 1.2 golden replay；Python 单测不能反映 AI 质量 |
 | 给每个 Agent 加重试 | DriftValidator 已经在 fallback 中放行，重试只会增加成本；除非 trace 显示真实重试收益 |
+| 阶段 2.1 Agent 抽象基类（暂缓，非永久放弃） | 当前没有要新增的 agent，抽象的唯一收益"加新 agent 省事"无处兑现。各 agent 的 fallback 差异大（Director 本地决策 / Validator 放行 / Extractor 抛错 / Compressor 拼接），强行统一反而降低可读性。在"无法本地跑测试 + 自主无人审查"下做核心链路大重构 ROI 为负。**触发条件**：真要加第 6 个 agent，或能在容器里跑回归测试时，再做 |
+| 凭感觉改 AI 行为（material 过滤强度 / director hints / drift 阈值，§7.2/7.5/7.3） | trace 基础设施刚建好、还没有真实数据。这些都标注为"等数据再定"。先收集 trace + judge 评分，用数据驱动，而不是继续猜 |
 
 ---
 

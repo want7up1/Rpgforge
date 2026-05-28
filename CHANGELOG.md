@@ -6,6 +6,16 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 7 — stage 常量统一 + dashboard trace 详情 (2026-05-28)
+
+**Changed**
+
+- `turn_jobs` 复用 `gameplay.STAGE_*` 常量构造 `TURN_JOB_STAGES`，stage id 单一来源；裸字符串替换为常量（不含 status / event_type）。纯重构。
+
+**Added**
+
+- `/admin` dashboard：点击 trace 行展开完整 prompt_messages / reasoning / output（复用 `GET /api/admin/traces/{id}`）。
+
 ### Round 6 — 阶段 3.1 Telemetry Dashboard (2026-05-28)
 
 **Added**
