@@ -3,6 +3,7 @@ from typing import Any
 
 from app.models.game import Game
 from app.models.turn import Turn
+from app.schemas.turn import GMRuntimeOutput
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import state_v2_view
 from app.services.story_settings import (
@@ -24,16 +25,23 @@ class PromptBuilder:
         summaries: dict[str, object] | None = None,
         story_director: dict[str, object] | None = None,
         drift_rewrite_instruction: str | None = None,
+        runtime_story: dict[str, Any] | None = None,
+        state_v2: dict[str, Any] | None = None,
+        previous_runtime_output: GMRuntimeOutput | None = None,
     ) -> list[dict[str, str]]:
         config = game.config
         game_state = game.state
+        state_json = game_state.state_json if game_state else {}
         generation_parameters = generation_parameters_from_config(config)
-        runtime_story = build_runtime_story(
-            config,
-            game_state.state_json if game_state else {},
-            selected_action_style=selected_action_style,
-            related_materials=related_materials or [],
-        )
+        if runtime_story is None:
+            runtime_story = build_runtime_story(
+                config,
+                state_json,
+                selected_action_style=selected_action_style,
+                related_materials=related_materials or [],
+            )
+        if state_v2 is None:
+            state_v2 = state_v2_view(state_json)
 
         runtime_payload = {
             "game": {
@@ -48,10 +56,13 @@ class PromptBuilder:
             "related_story_materials": [
                 self._retrieval_payload(result) for result in (related_materials or [])
             ],
-            "current_state_v2": state_v2_view(game_state.state_json if game_state else {}),
+            "current_state_v2": state_v2,
             "memory_summaries": summaries or {},
             "story_director": story_director or {},
             "drift_rewrite_instruction": drift_rewrite_instruction or "",
+            "previous_gm_output": (
+                previous_runtime_output.model_dump() if previous_runtime_output else None
+            ),
             "recent_turns": [
                 self._turn_payload(turn, generation_parameters["recent_turn_excerpt_chars"])
                 for turn in recent_turns

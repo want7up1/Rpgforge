@@ -37,6 +37,7 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
     except (DeepSeekError, StateExtractorValidationError, ValueError) as exc:
         logger.warning("Turn maintenance state extraction failed for job %s: %s", job_id, exc)
         _record_failed_delta(job_id, str(exc))
+        _mark_extractor_failed(job_id)
         _mark_maintenance_terminal(
             job_id,
             status="failed",
@@ -48,6 +49,7 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
     except Exception as exc:
         logger.exception("Unexpected turn maintenance failure for job %s", job_id)
         _record_failed_delta(job_id, f"{type(exc).__name__}: {exc}")
+        _mark_extractor_failed(job_id)
         _mark_maintenance_terminal(
             job_id,
             status="failed",
@@ -112,8 +114,20 @@ async def _extract_delta(job_id: UUID) -> dict[str, Any]:
         turn = db.get(Turn, job.turn_id)
         if game is None or turn is None:
             raise ValueError("Game or turn not found.")
+        runtime_inputs = job.turn_runtime_inputs or {}
 
-    return await StateExtractor().extract(game, turn)
+    director_decision = runtime_inputs.get("director_decision") if isinstance(
+        runtime_inputs, dict
+    ) else None
+    drift_findings = runtime_inputs.get("drift_validation") if isinstance(
+        runtime_inputs, dict
+    ) else None
+    return await StateExtractor().extract(
+        game,
+        turn,
+        director_decision=director_decision,
+        drift_findings=drift_findings,
+    )
 
 
 def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
@@ -138,6 +152,16 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
             rebuild_game_state(db, game)
         db.add(turn)
         touch_game(db, game.id)
+        db.commit()
+
+
+def _mark_extractor_failed(job_id: UUID) -> None:
+    with SessionLocal() as db:
+        job = db.get(TurnJob, job_id)
+        if job is None:
+            return
+        job.extractor_failed = True
+        db.add(job)
         db.commit()
 
 
