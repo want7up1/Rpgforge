@@ -6,6 +6,12 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 15 — 流式 JSON 解析测试 (2026-05-28)
+
+**Added**
+
+- `tests/test_stream_parse.py`：`extract_partial_json_string_field` 的 11 个测试（含 unicode 转义中途断裂等流式边界）。全套 102 passed。
+
 ### Round 14 — context_compressor + state_extractor 测试 (2026-05-28)
 
 **Added**
