@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 10 — 容器验证 + 修复 P0 部署阻断 bug |
+| 最近一轮 | Round 11 — admin 集成测试 + 修序列化 |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | AI 质量闭环完整。Round 1–10 已在本地 pgvector 容器**实测验证**（69 tests pass） |
-| ✅ 验证状态 | 本地 pgvector Postgres 实测：迁移 upgrade head 成功、全套 69 pytest 通过、trace 端到端往返 OK、admin 查询（含 JSONB）OK。详见 §9 |
-| 下一步建议 | 已具备坚实基础。剩余项（2.2/3.2/3.3/4.x）多为高风险或大 feature，建议有真实 trace 数据后再推进 |
+| 当前阶段 | AI 质量闭环完整 + admin endpoint 有集成测试。Round 1–11 本地 pgvector 实测 **77 tests pass** |
+| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、77 pytest（含 8 admin 集成）、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
+| 下一步建议 | 基础扎实。剩余项（2.2/3.2/3.3/4.x）多为高风险或大 feature，建议有真实 trace 数据后再推进 |
 
 ---
 
@@ -99,6 +99,20 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 11 (2026-05-28) — admin endpoint 集成测试 + 修 overall_score 序列化
+
+利用 Round 10 拿到的本地测试能力，给 Round 3-6 零覆盖的 admin endpoint 补集成测试，并修一个序列化不一致。
+
+**新增**
+
+- `tests/test_admin.py`（8 个 TestClient 集成测试）：stats 空库、trace 列表/详情/404、agent 过滤、golden label 过滤、turn-job 聚合排序、game evaluations、token 鉴权。
+
+**修复**
+
+- `admin.TurnEvaluationRead.overall_score`：`Decimal` → `float`。原来 FastAPI 把 `Numeric(3,2)` 序列化成 JSON 字符串 `"4.17"`，与前端 `lib/api.ts` 声明的 `number` 不一致。改 float 后 JSON 返回 number。（集成测试发现）
+
+**验证**：本地 pgvector 全套 **77 passed**。顺带验证了 `turn_evaluations` 的 FK 约束生效（测试插假 turn_id 被拒，改用真实 game+turn）。
 
 ### Round 10 (2026-05-28) — 容器验证 + 修复 P0 部署阻断 bug
 

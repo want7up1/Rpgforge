@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -133,7 +132,10 @@ class TurnEvaluationRead(BaseModel):
     prose_quality: int | None
     freshness: int | None
     safety: int | None
-    overall_score: Decimal | None
+    # DB 列是 Numeric(3,2)（Decimal）；用 float 让 JSON 序列化为 number 而非 string，
+    # 与前端 TurnEvaluationRead.overall_score: number 一致。Pydantic v2 lax 模式
+    # 会把 Decimal coerce 成 float。
+    overall_score: float | None
     rationale: dict[str, Any] | None
     judge_model: str | None
     trace_id: UUID | None

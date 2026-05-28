@@ -6,6 +6,18 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 11 — admin 集成测试 + 修序列化 (2026-05-28)
+
+**Added**
+
+- `tests/test_admin.py`：8 个 TestClient 集成测试覆盖 /api/admin/* endpoint。
+
+**Fixed**
+
+- `admin.TurnEvaluationRead.overall_score` 由 Decimal 改 float，使 JSON 返回 number（与前端类型一致），原本返回字符串 `"4.17"`。
+
+**Verified**：本地 pgvector 全套 77 passed。
+
 ### Round 10 — 容器验证 + 修复 P0 部署 bug (2026-05-28)
 
 **Fixed**
