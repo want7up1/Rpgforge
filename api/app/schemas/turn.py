@@ -89,5 +89,9 @@ class TurnJobRead(BaseModel):
     maintenance_error: str | None = None
     maintenance_started_at: datetime | None = None
     maintenance_completed_at: datetime | None = None
+    director_used_fallback: bool = False
+    drift_severity: str | None = None
+    rewrite_triggered: bool = False
+    extractor_failed: bool = False
     stream_started_at: datetime | None = None
     last_event_at: datetime | None = None
