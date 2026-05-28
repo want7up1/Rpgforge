@@ -13,12 +13,12 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 9 — dashboard 评分查询视图 |
+| 最近一轮 | Round 10 — 容器验证 + 修复 P0 部署阻断 bug |
 | 完成日期 | 2026-05-28 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | AI 质量闭环（stats→trace→judge）UI 完整可见。阶段 1 + 3.1 + §7.8 + 单测完成 |
-| ⚠️ 验证状态 | Round 1–9 仅做静态检查，**未在容器内跑过**。部署后先执行 §9 验证清单 |
-| 下一步建议 | 强烈建议先部署 + 跑 §9 验证再继续。剩余项（2.2/3.2/3.3/4.x）多为高风险或大 feature，宜在有真实数据 + 容器验证后推进 |
+| 当前阶段 | AI 质量闭环完整。Round 1–10 已在本地 pgvector 容器**实测验证**（69 tests pass） |
+| ✅ 验证状态 | 本地 pgvector Postgres 实测：迁移 upgrade head 成功、全套 69 pytest 通过、trace 端到端往返 OK、admin 查询（含 JSONB）OK。详见 §9 |
+| 下一步建议 | 已具备坚实基础。剩余项（2.2/3.2/3.3/4.x）多为高风险或大 feature，建议有真实 trace 数据后再推进 |
 
 ---
 
@@ -99,6 +99,28 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 10 (2026-05-28) — 容器验证 + 修复 P0 部署阻断 bug
+
+用本地 docker pgvector Postgres 第一次真实验证 Round 1-9 全部后端工作，并顺带发现+修复一个会让 app 起不来的既有 bug。
+
+**修复（P0，既有 bug，非本次优化引入）**
+
+- `app/routers/progress.py` 的 `delete_game_progress_save`：移除 `-> None` 返回注解。
+  - 根因：该模块顶部 `from __future__ import annotations` 把 `-> None` 变成字符串 `"None"`，FastAPI 0.115.x 将其 eval 成 `NoneType` 并误判为 response_model，触发 `Status code 204 must not have a response body`，**import 阶段直接崩溃，整个 app 起不来**。
+  - 影响面：用 `fastapi>=0.115`（requirements 范围 + uv.lock 为空不锁版本）构建的容器都会中招。本次优化新增的 admin endpoint 也因此连带不可用。
+  - 全项目仅此一处（future annotations + 204 endpoint 的唯一组合）。
+
+**验证结果（本地 pgvector pg16）**
+
+- `alembic upgrade head` 成功，含新迁移 0025/0026/0027。
+- `pytest tests/` **全套 69 passed**（含 5 个 TestClient 集成模块 + test_gameplay 向后兼容 + test_agent_infra 19 个新测试）。
+- trace 端到端：`record_trace` 写入 → `list_traces` / `get_trace` / `get_turn_job_traces` 读出 OK。
+- admin 查询：`stats_recent_turns`（聚合）、`list_golden_traces`（JSONB `extras[label]` 表达式）实测 OK。
+
+**说明**：验证用的 psycopg/redis/rq/pgvector/fastapi 是装在本地全局环境，**未改 `requirements.txt` / `uv.lock`**。
+
+> 附带建议（未做，留给后续）：`uv.lock` 当前是空的（只有 version 头），意味着依赖未真正锁定。考虑 `uv lock` 生成真实锁文件，避免 fastapi 等再次漂移到不兼容版本。
 
 ### Round 9 (2026-05-28) — dashboard 评分查询视图
 
@@ -557,10 +579,10 @@ ORDER BY rewrite_rate DESC;
 
 ---
 
-## 9. 容器验证清单（Round 1–6 待验证）
+## 9. 容器验证清单
 
-> ⚠️ Round 1–6 全部在**本地无 Postgres** 环境下开发，只做了 `py_compile` + 前端 `tsc/lint` 静态检查。
-> **首次部署后必须按本清单在容器内验证**，确认迁移、表、endpoint、AI 链路都正常。
+> ✅ **Round 10 已用本地 docker pgvector(pg16) 实测通过**：迁移 upgrade head、全套 69 pytest、trace 端到端、admin 查询全部 OK。
+> 下面清单保留给**生产环境首次部署**复核（生产用 docker-compose 的真实 redis + worker，本地验证未覆盖 RQ worker 实际消费和真实 LLM 调用）。
 
 ### 9.1 迁移 + 启动
 

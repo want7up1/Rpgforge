@@ -6,6 +6,18 @@ All notable changes to RPGForge will be documented in this file.
 
 ## Unreleased
 
+### Round 10 — 容器验证 + 修复 P0 部署 bug (2026-05-28)
+
+**Fixed**
+
+- `app/routers/progress.py`：`delete_game_progress_save` 移除 `-> None` 返回注解。该模块的 `from __future__ import annotations` 使 `-> None` 变字符串，FastAPI 0.115.x 误判为 response_model，导致 204 endpoint 在 import 时崩溃、整个 app 无法启动。既有 bug，非本次优化引入。
+
+**Verified**（本地 pgvector pg16 实测）
+
+- `alembic upgrade head` 成功（含迁移 0025/0026/0027）。
+- `pytest tests/` 全套 69 passed。
+- trace 写入→读出端到端、admin 聚合 + JSONB 查询 OK。
+
 ### Round 9 — dashboard 评分查询视图 (2026-05-28)
 
 **Added**
