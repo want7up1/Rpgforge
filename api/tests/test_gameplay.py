@@ -72,6 +72,75 @@ def test_prompt_injects_story_settings_runtime_view_and_materials(db_session) ->
     assert runtime_payload["recent_turns"][0]["gm_output_excerpt"].endswith("...")
 
 
+def test_gm_prompt_redacts_future_act_spoilers(db_session) -> None:
+    """GM 输入只应看到当前幕；next_act 与未来幕主线节点的剧透细节必须被裁掉。"""
+    game = create_game_from_config(db_session, build_generated_config())
+
+    messages = PromptBuilder().build_runtime_messages(
+        game=game,
+        player_input="我检查义庄门槛。",
+        selected_action_style=None,
+        recent_turns=[],
+    )
+    runtime_story = json.loads(messages[1]["content"])["runtime_story"]
+
+    # next_act 只保留 id + title，删除 objective/dramatic_question/allowed_reveals/anchors。
+    next_act = runtime_story["next_act"]
+    assert next_act == {"id": "act_2", "title": "黑伞追踪"}
+
+    # 未来幕（act_2）主线节点只保留 id/title/act_id；剧透字段被裁。
+    quests = {q["id"]: q for q in runtime_story["main_quest_path"]}
+    future_quest = quests["main_quest_2"]
+    assert set(future_quest.keys()) == {"id", "title", "act_id"}
+    assert "objective" not in future_quest
+    assert "player_visible" not in future_quest
+    # 当前幕（act_1）主线节点保留全文。
+    assert quests["main_quest_1"]["player_visible"] == "调查义庄异常痕迹。"
+
+    # 未来幕的剧透措辞不应出现在 GM 的 runtime_story 里。
+    blob = json.dumps(runtime_story, ensure_ascii=False)
+    assert "最终主谋身份" not in blob
+    assert "弄清陆沉舟寻找账册的理由" not in blob
+
+
+def test_gm_system_prompt_elevates_hard_constraints(db_session) -> None:
+    """硬红线必须从深层 JSON 提升到 system prompt，提高模型遵守权重。"""
+    game = create_game_from_config(db_session, build_generated_config())
+
+    messages = PromptBuilder().build_runtime_messages(
+        game=game,
+        player_input="我检查义庄门槛。",
+        selected_action_style=None,
+        recent_turns=[],
+    )
+    system_content = messages[0]["content"]
+
+    assert "本剧本不可违反的强约束" in system_content
+    # 「必须落实」组：正向强约束（玩家"想看却没看到"的部分）。
+    assert "本回合/本幕必须落实" in system_content
+    # hard_rules.must_follow
+    assert "每回合输出玩家可见剧情，并给出 A/B/C/D 四个具体行动选项。" in system_content
+    # hard_rules.reveal_rules
+    assert "隐藏真相只能通过线索逐步揭露。" in system_content
+    # hard_rules.continuity_rules
+    assert "人物动机和地点状态必须保持一致。" in system_content
+    # hard_rules.gm_output_rules
+    assert "正文不输出状态结算。" in system_content
+    # 当前幕目标
+    assert "本幕目标：找到旧案第一条线索。" in system_content
+    # core_mechanics 规则
+    assert "给线索不给答案" in system_content
+    # 「绝对禁止」组：hard_rules.must_not
+    assert "绝对禁止（违反即判失败）" in system_content
+    assert "不要提前揭露账册真凶" in system_content
+    # story_core.canon_terms
+    assert "黑伞客陆沉舟" in system_content
+    # story_core.must_not_become
+    assert "不要修仙" in system_content
+    # 当前幕 forbidden_reveals
+    assert "账册真凶" in system_content
+
+
 def test_action_style_and_material_retrieval_use_story_settings(db_session) -> None:
     game = create_game_from_config(db_session, build_generated_config())
 

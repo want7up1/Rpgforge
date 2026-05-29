@@ -13,16 +13,49 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 15 — 流式 JSON 解析测试（测试线完成） |
-| 完成日期 | 2026-05-28 |
+| 最近一轮 | Round 18 — 真实 trace 定位强约束被淹没，全部强约束提进 system prompt |
+| 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
 | ✅ 验证状态 | 本地 pgvector 实测：迁移 head、102 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | 测试加固线已完成。剩余为大 feature/高风险重构（2.2/3.2/3.3/4.x），**需人工审查 + 真实 trace 数据**，不适合无人自主推进 |
+| 下一步建议 | Round 17 已从源头治理提前揭露 + 约束遵守。**下一步等真实 trace/judge 数据**再决定是否做痛点2的②确定性canon校验、③drift每回合跑。其余大 feature（2.2/3.2/3.3/4.x）仍需人工审查 |
 
 ---
 
 ## 1. 已完成
+
+### Round 18 (2026-05-29) — 用真实 trace 定位"强约束在剧情里看不到"，把全部强约束提进 system prompt
+
+承接 Round 17。用户反馈："剧本里的强约束，游戏中大部分没见到，从第一回合就有。"先做**架构 + 真实 trace 双向诊断**，再对症修复（用户明确要求"解决传递/执行，而非只做事后校验"）。
+
+**诊断（dump 数据库 79 条旧 gm_runtime trace 的真实 prompt）**：
+
+- 无独立"开场"路径：第一回合也走 `run_turn → generate_turn_runtime_output → build_runtime_messages`，全回合统一。
+- 旧代码下 GM 实际收到：**SYSTEM 仅 3063 字符纯通用规则，本剧本强约束一条没有**；**USER 高达 60869 字符**。
+- USER 6 万字符构成实测：`current_state_v2` **24937（41%）** ← 最大淹没源（随回合累积）、`runtime_story` 19467（32%）、`memory_summaries` 11.4%、`recent_turns` 10.7%。`hard_rules`+`story_core` 约束合计仅 ~2300 字符（**<4%**）。
+- 根因（全在传递/执行层，非校验层）：①强约束占比 <4% 被淹没；②最高权重的 system prompt 对强约束零强化；③`current_state_v2` 独占 41% 是压倒性噪声。第一回合 state 小，所以"第一回合也没见到"主要是 ①②。
+- 关键缺口：Round 17 的 system 注入**只放了"禁止类"（must_not/forbidden_*）**，而玩家"想看却没看到"的是**"必须类"**——`hard_rules.must_follow`（实测 12 条，如"林辰战斗必须碾压""做爱即进化""性爱五环节""女敌必须五阶段处刑"）、`reveal_rules`/`continuity_rules`/`gm_output_rules`、当前幕 `objective`+未完成锚点、`core_mechanics` 规则。这些**全没进 system**。
+
+**决策**：不砍 `current_state_v2`（实测构成是 skills/relationship_tracks/quest_log 等合理当前状态，非历史垃圾，砍它高风险低收益）。正解是**把强约束提到 system 顶部，使其根本不进被淹没的 user 水域**。（见 §4 新增决策）
+
+**修复**：
+
+- `story_settings.py::gm_hard_constraints` 扩展：在原"禁止类"基础上，新增 `must_follow` / `reveal_rules` / `continuity_rules` / `gm_output_rules` / 当前幕 `objective`+未完成锚点 / `core_mechanics` 规则（结构化字段转可读行）。
+- `prompt_builder.py::_build_system_content` 重构为**三组渲染**：`## 本回合/本幕必须落实`（必须类，置顶）→ `## 绝对禁止`（禁止类）→ `## 命名与一致性`（canon_terms）。文案明确"必须类不是可选风格，每个相关回合都要在 narrative 真实体现"。
+
+**实测效果（同一真实游戏）**：SYSTEM 3063 → **6598** 字符，强约束块 3522；must_follow 全部强约束（含"林辰战斗必须碾压""做爱即进化""操死至死"等）确认进入 system 顶部；next_act 仍 1493→32、main_quest 未来节点已裁。
+
+**改动文件**：`api/app/services/story_settings.py`、`api/app/services/prompt_builder.py`、`api/tests/test_gameplay.py`（扩充 system 断言覆盖正向约束）。
+
+**部署**：api/worker 不挂源码，**必须重建镜像**：
+
+```bash
+docker compose up -d --build api worker
+```
+
+**验证**：重建后容器内 `pytest tests/` **141 passed**。
+
+> 遗留观察（未做，留待真实 trace 验证）：`current_state_v2` 占 user 41%，虽未淹没已提进 system 的强约束，但仍可能稀释 GM 对当前状态细节的注意力。若后续 trace 显示状态遵守仍差，再评估 state_v2 瘦身（高风险，需先看内容）。
 
 ### Round 1 (2026-05-28) — AI Agent 链路重构
 
@@ -99,6 +132,54 @@ docker compose restart api worker
 ```bash
 docker compose restart api worker
 ```
+
+### Round 17 (2026-05-29) — 从源头治理"提前揭露"与"约束不被遵守"
+
+承接 Round 16：滑动窗口黑名单回退后，从**数据流源头**而非事后字符串拦截来治理两个核心痛点。先用数据库里真实剧本（`光湮末世：破晓后宫`，5 幕 / 15 主线节点 / canon_terms 14 / must_not 10）量化、再改、再验证。
+
+**痛点 1：GM 提前揭露未来剧情 —— 源头是"把未来幕全文喂给 GM"**
+
+- 实测：游戏在 act_4，但每回合 `runtime_story.next_act` 把 **act_5（终局幕）完整 1493 字符**（objective「揭开 T 病毒全部真相…末世之主君临」、dramatic_question「林辰是实验体」、allowed_reveals 6 条、completion_anchors 9 条）直接喂给 GM；`main_quest_path` 15 个节点（含未来幕的 player_visible/objective/completion_signal）也全给。等于把答案递给模型再用 prompt 求它装不知道。
+- 修复：`story_settings.py::redact_runtime_story_for_gm`——**仅对 GM 输入**裁剪：`next_act` 只留 `id`+`title`（供 rule 29/32 柔和转场方向，1493→32 字符）；`main_quest_path` 非当前幕节点只留 `id/title/act_id`，剥掉 player_visible/objective/completion_signal。**不动** hard_rules/story_core/current_act/worldview。
+- 关键：裁剪只作用在 `prompt_builder.build_runtime_messages`（GM 提示词唯一咽喉点）。**DriftValidator 仍收到未裁剪的 `runtime_story_bare`**，才能识别"GM 提前揭露 next_act"——这正是 Round 16 保留的 drift prompt 第 5 条要判的偏离。Director 也仍看全量（需规划转场）。
+
+**痛点 2：剧情不遵守剧本约束 —— 根因是约束埋在巨型 user JSON 深层、且零代码兜底**
+
+- 根因 A：硬红线（hard_rules.must_not / story_core.canon_terms / must_not_become / forbidden_drift / 当前幕 forbidden_reveals）全塞在 user message 的 `runtime_story` JSON 里，与 worldview/materials/recent_turns 等"参考信息"平级混着，模型遵守度低。
+- 修复 A：`story_settings.py::gm_hard_constraints` 抽出这些红线，`prompt_builder._build_system_content` 把它们格式化成显式分节**追加到 system prompt 末尾**（"=== 本剧本不可违反的硬约束（最高优先级）==="），凌驾于其他风格/节奏要求。
+- 实测确认：上述真实剧本的 must_not 10 条、forbidden_reveals 4 条、canon_terms 14 个、must_not_become 等已逐条出现在 GM 的 system prompt。
+- 痛点 2 的②确定性 canon 校验、③drift 每回合跑 + 逐条核对——**本轮未做**，留作后续按真实 trace/judge 数据决定（避免重蹈 Round 16"凭感觉加拦截"覆辙）。
+
+**改动文件**：`api/app/services/story_settings.py`（+2 函数）、`api/app/services/prompt_builder.py`（system 拼装 + 裁剪接入）、`api/tests/test_gameplay.py`（+2 回归测试）。`drift_validator.md` 第 5 条 prompt 沿用 Round 16 保留版。
+
+**部署须知**：api/worker **不挂载源码**（`docker-compose.yml` 仅挂 data 卷），代码改动必须**重建镜像**才生效：
+
+```bash
+docker compose up -d --build api worker
+```
+
+**验证**：重建后容器内 `pytest tests/` **141 passed**（含 2 个新回归：`test_gm_prompt_redacts_future_act_spoilers` / `test_gm_system_prompt_elevates_hard_constraints`）；并用真实剧本实跑 `build_runtime_messages` 确认 next_act 1493→32、红线进 system prompt。
+
+### Round 16 (2026-05-29) — 回退"未来幕短语滑动窗口黑名单"误杀方案
+
+**背景**：在 c4b488b 之后的 working-tree 里，曾尝试用代码层硬拦截"GM/Director 提前揭露未来幕剧情"。实现方式是把 `next_act` / `main_quest_path` / `forbidden_drift` 等**未来幕全文**切成 4/6/7/8 字滑动窗口子串，组成黑名单，再用"子串 in 文本"判断 GM 输出 / Director 决策是否违规（gameplay.py `_blocked_story_boundary_phrases` 系列 + `_sanitize_director_free_text`；drift_validator.py `_precheck_story_boundary` 系列）。
+
+**为何回退**（容器内实测验证）：
+
+- 一个典型 next_act objective「进入保护伞核心设施营救洛冰」生成 **57 个**黑名单片段，全是 `营救洛冰`/`核心设施`/`保护伞核`/`被囚禁在` 这类通用词组。
+- 4 个**当前幕完全合法**的句子（"听说该地点的传闻""被囚禁在城南""角色擦肩而过""玩家内心想法营救念头"）全部被误判为 major 偏离。
+- 连续剧情里角色/地点必然跨幕复现，子串匹配必然大量误杀。命中后链路：`_should_run_drift_validation` 强制 True → drift `_precheck` 强制 `approved=False/major` → **强制重写**（多烧一次 GM Pro 8000 token）→ Director 合法指令被清空替换成模板套话。等于稳定剧情每回合都被无谓重写、叙事退化、成本翻倍。
+- 用脆弱的字符串子串匹配做语义判断 → 每修一次误杀就加白名单/调窗口，永远修不完（死循环根因）。
+- 该逻辑还在 gameplay.py 与 drift_validator.py 里复制成两份（~80 行各一）。
+
+**处置**：
+
+- `git checkout HEAD -- gameplay.py drift_validator.py tests/test_gameplay.py`，三个文件回退到 c4b488b。
+- **保留** `prompts/drift_validator.md` 第 5 条新增 prompt（"story_director 不是豁免凭证：若其指令本身要求 GM 提前揭露 next_act / 未来主任务 / 未来锚点 / 当前幕 forbidden_reveals，仍按 runtime_story 判偏离"）。把"防剧透"交回 **DriftValidator 的 LLM 语义判断** + 已有的精确 `forbidden_reveals` 硬注入（Round 1 #9 `_enforce_hard_forbidden_reveals`，整串匹配人工指定禁忌词）。
+
+**结论性决策**（见 §4 新增）：代码层防剧透只能基于**人工精确指定的整串** forbidden_reveals，**禁止**把未来幕全文切成滑动窗口子串黑名单。
+
+**验证**：容器内 `pytest tests/test_gameplay.py tests/test_turn_agents.py` **46 passed**；已 `docker compose restart api worker`。
 
 ### Round 15 (2026-05-28) — 流式 JSON 解析测试
 
@@ -466,6 +547,9 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
 | 给每个 Agent 加重试 | DriftValidator 已经在 fallback 中放行，重试只会增加成本；除非 trace 显示真实重试收益 |
 | 阶段 2.1 Agent 抽象基类（暂缓，非永久放弃） | 当前没有要新增的 agent，抽象的唯一收益"加新 agent 省事"无处兑现。各 agent 的 fallback 差异大（Director 本地决策 / Validator 放行 / Extractor 抛错 / Compressor 拼接），强行统一反而降低可读性。在"无法本地跑测试 + 自主无人审查"下做核心链路大重构 ROI 为负。**触发条件**：真要加第 6 个 agent，或能在容器里跑回归测试时，再做 |
 | 凭感觉改 AI 行为（material 过滤强度 / director hints / drift 阈值，§7.2/7.5/7.3） | trace 基础设施刚建好、还没有真实数据。这些都标注为"等数据再定"。先收集 trace + judge 评分，用数据驱动，而不是继续猜 |
+| 用"未来幕全文切滑动窗口子串黑名单"在代码层拦截剧透（Round 16 已回退） | 子串匹配做语义判断必然大量误杀：跨幕复现的角色/地点会让当前幕合法叙述被判 major 偏离 → 无谓强制重写 + Director 指令被擦成套话 + 成本翻倍。每修一次误杀就加白名单/调窗口 = 修不完的死循环。**正路**：防剧透交 DriftValidator 的 LLM 语义判断；代码层兜底只用**人工精确指定的整串** `forbidden_reveals`（`_enforce_hard_forbidden_reveals`），绝不自动从未来幕文本生成黑名单 |
+| 砍 `current_state_v2` 体积来给约束让位（Round 18 评估后不做） | 实测 state_v2 24915 字符构成是 skills/relationship_tracks/quest_log/protagonist_sheet 等合理的当前状态，非历史垃圾；砍它直接威胁状态一致性，高风险低收益。正解是把强约束提进 system prompt（最高权重、不进被 state 淹没的 user 水域），而非缩小噪声。仅当后续 trace 显示状态遵守仍差时再重评 |
+| 靠事后校验（DriftValidator/Judge）解决"约束不被遵守"（Round 18 明确否决为主手段） | 用户洞察：校验是亡羊补牢，执行/传递没做好时校验只是补漏。根因是强约束没被有效传给 AI（占 user <4% + system 零强化），应先在**传递层**把强约束提进 system prompt 确保 AI 一定看到；校验作为补充而非主手段 |
 
 ---
 
