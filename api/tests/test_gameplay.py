@@ -141,6 +141,58 @@ def test_gm_system_prompt_elevates_hard_constraints(db_session) -> None:
     assert "账册真凶" in system_content
 
 
+def test_state_ops_projection_keeps_minimal_drops_writing_fields() -> None:
+    """StateExtractor/Compressor 投影：保留状态运算所需字段，砍掉写作向 context。"""
+    from app.services.story_settings import project_runtime_story_for_state_ops
+
+    runtime_story = {
+        "format_version": "rpgforge.story.v2",
+        "current_act": {"id": "act_1", "completion_anchors": [{"id": "a1"}]},
+        "next_act": {
+            "id": "act_2",
+            "title": "黑伞追踪",
+            "objective": "长剧透文本",
+            "completion_anchors": [1, 2, 3],
+        },
+        "story_core": {"canon_terms": ["雁回镇"], "main_goal": "查案"},
+        "story_progress": {"current_act": "act_1"},
+        "main_quest_path": [{"id": "mq1", "act_id": "act_1", "title": "查泥痕"}],
+        "core_characters": [
+            {
+                "id": "c1",
+                "name": "陆沉舟",
+                "aliases": ["黑伞客"],
+                "role": "antagonist",
+                "fear": "秘密暴露",
+                "leverage": "账册",
+                "appearance": "黑衣",
+                "desire": "复仇",
+                "identity": "真凶",
+            }
+        ],
+        "worldview": {"hidden_facts": ["x"], "summary": "很长的世界观"},
+        "core_mechanics": [{"name": "调查", "rule": "给线索不给答案"}],
+        "hard_rules": {"must_follow": ["写满字数"], "must_not": ["x"]},
+        "home_base": {"name": "义庄"},
+    }
+    projected = project_runtime_story_for_state_ops(runtime_story)
+
+    # 保留状态运算必需字段。
+    assert projected["current_act"]["completion_anchors"] == [{"id": "a1"}]
+    assert projected["story_core"]["canon_terms"] == ["雁回镇"]
+    assert projected["main_quest_path"][0]["title"] == "查泥痕"
+    assert projected["story_progress"]["current_act"] == "act_1"
+    # next_act 瘦成 id+title（细节剧透/锚点用不上）。
+    assert projected["next_act"] == {"id": "act_2", "title": "黑伞追踪"}
+    # core_characters 瘦成 name/id/aliases/role 索引，砍掉写作内幕。
+    assert projected["core_characters"] == [
+        {"id": "c1", "name": "陆沉舟", "aliases": ["黑伞客"], "role": "antagonist"}
+    ]
+    # 写作向 context 完全砍掉。
+    for dropped in ("worldview", "core_mechanics", "hard_rules", "home_base"):
+        assert dropped not in projected
+
+
 def test_action_style_and_material_retrieval_use_story_settings(db_session) -> None:
     game = create_game_from_config(db_session, build_generated_config())
 

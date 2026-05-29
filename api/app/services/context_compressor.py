@@ -18,7 +18,10 @@ from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
 from app.services.prompt_loader import load_prompt_template
-from app.services.story_settings import build_runtime_story
+from app.services.story_settings import (
+    build_runtime_story,
+    project_runtime_story_for_state_ops,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +311,12 @@ class ContextCompressor:
                 "genre": game.genre,
                 "description": game.description,
             },
-            "runtime_story": build_runtime_story(
-                game.config,
-                game.state.state_json if game.state else {},
+            # 按需注入：compressor 只压缩摘要，用精简投影而非全量 runtime_story。
+            "runtime_story": project_runtime_story_for_state_ops(
+                build_runtime_story(
+                    game.config,
+                    game.state.state_json if game.state else {},
+                )
             ),
             "current_state": game.state.state_json if game.state else {},
             "previous_summaries": existing_summaries,
