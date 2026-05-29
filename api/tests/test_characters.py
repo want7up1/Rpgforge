@@ -70,3 +70,72 @@ def test_sync_characters_preserves_manual_fields(db_session) -> None:
     assert refreshed.description == "用户手动改写的主角简介。"
     assert refreshed.appearance
     assert refreshed.manual_fields == ["description"]
+
+
+def test_sync_characters_creates_new_runtime_npc_by_real_name(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    game.state.state_json = {
+        **game.state.state_json,
+        "npcs": [
+            {
+                "id": "无名女性幸存者",
+                "name": "陈雨桐",
+                "status": "alive",
+                "attitude": "信任初建",
+            }
+        ],
+        "relationships": [
+            {
+                "npc": "陈雨桐",
+                "stage": "陌生",
+                "trust": 6,
+            }
+        ],
+    }
+    db_session.add(game.state)
+    db_session.commit()
+
+    created, _, characters = sync_characters_from_game(db_session, game)
+
+    assert created == 1
+    assert any(character.name == "陈雨桐" for character in characters)
+    assert not any(character.name == "无名女性幸存者" for character in characters)
+
+
+def test_sync_characters_merges_runtime_alias_with_existing_character(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    duplicate_name = "无名女性幸存者（二楼）"
+    db_session.add(
+        Character(
+            game_id=game.id,
+            name=duplicate_name,
+            aliases=[],
+            role="npc",
+            visibility="visible",
+            is_visible=True,
+            source="generated",
+            sync_meta={},
+            manual_fields=[],
+        )
+    )
+    game.state.state_json = {
+        **game.state.state_json,
+        "npcs": [
+            {
+                "id": duplicate_name,
+                "name": "陆沉舟",
+                "aliases": [duplicate_name],
+                "status": "alive",
+            }
+        ],
+    }
+    db_session.add(game.state)
+    db_session.commit()
+
+    _, _, characters = sync_characters_from_game(db_session, game)
+
+    names = [character.name for character in characters]
+    assert "陆沉舟" in names
+    assert duplicate_name not in names
+    lu_chenzhou = next(character for character in characters if character.name == "陆沉舟")
+    assert duplicate_name in lu_chenzhou.aliases

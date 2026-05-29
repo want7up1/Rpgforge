@@ -165,12 +165,14 @@ class ModelRouter:
         extras: dict,
     ) -> ChatCompletionResult:
         start = monotonic()
+        thinking = self._thinking_mode(reasoning_effort)
+        trace_extras = {**extras, "thinking": thinking}
         try:
             result = await self.client.chat_completion(
                 model=model,
                 messages=messages,
                 json_mode=json_mode,
-                thinking="enabled",
+                thinking=thinking,
                 reasoning_effort=reasoning_effort,
                 max_tokens=max_tokens,
             )
@@ -184,7 +186,7 @@ class ModelRouter:
                 latency_ms=int((monotonic() - start) * 1000),
                 status="error",
                 error_message=str(exc),
-                extras=extras,
+                extras=trace_extras,
             )
             raise
         tokens_in, tokens_out, tokens_reason = extract_usage(result.raw)
@@ -199,7 +201,7 @@ class ModelRouter:
             tokens_input=tokens_in,
             tokens_output=tokens_out,
             tokens_reasoning=tokens_reason,
-            extras=extras,
+            extras=trace_extras,
         )
         return result
 
@@ -218,6 +220,8 @@ class ModelRouter:
         # 注意 stream 接口 DeepSeek 不返回 usage（除非显式 include_usage），
         # 所以 tokens_* 字段会是 None；可以接受。
         start = monotonic()
+        thinking = self._thinking_mode(reasoning_effort)
+        trace_extras = {**extras, "thinking": thinking}
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         observed_model: str | None = None
@@ -227,7 +231,7 @@ class ModelRouter:
                 model=model,
                 messages=messages,
                 json_mode=json_mode,
-                thinking="enabled",
+                thinking=thinking,
                 reasoning_effort=reasoning_effort,
                 max_tokens=max_tokens,
             ):
@@ -262,8 +266,14 @@ class ModelRouter:
                 latency_ms=int((monotonic() - start) * 1000),
                 status=status,
                 error_message=err_msg,
-                extras=extras,
+                extras=trace_extras,
             )
+
+    @staticmethod
+    def _thinking_mode(
+        reasoning_effort: Literal["high", "max"] | None,
+    ) -> Literal["enabled", "disabled"]:
+        return "disabled" if reasoning_effort is None else "enabled"
 
     @staticmethod
     def _select_model(

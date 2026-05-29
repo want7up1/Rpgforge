@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 type AppShellProps = {
@@ -37,7 +38,15 @@ export function AppShell({ children, variant = "default" }: AppShellProps) {
           }
         >
           <Link href="/" className="flex items-center gap-2 text-lg font-semibold text-[color:var(--foreground)]">
-            <span className="brand-mark-small">RF</span>
+            <span className="brand-mark-small" aria-hidden="true">
+              <Image
+                alt=""
+                className="brand-mark-image"
+                height={32}
+                src="/rpg-deepseek-logo.png"
+                width={32}
+              />
+            </span>
             <span>RPGForge</span>
           </Link>
           <nav className="site-nav md:justify-end">

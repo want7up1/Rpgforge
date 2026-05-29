@@ -93,6 +93,8 @@ def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
     story_progress = initial_state.get("story_progress")
     if not isinstance(story_progress, dict) or not story_progress.get("current_act"):
         initial_state["story_progress"] = initial_story_progress(game.config)
+    _sync_source_variables(initial_state, game.title, game.description)
+    _fill_protagonist_from_story_settings(initial_state, story_settings)
     initial_turn = int(initial_state.get("current_turn", 0))
     normalized_initial_state = normalize_state_v2(initial_state, initial_turn)
     game.state = GameState(
@@ -110,6 +112,46 @@ def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
     db.commit()
     db.refresh(game)
     return game
+
+
+def _fill_protagonist_from_story_settings(
+    initial_state: dict[str, Any],
+    story_settings: dict[str, Any],
+) -> None:
+    protagonist = initial_state.setdefault("protagonist", {})
+    if not isinstance(protagonist, dict):
+        protagonist = {}
+        initial_state["protagonist"] = protagonist
+    configured = next(
+        (
+            character
+            for character in story_settings.get("core_characters") or []
+            if isinstance(character, dict)
+            and str(character.get("role") or "").lower()
+            in {"protagonist", "主角", "pc", "player"}
+        ),
+        None,
+    )
+    if not isinstance(configured, dict):
+        return
+    for key in ("name", "identity", "appearance"):
+        incoming = str(configured.get(key) or "").strip()
+        current = str(protagonist.get(key) or "").strip()
+        if incoming and current in {"", "未定", "未知", "无名", "待定"}:
+            protagonist[key] = incoming
+
+
+def _sync_source_variables(
+    initial_state: dict[str, Any],
+    title: str,
+    description: str | None,
+) -> None:
+    variables = initial_state.setdefault("variables", {})
+    if not isinstance(variables, dict):
+        variables = {}
+        initial_state["variables"] = variables
+    variables["source_title"] = title
+    variables["source_description"] = description or ""
 
 
 def _character_from_story_settings(item: dict[str, Any]) -> Character:

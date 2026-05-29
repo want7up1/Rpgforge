@@ -16,6 +16,10 @@
 13. story_progress_update 只能推进运行时进度，不能修改剧本设定；不要跳幕，不要因为玩家意图或蓝图计划而提前推进。
 14. 如果 payload 中存在 director_hints，优先扫描其中 continuity_notes、forbidden_reveals、scene_objective 提到的人物、物品、地点、关系，把 GM 输出中明确发生的对应变化写入相应状态字段；不要因为 hints 提到就凭空写入未发生的变化。
 15. 如果 payload 中存在 drift_hints.state_conflicts，逐项检查 GM 输出是否仍存在该冲突：若已修正，无需输出任何额外修复；若 GM 写出了与 current_state 冲突的细节，请把"以 current_state 为准"的最小校正写入对应字段，不要新增矛盾。
+16. 如果 GM 输出的 `###/####` 场景标题、玩家输入或正文明确表示主视角已经返回、进入、撤回、来到、抵达或深入新地点，必须输出 location_change；不要只更新 NPC location。
+17. 如果多个同场 NPC 在本回合明确移动或互动于同一新地点，也必须把该地点输出为 location_change，确保全局 active_scene 跟随主视角。
+18. 不要把纯时间标题（如“清晨”“夜晚”“片刻后”）当作 location_change。
+19. 如果 GM 输出明确写出某个 NPC 被带到新地点、正在当前场景互动、同处 location_change 指向的地点，或本回合的互动只能发生在新场景中，则在该 NPC 的 npc_updates 中写入 location；不要只更新 status/attitude。
 
 输出结构：
 {

@@ -60,7 +60,12 @@ def build_character_records_from_config(config: GeneratedGameConfig) -> list[Cha
     ]
 
 
-def sync_characters_from_game(db: Session, game: Game) -> tuple[int, int, list[Character]]:
+def sync_characters_from_game(
+    db: Session,
+    game: Game,
+    *,
+    commit: bool = True,
+) -> tuple[int, int, list[Character]]:
     profiles = extract_profiles_from_game(game)
     existing = list(db.scalars(select(Character).where(Character.game_id == game.id)).all())
     existing_by_key: dict[str, Character] = {}
@@ -80,6 +85,8 @@ def sync_characters_from_game(db: Session, game: Game) -> tuple[int, int, list[C
         merge_character_into_character(current, character)
         db.delete(character)
         updated += 1
+
+    updated += merge_existing_profile_aliases(db, existing_by_key, profiles)
 
     for profile in profiles:
         profile.name = canonical_character_name(profile.name)
@@ -110,13 +117,52 @@ def sync_characters_from_game(db: Session, game: Game) -> tuple[int, int, list[C
 
         merge_profile_into_character(character, profile)
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     characters = list(
         db.scalars(
             select(Character).where(Character.game_id == game.id).order_by(Character.name.asc())
         ).all()
     )
     return created, updated, characters
+
+
+def merge_existing_profile_aliases(
+    db: Session,
+    existing_by_key: dict[str, Character],
+    profiles: list[CharacterProfile],
+) -> int:
+    updated = 0
+    for profile in profiles:
+        target_key = canonical_character_name(profile.name)
+        if not target_key or target_key in PLACEHOLDER_NAMES:
+            continue
+        for alias in profile.aliases:
+            alias_key = canonical_character_name(alias)
+            if not alias_key or alias_key == target_key or alias_key in PLACEHOLDER_NAMES:
+                continue
+            duplicate = existing_by_key.get(alias_key)
+            if duplicate is None:
+                continue
+            target = existing_by_key.get(target_key)
+            if target is None:
+                duplicate.aliases = clean_aliases(
+                    [*(duplicate.aliases or []), duplicate.name, *profile.aliases]
+                )
+                duplicate.name = target_key
+                existing_by_key.pop(alias_key, None)
+                existing_by_key[target_key] = duplicate
+                updated += 1
+                continue
+            if duplicate is target:
+                continue
+            merge_character_into_character(target, duplicate)
+            db.delete(duplicate)
+            existing_by_key.pop(alias_key, None)
+            updated += 1
+    return updated
 
 
 def extract_profiles_from_config(config: GeneratedGameConfig) -> list[CharacterProfile]:
@@ -219,7 +265,7 @@ def profile_from_mapping(data: dict[str, Any], name: str, role: str) -> Characte
     return CharacterProfile(
         name=name,
         role=role,
-        aliases=[],
+        aliases=profile_aliases_from_mapping(data, name),
         identity=identity_value,
         description=description,
         appearance=appearance,
@@ -228,6 +274,15 @@ def profile_from_mapping(data: dict[str, Any], name: str, role: str) -> Characte
         visibility=normalize_visibility(data.get("visibility")),
         source="state",
     )
+
+
+def profile_aliases_from_mapping(data: dict[str, Any], name: str) -> list[str]:
+    aliases = list(as_list(data.get("aliases")))
+    for key in ("id", "key", "title", "npc"):
+        value = clean_text(data.get(key))
+        if value and value != name:
+            aliases.append(value)
+    return clean_aliases(aliases)
 
 
 def merge_profiles(profiles: list[CharacterProfile]) -> list[CharacterProfile]:

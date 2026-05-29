@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -88,12 +89,18 @@ def _identity(value: Any) -> str:
     return _first_text(value)
 
 
+def _named_identity(value: Any) -> str:
+    if isinstance(value, dict):
+        return _first_text(value.get("name"), value.get("title"), value.get("id"))
+    return _first_text(value)
+
+
 def _present_npc_names(npcs: list[Any], current_location: str) -> list[str]:
     names: list[str] = []
     for npc in npcs:
         if not isinstance(npc, dict):
             continue
-        name = _identity(npc)
+        name = _named_identity(npc)
         if not name:
             continue
         if _npc_is_present(npc, current_location):
@@ -105,16 +112,47 @@ def _npc_is_present(npc: dict[str, Any], current_location: str) -> bool:
     if npc.get("active") is True or npc.get("present") is True:
         return True
 
-    haystack = "\n".join(
-        _first_text(npc.get(key))
-        for key in ("location", "current_location", "status", "state", "relationship", "attitude")
-    )
-    if current_location and current_location in haystack:
+    npc_location = _first_text(npc.get("location"), npc.get("current_location"))
+    if _locations_overlap(current_location, npc_location):
         return True
-    return any(
-        marker in haystack
-        for marker in ("在场", "同行", "同伴", "队伍", "跟随", "陪同", "身边", "交谈", "保护")
+
+    location_text = "\n".join(
+        _first_text(npc.get(key)) for key in ("location", "current_location")
     )
+    if current_location and current_location in location_text:
+        return True
+
+    context_text = "\n".join(
+        _first_text(npc.get(key))
+        for key in ("status", "state", "relationship", "attitude")
+    )
+    return any(
+        marker in context_text
+        for marker in ("在场", "同行", "同伴", "队伍", "跟随", "陪同", "身边", "交谈")
+    )
+
+
+def _locations_overlap(current_location: str, npc_location: str) -> bool:
+    if not current_location or not npc_location:
+        return False
+    if current_location in npc_location or npc_location in current_location:
+        return True
+    current_fragments = _location_fragments(current_location)
+    npc_fragments = _location_fragments(npc_location)
+    return any(
+        left in npc_location or right in current_location
+        for left in current_fragments
+        for right in npc_fragments
+    )
+
+
+def _location_fragments(value: str) -> list[str]:
+    fragments: list[str] = []
+    for part in re.split(r"[\s,，、。；;：:（）()及和与/\\-]+", value):
+        text = _first_text(part)
+        if len(text) >= 4 and text not in fragments:
+            fragments.append(text)
+    return fragments
 
 
 def _party_names(state: dict[str, Any], npcs: list[Any], present_npcs: list[str]) -> list[str]:
@@ -127,7 +165,7 @@ def _party_names(state: dict[str, Any], npcs: list[Any], present_npcs: list[str]
     for npc in npcs:
         if not isinstance(npc, dict):
             continue
-        name = _identity(npc)
+        name = _named_identity(npc)
         if not name:
             continue
         relation_text = "\n".join(
@@ -144,7 +182,7 @@ def _npc_registry(npcs: list[Any]) -> list[dict[str, Any]]:
     for npc in npcs:
         if not isinstance(npc, dict):
             continue
-        name = _identity(npc)
+        name = _named_identity(npc)
         if not name:
             continue
         existing = registry.setdefault(
@@ -176,22 +214,26 @@ def _quest_log(quests: list[Any]) -> dict[str, list[dict[str, Any]]]:
                 continue
             item = {"name": name, "status": "active", "objective": ""}
         else:
-            name = _identity(quest)
+            quest_id = _first_text(quest.get("id"), quest.get("key"))
+            name = _first_text(quest.get("title"), quest.get("name"), quest_id)
             if not name:
                 continue
             status = _first_text(quest.get("status"), quest.get("state"), quest.get("new_status"))
             item = {
+                "id": quest_id or name,
                 "name": name,
+                "title": name,
                 "status": status or "active",
                 "objective": _first_text(
                     quest.get("objective"),
                     quest.get("current"),
                     quest.get("description"),
                 ),
+                "act_id": _first_text(quest.get("act_id"), quest.get("act")),
             }
 
         bucket = _quest_bucket(item["status"])
-        marker = (bucket, item["name"])
+        marker = (bucket, item.get("id") or item["name"])
         if marker in seen:
             continue
         seen.add(marker)
@@ -200,11 +242,12 @@ def _quest_log(quests: list[Any]) -> dict[str, list[dict[str, Any]]]:
 
 
 def _quest_bucket(status: str) -> str:
-    if any(marker in status for marker in ("隐藏", "秘密", "unknown")):
+    text = status.lower()
+    if any(marker in text for marker in ("隐藏", "秘密", "hidden", "secret", "unknown")):
         return "hidden"
-    if any(marker in status for marker in ("完成", "解决", "closed", "complete")):
+    if any(marker in text for marker in ("完成", "解决", "closed", "complete")):
         return "completed"
-    if any(marker in status for marker in ("失败", "放弃", "failed")):
+    if any(marker in text for marker in ("失败", "放弃", "failed")):
         return "failed"
     return "active"
 
@@ -227,19 +270,53 @@ def _thread_log(open_threads: Any) -> dict[str, list[dict[str, Any]]]:
 
 def _thread_item(thread: Any) -> dict[str, Any]:
     if isinstance(thread, dict):
-        title = _first_text(thread.get("title"), thread.get("name"), thread.get("description"))
-        status = _first_text(thread.get("status"), thread.get("state"))
+        data = _thread_payload(thread)
+        title = _first_text(data.get("title"), data.get("name"), data.get("description"))
+        status = _first_text(data.get("status"), data.get("state"))
+        if not status and _thread_action_resolves(_first_text(thread.get("action")).lower()):
+            status = "resolved"
         return {
             "title": title,
             "status": status or "active",
-            "source": _first_text(thread.get("source")),
+            "source": _first_text(data.get("source")),
         }
     return {"title": _first_text(thread), "status": "active", "source": ""}
 
 
 def _thread_is_resolved(thread: dict[str, Any]) -> bool:
     text = "\n".join(_first_text(thread.get(key)) for key in ("title", "status"))
-    return any(marker in text for marker in ("完成", "解决", "关闭", "resolved", "closed"))
+    return any(
+        marker in text
+        for marker in ("完成", "解决", "关闭", "resolved", "closed", "complete", "done", "finished")
+    )
+
+
+def _thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
+    nested = thread.get("thread")
+    if isinstance(nested, dict):
+        payload = dict(nested)
+        for key in ("id", "key", "title", "name", "status", "state", "source"):
+            if not payload.get(key) and thread.get(key):
+                payload[key] = thread[key]
+        return payload
+    return thread
+
+
+def _thread_action_resolves(action: str) -> bool:
+    return action in {
+        "resolve",
+        "resolved",
+        "close",
+        "closed",
+        "complete",
+        "completed",
+        "done",
+        "finish",
+        "finished",
+        "解决",
+        "关闭",
+        "完成",
+    }
 
 
 def _story_progress(value: Any) -> dict[str, Any]:
@@ -444,7 +521,7 @@ def _relationship_tracks(relationships: Any, npcs: list[Any]) -> list[dict[str, 
     for npc in npcs:
         if not isinstance(npc, dict):
             continue
-        name = _identity(npc)
+        name = _named_identity(npc)
         if not name or name in seen:
             continue
         relationship = _first_text(npc.get("relationship"))

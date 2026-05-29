@@ -21,6 +21,7 @@ from app.services.story_settings import build_runtime_story
 logger = logging.getLogger(__name__)
 
 DRIFT_VALIDATOR_TIMEOUT_SECONDS = 90.0
+DRIFT_VALIDATOR_MAX_TOKENS = 2400
 
 
 class DriftValidationResult(BaseModel):
@@ -96,7 +97,7 @@ class DriftValidator:
                     "drift_validator",
                     messages,
                     json_mode=True,
-                    max_tokens=1600,
+                    max_tokens=DRIFT_VALIDATOR_MAX_TOKENS,
                 ),
                 timeout=DRIFT_VALIDATOR_TIMEOUT_SECONDS,
             )
