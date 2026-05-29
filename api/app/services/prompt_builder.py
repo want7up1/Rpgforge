@@ -10,7 +10,28 @@ from app.services.story_settings import (
     StoryMaterialResult,
     build_runtime_story,
     generation_parameters_from_config,
+    gm_hard_constraints,
+    redact_runtime_story_for_gm,
 )
+
+# system prompt 强约束分节：(分组, key, 标题)。顺序即呈现顺序，与 gm_hard_constraints 对应。
+# 必须类在前（玩家"想看却没看到"的强约束），禁止类居中，命名一致最后。
+_MUST = "本回合/本幕必须落实（强约束，凌驾于风格与节奏）"
+_NOT = "绝对禁止（违反即判失败）"
+_CANON = "命名与一致性"
+_HARD_CONSTRAINT_LABELS: list[tuple[str, str, str]] = [
+    (_MUST, "current_act", "当前幕目标与未完成锚点（本回合必须围绕推进）"),
+    (_MUST, "must_follow", "必须遵守（must_follow）"),
+    (_MUST, "reveal_rules", "信息揭露规则（reveal_rules）"),
+    (_MUST, "continuity_rules", "连续性规则（continuity_rules）"),
+    (_MUST, "gm_output_rules", "GM 输出规则（gm_output_rules）"),
+    (_MUST, "core_mechanics", "核心机制规则（core_mechanics）"),
+    (_NOT, "must_not", "绝对禁止（must_not）"),
+    (_NOT, "current_act_forbidden_reveals", "当前幕禁止提前揭露（forbidden_reveals）"),
+    (_NOT, "must_not_become", "本作绝不能演变成（must_not_become）"),
+    (_NOT, "forbidden_drift", "禁止的剧情漂移方向（forbidden_drift）"),
+    (_CANON, "canon_terms", "专有名词必须严格沿用原文，不得改写、另译或音译（canon_terms）"),
+]
 
 
 class PromptBuilder:
@@ -43,6 +64,11 @@ class PromptBuilder:
         if state_v2 is None:
             state_v2 = state_v2_view(state_json)
 
+        # 在裁剪前抽取硬红线（裁剪不动 hard_rules/story_core/current_act，但顺序上先抽更稳）。
+        system_content = self._build_system_content(runtime_story)
+        # GM 不应看到完整的未来幕剧情（next_act 细节 / 未来幕主线节点），从源头裁掉。
+        gm_runtime_story = redact_runtime_story_for_gm(runtime_story)
+
         runtime_payload = {
             "game": {
                 "id": str(game.id),
@@ -51,7 +77,7 @@ class PromptBuilder:
                 "description": game.description,
             },
             "generation_parameters": generation_parameters,
-            "runtime_story": runtime_story,
+            "runtime_story": gm_runtime_story,
             "selected_action_style": selected_action_style or {},
             "related_story_materials": [
                 self._retrieval_payload(result) for result in (related_materials or [])
@@ -71,12 +97,49 @@ class PromptBuilder:
         }
 
         return [
-            {"role": "system", "content": load_prompt_template("gm_runtime.md")},
+            {"role": "system", "content": system_content},
             {
                 "role": "user",
                 "content": json.dumps(runtime_payload, ensure_ascii=False, default=str),
             },
         ]
+
+    @staticmethod
+    def _build_system_content(runtime_story: dict[str, Any] | None) -> str:
+        """gm_runtime.md 基础规则 + 本剧本强约束（从 JSON 深层提升到 system prompt）。
+
+        强约束在 user JSON 里占比 <4% 且被 current_state_v2 淹没，模型遵守度极低。
+        提到 system 末尾按"必须类 / 禁止类 / 命名一致"分组列出，确保 GM 一定看到。
+        """
+        template = load_prompt_template("gm_runtime.md")
+        constraints = gm_hard_constraints(runtime_story or {})
+
+        # 按分组聚合各分节，保持 _HARD_CONSTRAINT_LABELS 的顺序。
+        grouped: dict[str, list[str]] = {}
+        order: list[str] = []
+        for group, key, label in _HARD_CONSTRAINT_LABELS:
+            items = constraints.get(key) or []
+            if not items:
+                continue
+            if group not in grouped:
+                grouped[group] = []
+                order.append(group)
+            lines = "\n".join(f"- {item}" for item in items)
+            grouped[group].append(f"〔{label}〕\n{lines}")
+
+        if not order:
+            return template
+
+        blocks = [f"## {group}\n\n" + "\n\n".join(grouped[group]) for group in order]
+        body = "\n\n".join(blocks)
+        return (
+            f"{template}\n\n"
+            "=== 本剧本不可违反的强约束（最高优先级，凌驾于上文一切风格与节奏要求）===\n"
+            "以下条目来自剧本设定，必须逐条严格落实；与任何其他指令冲突时以本节为准。\n"
+            "尤其是「必须落实」组——这些不是可选风格，而是每个相关回合都要在 narrative 中"
+            "真实体现的硬性要求。\n\n"
+            f"{body}"
+        )
 
     def _retrieval_payload(self, result: StoryMaterialResult) -> dict[str, object]:
         payload = dict(result.material)
