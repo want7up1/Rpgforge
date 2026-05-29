@@ -249,6 +249,117 @@ def build_runtime_story(
     )
 
 
+def redact_runtime_story_for_gm(runtime_story: dict[str, Any]) -> dict[str, Any]:
+    """裁剪掉只该让 Director/DriftValidator 看、不该提前喂给 GM 的未来剧情。
+
+    GM 写当前幕时，runtime_story 里完整的 next_act（objective/dramatic_question/
+    allowed_reveals/completion_anchors）和未来幕的 main_quest_path 节点
+    （player_visible/objective/completion_signal）就是"提前揭露"的弹药库——把答案
+    递给模型再用 prompt 求它装不知道并不可靠。这里从源头砍掉：
+
+    - next_act 只保留 id + title（供柔和转场方向判断，rule 29/32），删除会剧透
+      结局/真相的 objective、dramatic_question、allowed_reveals、completion_anchors。
+    - main_quest_path 中非当前幕的节点（过去或未来）只保留 id/title/act_id，删除
+      player_visible/objective/completion_signal 等含未来真相的字段；当前幕节点保留全文。
+
+    不修改 hard_rules / story_core / current_act / worldview —— 这些是 GM 必须看全的约束。
+    返回新 dict，不改原对象（Director/DriftValidator 仍用未裁剪版）。
+    """
+    if not isinstance(runtime_story, dict):
+        return runtime_story
+
+    redacted = dict(runtime_story)
+
+    next_act = runtime_story.get("next_act")
+    if isinstance(next_act, dict) and next_act:
+        slim_next: dict[str, Any] = {}
+        if next_act.get("id"):
+            slim_next["id"] = next_act["id"]
+        if next_act.get("title"):
+            slim_next["title"] = next_act["title"]
+        redacted["next_act"] = slim_next
+
+    current_act = runtime_story.get("current_act")
+    current_id = _text(current_act.get("id")) if isinstance(current_act, dict) else ""
+    quests = runtime_story.get("main_quest_path")
+    if isinstance(quests, list) and current_id:
+        slimmed: list[dict[str, Any]] = []
+        for quest in quests:
+            if not isinstance(quest, dict):
+                continue
+            act_id = _text(quest.get("act_id") or quest.get("act"))
+            if act_id == current_id:
+                slimmed.append(quest)
+                continue
+            node: dict[str, Any] = {}
+            if quest.get("id"):
+                node["id"] = quest["id"]
+            if quest.get("title"):
+                node["title"] = quest["title"]
+            if act_id:
+                node["act_id"] = act_id
+            slimmed.append(node)
+        redacted["main_quest_path"] = slimmed
+
+    return redacted
+
+
+def gm_hard_constraints(runtime_story: dict[str, Any]) -> dict[str, list[str]]:
+    """从 runtime_story 抽出最该被 GM 严格遵守的强约束，供提升进 system prompt。
+
+    这些约束本来就在 runtime_story JSON 里，但埋在深层数组、与大量"参考信息"平级，
+    又被体积庞大的 current_state_v2（实测可占 user prompt 40%+）淹没，模型遵守度极低。
+    抽出来显式列进 system prompt（最高权重、不被 user JSON 噪声冲淡），从传递层根治
+    "剧本强约束在剧情里大部分看不到"。
+
+    既含"禁止类"（must_not / forbidden_*），也含"必须类"（must_follow / 各 *_rules /
+    当前幕目标与未完成锚点 / 核心机制规则）——后者是玩家"想看却没看到"的主要部分。
+    """
+    if not isinstance(runtime_story, dict):
+        return {}
+
+    hard_rules = _record(runtime_story.get("hard_rules"))
+    story_core = _record(runtime_story.get("story_core"))
+    current_act = _record(runtime_story.get("current_act"))
+
+    # 当前幕目标 + 未完成必需锚点（build_runtime_story 已把 completion_anchors 过滤为未完成项）。
+    act_lines: list[str] = []
+    objective = _text(current_act.get("objective"))
+    if objective:
+        act_lines.append(f"本幕目标：{objective}")
+    dramatic_question = _text(current_act.get("dramatic_question"))
+    if dramatic_question:
+        act_lines.append(f"核心戏剧问题：{dramatic_question}")
+    for anchor in _records(current_act.get("completion_anchors")):
+        required = "必需" if _bool(anchor.get("required"), True) else "可选"
+        label = _text(anchor.get("title")) or _text(anchor.get("completion_signal"))
+        if label and label != "未命名锚点":
+            act_lines.append(f"[{required}锚点] {label}")
+
+    # 核心机制规则（rule 文本，去掉纯展示用字段）。
+    mechanic_lines: list[str] = []
+    for mechanic in _records(runtime_story.get("core_mechanics")):
+        rule = _text(mechanic.get("rule"))
+        if not rule:
+            continue
+        name = _text(mechanic.get("name"))
+        mechanic_lines.append(f"{name}：{rule}" if name else rule)
+
+    return {
+        "current_act": act_lines,
+        "must_follow": _strings(hard_rules.get("must_follow")),
+        "reveal_rules": _strings(hard_rules.get("reveal_rules")),
+        "continuity_rules": _strings(hard_rules.get("continuity_rules")),
+        "gm_output_rules": _strings(hard_rules.get("gm_output_rules")),
+        "core_mechanics": mechanic_lines,
+        "must_not": _strings(hard_rules.get("must_not")),
+        "current_act_forbidden_reveals": _strings(current_act.get("forbidden_reveals")),
+        "must_not_become": _strings(story_core.get("must_not_become")),
+        "forbidden_drift": _strings(story_core.get("forbidden_drift")),
+        "canon_terms": _strings(story_core.get("canon_terms")),
+    }
+
+
 def select_action_style(
     config: GameConfig | None,
     player_input: str,
