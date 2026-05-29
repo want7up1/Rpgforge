@@ -10,6 +10,7 @@ from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
 from app.services.agent_traces import set_trace_context
+from app.services.characters import sync_characters_from_game
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
 from app.services.game_activity import touch_game
@@ -144,6 +145,7 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
             return
 
         turn.state_delta_json = delta_json
+        job.extractor_failed = False
         if game.state is not None:
             approve_turn_state_delta(
                 db,
@@ -153,6 +155,8 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
                 approved_at=datetime.now(UTC),
             )
             rebuild_game_state(db, game)
+            sync_characters_from_game(db, game, commit=False)
+        db.add(job)
         db.add(turn)
         touch_game(db, game.id)
         db.commit()

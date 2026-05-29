@@ -4,8 +4,13 @@
 gameplay 的纯逻辑，作为实现的规格说明与回归保护。
 """
 
+import anyio
+
 from app.services.agent_traces import extract_usage
+from app.services.deepseek_client import ChatCompletionResult
 from app.services.gameplay import GameplayService
+from app.services.model_router import ModelRouter
+from app.services.runtime_settings import EffectiveDeepSeekSettings
 from app.services.state_extractor import _director_hints, _drift_hints
 from app.services.story_director import StoryDirectorDecision
 from app.services.story_settings import StoryMaterialResult
@@ -38,6 +43,51 @@ def test_extract_usage_reasoning_tokens() -> None:
 def test_extract_usage_garbage_values() -> None:
     raw = {"usage": {"prompt_tokens": "x", "completion_tokens": None}}
     assert extract_usage(raw) == (None, None, None)
+
+
+# ---------- ModelRouter thinking mode ----------
+
+def test_model_router_disables_thinking_when_reasoning_effort_is_none(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class FakeClient:
+        async def chat_completion(self, **kwargs):
+            calls.append(kwargs)
+            return ChatCompletionResult(content="{}", model=kwargs["model"], raw={})
+
+    monkeypatch.setattr(
+        "app.services.model_router.get_effective_deepseek_settings",
+        lambda _settings: EffectiveDeepSeekSettings(
+            api_key="test",
+            api_key_source="test",
+            base_url="http://example.test",
+            flash_model="flash-test",
+            pro_model="pro-test",
+            task_model_routes={},
+        ),
+    )
+    monkeypatch.setattr("app.services.model_router.record_trace", lambda **_kwargs: None)
+
+    router = ModelRouter(client=FakeClient())
+
+    async def call_router() -> None:
+        await router.use_flash(
+            "state_delta_extract",
+            [{"role": "user", "content": "{}"}],
+            reasoning_effort=None,
+        )
+        await router.use_flash(
+            "story_director",
+            [{"role": "user", "content": "{}"}],
+            reasoning_effort="high",
+        )
+
+    anyio.run(call_router)
+
+    assert calls[0]["thinking"] == "disabled"
+    assert calls[0]["reasoning_effort"] is None
+    assert calls[1]["thinking"] == "enabled"
+    assert calls[1]["reasoning_effort"] == "high"
 
 
 # ---------- turn_judge.JudgeResult clamp ----------

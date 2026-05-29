@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
@@ -378,7 +379,15 @@ function AdventureSidebar({
   return (
     <aside className="adventure-sidebar">
       <Link className="mb-6 flex items-center gap-2 font-black" href="/">
-        <span className="brand-mark-small">RF</span>
+        <span className="brand-mark-small" aria-hidden="true">
+          <Image
+            alt=""
+            className="brand-mark-image"
+            height={32}
+            src="/rpg-deepseek-logo.png"
+            width={32}
+          />
+        </span>
         <span>RPGForge</span>
       </Link>
 

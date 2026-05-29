@@ -119,6 +119,9 @@ def _initial_state_for_rebuild(game: Game) -> tuple[dict[str, Any], bool]:
         initial_state = build_default_initial_state(game.title, game.description)
         changed = True
 
+    if _sync_source_variables(initial_state, game):
+        changed = True
+
     if game.config is not None and not _has_current_act(initial_state.get("story_progress")):
         initial_state["story_progress"] = _merged_story_progress(
             initial_state.get("story_progress"),
@@ -148,3 +151,22 @@ def _text(value: Any) -> str:
     if value is not None and not isinstance(value, (dict, list)):
         return str(value).strip()
     return ""
+
+
+def _sync_source_variables(state: dict[str, Any], game: Game) -> bool:
+    variables = state.setdefault("variables", {})
+    changed = False
+    if not isinstance(variables, dict):
+        variables = {}
+        state["variables"] = variables
+        changed = True
+
+    expected = {
+        "source_title": _text(game.title),
+        "source_description": _text(game.description),
+    }
+    for key, value in expected.items():
+        if variables.get(key) != value:
+            variables[key] = value
+            changed = True
+    return changed

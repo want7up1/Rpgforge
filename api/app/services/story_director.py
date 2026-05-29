@@ -19,6 +19,7 @@ from app.services.story_settings import StoryMaterialResult, build_runtime_story
 logger = logging.getLogger(__name__)
 
 STORY_DIRECTOR_TIMEOUT_SECONDS = 90.0
+STORY_DIRECTOR_MAX_TOKENS = 3000
 # 喂给 Director 的近期回合 gm_output 截断长度。Director 只需要"上一回合发生了什么"
 # 的摘要，完整 narrative 已经被 GM 用过，没必要再给 Director 看一次。
 DIRECTOR_RECENT_TURN_EXCERPT_CHARS = 320
@@ -92,7 +93,8 @@ class StoryDirector:
                     "story_director",
                     messages,
                     json_mode=True,
-                    max_tokens=1800,
+                    max_tokens=STORY_DIRECTOR_MAX_TOKENS,
+                    reasoning_effort=None,
                 ),
                 timeout=STORY_DIRECTOR_TIMEOUT_SECONDS,
             )

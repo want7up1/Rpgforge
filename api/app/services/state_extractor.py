@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -12,6 +13,53 @@ from app.services.prompt_loader import load_prompt_template
 from app.services.story_settings import build_runtime_story
 
 STATE_EXTRACTOR_TIMEOUT_SECONDS = 150.0
+SCENE_HEADING_RE = re.compile(r"^\s{0,3}#{3,4}\s+(.+?)\s*$", re.MULTILINE)
+PLACE_HINTS = (
+    "基地",
+    "庭院",
+    "主堡",
+    "主楼",
+    "大厅",
+    "入口",
+    "山",
+    "小道",
+    "医院",
+    "超市",
+    "仓库",
+    "房",
+    "区",
+    "站",
+    "塔",
+    "桥",
+    "街",
+    "镇",
+    "城",
+    "村",
+    "营地",
+    "洞",
+    "隧道",
+    "实验室",
+    "研究所",
+    "废墟",
+)
+TIME_HEADING_TEXTS = {
+    "清晨",
+    "黎明",
+    "上午",
+    "中午",
+    "午后",
+    "下午",
+    "傍晚",
+    "黄昏",
+    "夜晚",
+    "深夜",
+    "凌晨",
+    "黎明前",
+    "几分钟后",
+    "片刻后",
+    "与此同时",
+}
+SCENE_HEADING_PLACE_WORDS = ("内", "外", "前", "后", "口", "顶", "下", "层")
 
 
 class StateDeltaExtraction(BaseModel):
@@ -127,7 +175,9 @@ class StateExtractor:
             ) from exc
         try:
             parsed = parse_json_object(result.content)
-            return StateDeltaExtraction.model_validate(parsed).model_dump()
+            delta = StateDeltaExtraction.model_validate(parsed).model_dump()
+            _backfill_scene_location_change(delta, current_state, turn)
+            return delta
         except (ValueError, ValidationError) as exc:
             raise StateExtractorValidationError(str(exc)) from exc
 
@@ -161,3 +211,211 @@ def _drift_hints(findings: dict[str, Any] | None) -> dict[str, Any]:
     if isinstance(severity, str) and severity.strip():
         hints["severity"] = severity
     return hints
+
+
+def _backfill_scene_location_change(
+    delta: dict[str, Any],
+    current_state: dict[str, Any],
+    turn: Turn,
+) -> None:
+    if delta.get("location_change"):
+        return
+    inferred = _infer_common_npc_location(delta, current_state)
+    if not inferred:
+        inferred = _infer_location_from_scene_heading(current_state, turn.gm_output)
+    if not inferred:
+        return
+
+    current = _current_location(current_state)
+    if current:
+        delta["location_change"] = {"from": current, "to": inferred}
+    else:
+        delta["location_change"] = inferred
+    _backfill_protagonist_npc_location(delta, current_state, inferred)
+
+
+def _infer_location_from_scene_heading(
+    current_state: dict[str, Any],
+    gm_output: str | None,
+) -> str:
+    heading = _first_scene_heading(gm_output)
+    if not heading:
+        return ""
+
+    normalized_heading = _normalize_location_text(heading)
+    if not normalized_heading:
+        return ""
+
+    current = _current_location(current_state)
+    normalized_current = _normalize_location_text(current)
+    if normalized_current == normalized_heading:
+        return ""
+
+    known_locations = _known_scene_locations(current_state)
+    for location in known_locations:
+        normalized_location = _normalize_location_text(location)
+        if normalized_location == normalized_heading:
+            return location
+
+    if normalized_current and normalized_current.startswith(normalized_heading):
+        return ""
+    if _heading_looks_like_location(heading):
+        return _clean_heading_location(heading)
+    return ""
+
+
+def _first_scene_heading(gm_output: str | None) -> str:
+    match = SCENE_HEADING_RE.search(gm_output or "")
+    if not match:
+        return ""
+    heading = match.group(1).strip().strip("#").strip()
+    return heading
+
+
+def _current_location(state: dict[str, Any]) -> str:
+    location = state.get("location")
+    if not isinstance(location, dict):
+        return ""
+    return _text(location.get("current") or location.get("name"))
+
+
+def _known_scene_locations(state: dict[str, Any]) -> list[str]:
+    locations: list[str] = []
+    location = state.get("location")
+    if isinstance(location, dict):
+        locations.extend(_text(item) for item in location.get("known_locations") or [])
+        locations.extend(
+            _text(location.get(key))
+            for key in ("current", "name", "to", "destination")
+        )
+
+    for npc in state.get("npcs") or []:
+        if not isinstance(npc, dict):
+            continue
+        locations.append(_text(npc.get("location") or npc.get("current_location")))
+
+    result: list[str] = []
+    for item in locations:
+        if item and item not in result:
+            result.append(item)
+    return result
+
+
+def _infer_common_npc_location(
+    delta: dict[str, Any],
+    current_state: dict[str, Any],
+) -> str:
+    location_counts: dict[str, int] = {}
+    location_by_key: dict[str, str] = {}
+    current = _current_location(current_state)
+    normalized_current = _normalize_location_text(current)
+
+    for update in delta.get("npc_updates") or []:
+        if not isinstance(update, dict):
+            continue
+        location = _text(update.get("location") or update.get("current_location"))
+        if not location:
+            continue
+        key = _normalize_location_text(location)
+        if not key or key == normalized_current:
+            continue
+        location_counts[key] = location_counts.get(key, 0) + 1
+        location_by_key.setdefault(key, location)
+
+    if not location_counts:
+        return ""
+    key, count = max(location_counts.items(), key=lambda item: item[1])
+    if count < 2:
+        return ""
+    return location_by_key[key]
+
+
+def _backfill_protagonist_npc_location(
+    delta: dict[str, Any],
+    current_state: dict[str, Any],
+    location: str,
+) -> None:
+    protagonist_name = _protagonist_name(current_state)
+    if not protagonist_name or not _state_has_npc(current_state, protagonist_name):
+        return
+
+    updates = delta.setdefault("npc_updates", [])
+    if not isinstance(updates, list):
+        return
+    for update in updates:
+        if not isinstance(update, dict) or not _npc_update_matches(update, protagonist_name):
+            continue
+        if not _text(update.get("location") or update.get("current_location")):
+            update["location"] = location
+        return
+    updates.append({"name": protagonist_name, "location": location})
+
+
+def _protagonist_name(state: dict[str, Any]) -> str:
+    protagonist = state.get("protagonist")
+    if not isinstance(protagonist, dict):
+        return ""
+    return _text(protagonist.get("name") or protagonist.get("id") or protagonist.get("title"))
+
+
+def _state_has_npc(state: dict[str, Any], name: str) -> bool:
+    return any(
+        isinstance(npc, dict) and _npc_record_matches(npc, name)
+        for npc in state.get("npcs") or []
+    )
+
+
+def _npc_record_matches(npc: dict[str, Any], name: str) -> bool:
+    candidates = [
+        _text(npc.get("name")),
+        _text(npc.get("id")),
+        _text(npc.get("title")),
+    ]
+    for alias in npc.get("aliases") or []:
+        candidates.append(_text(alias))
+    return name in candidates
+
+
+def _npc_update_matches(update: dict[str, Any], name: str) -> bool:
+    return name in {
+        _text(update.get("name")),
+        _text(update.get("id")),
+        _text(update.get("npc")),
+        _text(update.get("title")),
+    }
+
+
+def _heading_looks_like_location(heading: str) -> bool:
+    normalized = _normalize_location_text(heading)
+    if not normalized or normalized in TIME_HEADING_TEXTS:
+        return False
+    if len(normalized) <= 3 and any(word in normalized for word in TIME_HEADING_TEXTS):
+        return False
+    if any(hint in heading for hint in PLACE_HINTS):
+        return True
+    if "·" in heading or "・" in heading:
+        return True
+    if any(normalized.endswith(word) for word in SCENE_HEADING_PLACE_WORDS):
+        return True
+    if re.search(r"\d", heading) and len(normalized) >= 4:
+        return True
+    return False
+
+
+def _clean_heading_location(heading: str) -> str:
+    text = _text(heading)
+    text = re.sub(r"[*_`]+", "", text)
+    text = re.sub(r"\s+", "", text)
+    return text.strip()
+
+
+def _normalize_location_text(value: Any) -> str:
+    text = _text(value)
+    text = re.sub(r"[*_`]+", "", text)
+    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"[·・]", "", text)
+    return text.strip()
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""

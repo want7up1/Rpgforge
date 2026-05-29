@@ -220,9 +220,9 @@ class GameplayService:
             state_v2=context.state_v2,
         )
         context.telemetry.director_used_fallback = director_decision.used_fallback
-        # 用代码硬底线补全 Director 的 forbidden_reveals：Director 可能漏写，但脚本里
-        # 写死的禁止揭露/禁止偏离不允许被 Director 删除。
-        self._enforce_hard_forbidden_reveals(
+        # 用代码硬底线约束 Director 的揭露边界：Director 可能漏写禁止项，也可能扩写
+        # allowed_reveals；脚本当前幕的白名单/黑名单不允许被 Director 改写。
+        self._enforce_director_reveal_boundaries(
             director_decision,
             runtime_story=context.runtime_story_bare,
         )
@@ -462,6 +462,39 @@ class GameplayService:
             state_v2=context.state_v2,
             previous_runtime_output=previous_runtime_output,
         )
+
+    @staticmethod
+    def _enforce_director_reveal_boundaries(
+        decision: StoryDirectorDecision,
+        *,
+        runtime_story: dict[str, Any],
+    ) -> None:
+        GameplayService._clamp_allowed_reveals(decision, runtime_story=runtime_story)
+        GameplayService._enforce_hard_forbidden_reveals(
+            decision,
+            runtime_story=runtime_story,
+        )
+
+    @staticmethod
+    def _clamp_allowed_reveals(
+        decision: StoryDirectorDecision,
+        *,
+        runtime_story: dict[str, Any],
+    ) -> None:
+        current_act = runtime_story.get("current_act") if isinstance(runtime_story, dict) else None
+        if not isinstance(current_act, dict):
+            return
+        allowed = current_act.get("allowed_reveals")
+        if not isinstance(allowed, list):
+            return
+
+        allowed_items = [str(item).strip() for item in allowed if str(item or "").strip()]
+        allowed_set = set(allowed_items)
+        decision.allowed_reveals = [
+            item
+            for item in decision.allowed_reveals
+            if item.strip() in allowed_set
+        ]
 
     @staticmethod
     def _enforce_hard_forbidden_reveals(

@@ -16,7 +16,8 @@ export const metadata: Metadata = {
   title: "RPGForge",
   description: "State-driven AI text RPG engine",
   icons: {
-    icon: "/favicon.svg"
+    icon: "/rpg-deepseek-logo.png",
+    apple: "/rpg-deepseek-logo.png"
   }
 };
 
