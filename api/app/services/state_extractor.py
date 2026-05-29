@@ -10,7 +10,10 @@ from app.models.turn import Turn
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
 from app.services.prompt_loader import load_prompt_template
-from app.services.story_settings import build_runtime_story
+from app.services.story_settings import (
+    build_runtime_story,
+    project_runtime_story_for_state_ops,
+)
 
 STATE_EXTRACTOR_TIMEOUT_SECONDS = 150.0
 SCENE_HEADING_RE = re.compile(r"^\s{0,3}#{3,4}\s+(.+?)\s*$", re.MULTILINE)
@@ -137,7 +140,10 @@ class StateExtractor:
                 "genre": game.genre,
                 "description": game.description,
             },
-            "runtime_story": build_runtime_story(game.config, current_state),
+            # 按需注入：extractor 只算状态变更，用精简投影而非全量 runtime_story。
+            "runtime_story": project_runtime_story_for_state_ops(
+                build_runtime_story(game.config, current_state)
+            ),
             "current_state": current_state,
             "turn": {
                 "turn_number": turn.turn_number,

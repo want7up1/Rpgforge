@@ -304,6 +304,63 @@ def redact_runtime_story_for_gm(runtime_story: dict[str, Any]) -> dict[str, Any]
     return redacted
 
 
+_STATE_OPS_CHARACTER_KEYS = ("id", "name", "aliases", "role")
+_STATE_OPS_KEEP_KEYS = (
+    "format_version",
+    "current_act",
+    "story_core",
+    "story_progress",
+    "main_quest_path",
+)
+
+
+def project_runtime_story_for_state_ops(runtime_story: dict[str, Any]) -> dict[str, Any]:
+    """给 StateExtractor / ContextCompressor 的精简投影（按需注入，省 input token）。
+
+    这两个 agent 只做"读现状 + 本回合 → 算状态变更 / 压缩摘要"，**不写剧情**，因此
+    用不上大量写作向 context：`worldview` 全文、`core_mechanics` 规则、`hard_rules`
+    （must_follow 等写作规则）、角色内幕（fear/leverage/appearance/desire/identity 等）。
+    实测全量 runtime_story ~19k 字符里这些占一大半，每回合（extractor 必跑）白白重发。
+
+    只保留判断幕/锚点/主线推进 + 命名一致所需的最小集：
+    - current_act（含未完成锚点）、story_core（含 canon_terms/main_goal）、story_progress、
+      main_quest_path（判断主线任务状态）。
+    - next_act 瘦成 id+title（知道下一幕存在即可，细节用不上）。
+    - core_characters 瘦成 name/id/aliases/role 索引（够认人、归类关系事件）。
+    返回新 dict，不改原对象。
+    """
+    if not isinstance(runtime_story, dict):
+        return runtime_story
+
+    projected: dict[str, Any] = {
+        key: runtime_story[key] for key in _STATE_OPS_KEEP_KEYS if key in runtime_story
+    }
+
+    next_act = runtime_story.get("next_act")
+    if isinstance(next_act, dict) and next_act:
+        slim_next: dict[str, Any] = {}
+        if next_act.get("id"):
+            slim_next["id"] = next_act["id"]
+        if next_act.get("title"):
+            slim_next["title"] = next_act["title"]
+        if slim_next:
+            projected["next_act"] = slim_next
+
+    characters = runtime_story.get("core_characters")
+    if isinstance(characters, list):
+        slim_characters: list[dict[str, Any]] = []
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            node = {k: character[k] for k in _STATE_OPS_CHARACTER_KEYS if character.get(k)}
+            if node:
+                slim_characters.append(node)
+        if slim_characters:
+            projected["core_characters"] = slim_characters
+
+    return projected
+
+
 def gm_hard_constraints(runtime_story: dict[str, Any]) -> dict[str, list[str]]:
     """从 runtime_story 抽出最该被 GM 严格遵守的强约束，供提升进 system prompt。
 
