@@ -13,16 +13,43 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 19 — 按需注入：StateExtractor/Compressor 用精简投影省 input token |
+| 最近一轮 | Round 20 — 验证器观测层 v1：GM 输出后确定性校验，只写 telemetry 不重写 |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
 | ✅ 验证状态 | 本地 pgvector 实测：迁移 head、102 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | **方案已敲定**，见 [`PROMPT_ARCHITECTURE_REDESIGN.md`](PROMPT_ARCHITECTURE_REDESIGN.md) §11（2026-05-29 头脑风暴）。北极星=遵守剧本质量；验证器只观测不重写；遵守与省 token 并行。**下一步 Round 20：验证器观测层 v1（canon/越界/提前揭露，只写 telemetry）**；Round 21 GM 场景投影；Round 22 接 DeepSeek 缓存 |
+| 下一步建议 | **方案已敲定**，见 [`PROMPT_ARCHITECTURE_REDESIGN.md`](PROMPT_ARCHITECTURE_REDESIGN.md) §11（2026-05-29 头脑风暴）。北极星=遵守剧本质量；验证器只观测不重写；遵守与省 token 并行。Round 20（验证器观测层 v1）已落地。**下一步 Round 21：GM 场景投影 state（最大 token 黑洞）**；Round 22 接 DeepSeek 缓存；Round 20b dashboard 展示观测违规率 |
 
 ---
 
 ## 1. 已完成
+
+### Round 20 (2026-05-29) — 验证器观测层 v1（敲定方案线 B 起步：只观测不重写）
+
+按 `PROMPT_ARCHITECTURE_REDESIGN.md` §11 敲定方案，遵守剧本为北极星、验证器**只观测不重写**（度量先行，避免 Round 16 过度重写）。每回合 GM 输出后用代码做确定性校验，结果写 telemetry 供 dashboard/调优，**不干预生成**。
+
+**新增 `app/services/output_observer.py::observe_gm_output`**（纯函数，整串匹配，失败被吞不影响主回合）：
+
+- **generation_parameters 达标**：字数/段落/场景标题/强调/行动选项数（=4）——纯机械 100% 可靠。
+- **forbidden_reveals 整串命中**：仅取 current_act.forbidden_reveals（会被揭露的实体/概念），整串匹配（绝不滑动窗口，Round 16 教训）。高精度低召回。
+- **canon_terms 使用度**：每个专名是否出现，统计被冷落的专名（canon 一致性弱代理）。
+- **核心角色提及**：core_characters 的 name+aliases 整串匹配统计。
+- 不做（v1）：在场一致性（state.present_npcs 数据常空，噪声大，留 v1.1）。
+
+**接入**：`gameplay.py` 两个 GM 输出 return 点前调用 `_record_output_observation`；`TurnTelemetry` 加 `output_observation` 字段并纳入 `to_runtime_inputs` → 随 `TurnJob.turn_runtime_inputs` JSONB 落库（**免迁移**，复用 Round 1 telemetry 链路）。
+
+**真实数据立刻暴露两个之前不可见的系统性问题**（拿数据库 79 回合 trace 实跑观测）：
+
+1. **GM 每回合字数严重不达标**：硬下限 1200 字，实际仅 831/872 字（约 70%）。
+2. **canon 14 个专名每回合只用 2-3 个**，"[地点]""[异能]""[能量]"等核心专名长期冷落——对应"设定没体现"。
+
+→ 这正是观测层的价值：把违规可观测化，为后续数据驱动治理（升级分级重写 / 调 prompt）提供依据。
+
+**改动文件**：`api/app/services/output_observer.py`（新）、`api/app/services/gameplay.py`、`api/tests/test_output_observer.py`（新，4 用例）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **146 passed**，ruff 通过。
+
+> 后续：Round 20b 给 admin dashboard 加观测违规率展示（读 turn_runtime_inputs.output_observation 聚合）。
 
 ### Round 19 (2026-05-29) — 按需注入：状态运算类 agent 用精简 runtime_story 投影
 

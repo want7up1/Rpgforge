@@ -271,7 +271,7 @@
 
 落地序列：
 
-- **Round 20（线 B 起步）**：验证器观测层 v1——canon 专名整串一致性检测 + 未授权实体/在场一致性检测 + 提前揭露检测；**只写 telemetry**；dashboard 展示各类违规率。
+- **Round 20（线 B 起步）✅ 已落地**：验证器观测层 v1（`output_observer.py`）——generation_parameters 达标 + forbidden_reveals 整串命中 + canon 使用度 + 角色提及；**只写 telemetry**（`TurnJob.turn_runtime_inputs.output_observation`）；不干预生成。真实数据已暴露：GM 字数普遍仅达硬下限 70%、canon 14 专名每回合仅用 2-3 个。在场一致性留 v1.1（present_npcs 数据常空）。dashboard 展示 → Round 20b。
 - **Round 21（线 A）**：GM 场景投影 state（支柱 2，最大 token 黑洞）。
 - **Round 22（线 A）**：宪法层固化为字节稳定前缀 + 接通 DeepSeek prefix cache + GM 流式加 `stream_options.include_usage` 补 token/cache 观测。
 - **持续**：turn_judge 评 canon_fidelity / safety / 状态一致性，观测风格类与整体遵守度趋势。
