@@ -13,16 +13,66 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 18 — 真实 trace 定位强约束被淹没，全部强约束提进 system prompt |
+| 最近一轮 | Round 20 — 验证器观测层 v1：GM 输出后确定性校验，只写 telemetry 不重写 |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
 | ✅ 验证状态 | 本地 pgvector 实测：迁移 head、102 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | Round 17 已从源头治理提前揭露 + 约束遵守。**下一步等真实 trace/judge 数据**再决定是否做痛点2的②确定性canon校验、③drift每回合跑。其余大 feature（2.2/3.2/3.3/4.x）仍需人工审查 |
+| 下一步建议 | **方案已敲定**，见 [`PROMPT_ARCHITECTURE_REDESIGN.md`](PROMPT_ARCHITECTURE_REDESIGN.md) §11（2026-05-29 头脑风暴）。北极星=遵守剧本质量；验证器只观测不重写；遵守与省 token 并行。Round 20（验证器观测层 v1）已落地。**下一步 Round 21：GM 场景投影 state（最大 token 黑洞）**；Round 22 接 DeepSeek 缓存；Round 20b dashboard 展示观测违规率 |
 
 ---
 
 ## 1. 已完成
+
+### Round 20 (2026-05-29) — 验证器观测层 v1（敲定方案线 B 起步：只观测不重写）
+
+按 `PROMPT_ARCHITECTURE_REDESIGN.md` §11 敲定方案，遵守剧本为北极星、验证器**只观测不重写**（度量先行，避免 Round 16 过度重写）。每回合 GM 输出后用代码做确定性校验，结果写 telemetry 供 dashboard/调优，**不干预生成**。
+
+**新增 `app/services/output_observer.py::observe_gm_output`**（纯函数，整串匹配，失败被吞不影响主回合）：
+
+- **generation_parameters 达标**：字数/段落/场景标题/强调/行动选项数（=4）——纯机械 100% 可靠。
+- **forbidden_reveals 整串命中**：仅取 current_act.forbidden_reveals（会被揭露的实体/概念），整串匹配（绝不滑动窗口，Round 16 教训）。高精度低召回。
+- **canon_terms 使用度**：每个专名是否出现，统计被冷落的专名（canon 一致性弱代理）。
+- **核心角色提及**：core_characters 的 name+aliases 整串匹配统计。
+- 不做（v1）：在场一致性（state.present_npcs 数据常空，噪声大，留 v1.1）。
+
+**接入**：`gameplay.py` 两个 GM 输出 return 点前调用 `_record_output_observation`；`TurnTelemetry` 加 `output_observation` 字段并纳入 `to_runtime_inputs` → 随 `TurnJob.turn_runtime_inputs` JSONB 落库（**免迁移**，复用 Round 1 telemetry 链路）。
+
+**真实数据立刻暴露两个之前不可见的系统性问题**（拿数据库 79 回合 trace 实跑观测）：
+
+1. **GM 每回合字数严重不达标**：硬下限 1200 字，实际仅 831/872 字（约 70%）。
+2. **canon 14 个专名每回合只用 2-3 个**，"[地点]""[异能]""[能量]"等核心专名长期冷落——对应"设定没体现"。
+
+→ 这正是观测层的价值：把违规可观测化，为后续数据驱动治理（升级分级重写 / 调 prompt）提供依据。
+
+**改动文件**：`api/app/services/output_observer.py`（新）、`api/app/services/gameplay.py`、`api/tests/test_output_observer.py`（新，4 用例）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **146 passed**，ruff 通过。
+
+> 后续：Round 20b 给 admin dashboard 加观测违规率展示（读 turn_runtime_inputs.output_observation 聚合）。
+
+### Round 19 (2026-05-29) — 按需注入：状态运算类 agent 用精简 runtime_story 投影
+
+用户需求：从架构上减少 input token 浪费——"该注入什么的时候再注入什么"，而非所有 agent 每回合无脑塞同一份巨型全量 payload。
+
+**诊断（trace 实测每回合 input token）**：story_director ~27.5k / gm ~26k / state_extractor ~31.4k / drift ~25.3k / compressor ~34.9k。input:output ≈ 30:1，成本几乎全在输入端，且当前**零 prompt caching**。核心浪费：每个 agent 每回合全量重发 `runtime_story`（~17.5k 字符），其中 worldview/core_mechanics/hard_rules/角色内幕(fear/leverage/appearance/desire) 等**写作向字段**对"状态运算类" agent 完全无用。
+
+**本轮范围（保守起步，用户选定）**：只改职责最窄、最不需要写作向字段的 **StateExtractor（每回合必跑）+ ContextCompressor（每 4 回合）**。GM/Director/Drift 暂不动。
+
+**实现**：
+
+- `story_settings.py::project_runtime_story_for_state_ops`：精简投影。保留 `current_act`(含锚点) / `story_core` / `story_progress` / `main_quest_path`；`next_act` 瘦成 id+title；`core_characters` 瘦成 `name/id/aliases/role` 索引（够认人、归类关系事件）。砍掉 worldview / core_mechanics / hard_rules / home_base / game_profile / generation_parameters / priority_order。
+- `state_extractor.py` / `context_compressor.py`：payload 里用投影包裹 `build_runtime_story`。
+
+**安全性**：核对 `extract_state_delta.md` / `compress_context.md`，两个 prompt 只引用 `current_act.completion_anchors` / `next_act` / 主线 / `director_hints` / `current_state.v2`，**完全不引用被砍字段**——投影保留集与 prompt 需求精确吻合，不破坏功能。
+
+**实测节省（真实游戏）**：这两个 agent 的 runtime_story **17564 → 5989 字符，省 65.9%（~5.8k tokens/次）**。extractor 每回合必跑，等于每回合直接省 ~11.6k 字符 input。
+
+**改动文件**：`api/app/services/story_settings.py`、`api/app/services/state_extractor.py`、`api/app/services/context_compressor.py`、`api/tests/test_gameplay.py`（+投影回归测试）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **142 passed**，ruff 通过。
+
+> 后续可选（未做）：①Director/Drift 同样按需投影（中等风险，需逐个验证不影响决策/偏离判定）；②GM 的 state_v2(占 user 41%) 精简（高风险）；③确认后端是否支持 prompt caching——若支持，把稳定前缀缓存化是更大杠杆。
 
 ### Round 18 (2026-05-29) — 用真实 trace 定位"强约束在剧情里看不到"，把全部强约束提进 system prompt
 

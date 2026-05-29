@@ -17,6 +17,7 @@ from app.services.drift_validator import DriftValidator
 from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
+from app.services.output_observer import observe_gm_output
 from app.services.prompt_builder import PromptBuilder
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
@@ -67,14 +68,18 @@ class TurnTelemetry:
     extractor_failed: bool = False
     director_decision: dict[str, Any] | None = None
     drift_validation: dict[str, Any] | None = None
+    # Round 20 输出观测层：只观测不重写，结果随 turn_runtime_inputs 落库供 dashboard/调优。
+    output_observation: dict[str, Any] | None = None
 
     def to_runtime_inputs(self) -> dict[str, Any]:
-        """传给 maintenance 阶段 StateExtractor 的 hints。"""
+        """传给 maintenance 阶段 StateExtractor 的 hints，并携带输出观测结果。"""
         payload: dict[str, Any] = {}
         if self.director_decision:
             payload["director_decision"] = self.director_decision
         if self.drift_validation:
             payload["drift_validation"] = self.drift_validation
+        if self.output_observation:
+            payload["output_observation"] = self.output_observation
         return payload
 
 
@@ -264,6 +269,7 @@ class GameplayService:
         ):
             if on_progress:
                 await on_progress("偏离风险较低，跳过深度校验。")
+            self._record_output_observation(context, runtime_output)
             return runtime_output, model_used
         await _emit_stage(on_stage, STAGE_DRIFT_VALIDATION)
         if on_progress:
@@ -277,7 +283,33 @@ class GameplayService:
             on_progress=on_progress,
             on_stage=on_stage,
         )
+        self._record_output_observation(context, runtime_output)
         return runtime_output, model_used
+
+    @staticmethod
+    def _record_output_observation(
+        context: TurnRuntimeContext,
+        runtime_output: GMRuntimeOutput,
+    ) -> None:
+        """Round 20：对最终 GM 输出做确定性观测，结果存入 telemetry（只观测不重写）。"""
+        try:
+            runtime_story = context.runtime_story_bare or {}
+            observation = observe_gm_output(
+                narrative=runtime_output.narrative,
+                visible_clues=runtime_output.visible_clues,
+                action_options=runtime_output.action_options,
+                runtime_story=runtime_story,
+                generation_parameters=runtime_story.get("generation_parameters", {}),
+            )
+            context.telemetry.output_observation = observation
+            if observation.get("flags"):
+                logger.info(
+                    "GM 输出观测 flags（game %s）：%s",
+                    context.game.id,
+                    "；".join(observation["flags"]),
+                )
+        except Exception as exc:  # 观测失败绝不影响主回合
+            logger.warning("GM 输出观测失败（game %s）：%s", context.game.id, exc)
 
     def _should_run_drift_validation(
         self,
