@@ -294,12 +294,16 @@ class GameplayService:
         """Round 20：对最终 GM 输出做确定性观测，结果存入 telemetry（只观测不重写）。"""
         try:
             runtime_story = context.runtime_story_bare or {}
+            previous_narrative = (
+                context.recent_turns[-1].gm_output if context.recent_turns else None
+            )
             observation = observe_gm_output(
                 narrative=runtime_output.narrative,
                 visible_clues=runtime_output.visible_clues,
                 action_options=runtime_output.action_options,
                 runtime_story=runtime_story,
                 generation_parameters=runtime_story.get("generation_parameters", {}),
+                previous_narrative=previous_narrative,
             )
             context.telemetry.output_observation = observation
             if observation.get("flags"):

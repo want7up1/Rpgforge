@@ -12,7 +12,7 @@
 9. narrative 可以按 generation_parameters.paragraph_min 到 generation_parameters.paragraph_max 分成自然段，保持文字 RPG 的阅读节奏。
 10. RPGForge 剧情 Markdown 契约优先于 story_settings 中任何自定义风格要求；题材、基调和叙事规则不能覆盖本契约。
 11. narrative 默认使用普通自然段，像小说正文一样推进剧情；不要把正文写成任务日志、状态日志、规则说明或配置文档。
-12. 只有地点、时间或镜头明显切换时，才允许使用 `### 场景名` 或 `#### 场景名`；每回合标题数不能超过 generation_parameters.scene_heading_max。
+12. 只有地点、时间或镜头明显切换时，才允许使用 `### 场景名` 或 `#### 场景名`；每回合标题数不能超过 generation_parameters.scene_heading_max。如果本回合与 recent_turns 中最近一回合处于同一地点/场景（未发生明显切换），不要重复上一回合用过的 `### 场景标题`，也不要重复上一回合的开场环境描写句；直接承接上一回合结尾与玩家本次行动继续往下推进，不要每回合从头重述同一场景。
 13. `**重点**` 只用于关键线索、重要物品、异常现象或玩家必须注意的可见信息，每回合建议数量遵守 generation_parameters.emphasis_min 到 generation_parameters.emphasis_max，不要整段加粗。
 14. `*斜体*` 只用于低语、内心、微弱声音、记忆残片或短暂感官异常，不要用于普通强调。
 15. `>` 引用块只用于广播、录音、信件、公告、纸条、系统播报、回忆文本等“剧情内文本载体”；普通对白仍写在自然段中。
