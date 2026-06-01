@@ -206,20 +206,29 @@ def _generation_parameter_directives(generation_parameters: dict[str, int] | Non
 
     lines: list[str] = []
     if nmin:
-        target = f"（目标 {tmin}–{tmax} 字）" if tmin and tmax else ""
+        target = f"（一般目标 {tmin}–{tmax} 字）" if tmin and tmax else ""
         lines.append(
-            f"- narrative 正文不少于 {nmin} 字{target}；字数不足视为偷工，"
-            "宁可补充感官细节、NPC 反应、场景推进，也不要草草收尾。"
+            f"- 【硬下限】narrative 正文不少于 {nmin} 字{target}；字数不足视为偷工，"
+            "宁可补充感官细节、身体反应、NPC 反应、场景推进，也不要草草收尾。"
         )
+    soft: list[str] = []
     if pmin and pmax:
-        lines.append(f"- 自然段控制在 {pmin}–{pmax} 段；不要碎成几十个短段，也不要堆成一大坨。")
+        soft.append(f"自然段一般 {pmin}–{pmax} 段")
     if smax is not None:
-        lines.append(f"- 场景标题（`###`/`####`）本回合最多 {smax} 个；同场景承接时通常 0 个。")
+        soft.append(f"场景标题（`###`）一般不超过 {smax} 个、同场景承接时通常 0 个")
     if emin is not None and emax:
-        lines.append(f"- 重点强调（`**`）控制在 {emin}–{emax} 处；不要滥用加粗。")
+        soft.append(f"重点强调（`**`）一般 {emin}–{emax} 处")
+    if soft:
+        lines.append(
+            "- 【软参考，可被剧本覆盖】" + "；".join(soft) + "，用于避免无意义注水或碎段。"
+        )
+    if nmin or soft:
+        lines.append(
+            "- 【优先级】凡 hard_rules / core_mechanics 要求“完整/详细描写”的场景"
+            "（如[剧情规则]、战斗色情化、[剧情规则]、性征刻画、日常调教等），必须优先写完整；"
+            "此时段落数、强调数与篇幅上限一律让位于剧本要求，不受上述软参考限制（但仍不得低于硬下限）。"
+        )
     if not lines:
         return ""
 
-    return (
-        "=== 本回合输出篇幅硬指标（必须满足，系统会逐项校验）===\n" + "\n".join(lines)
-    )
+    return "=== 本回合输出篇幅指引 ===\n" + "\n".join(lines)
