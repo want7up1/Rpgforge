@@ -129,12 +129,15 @@ def test_thread_no_split_across_id_and_title_forms() -> None:
     desc = "废墟城市方向约两公里外有规律火光，疑似幸存者"
     state: dict = {}
     # 早期回合：带 thread_id + description（无 title）
-    _apply_thread_updates(state, [{"thread_id": "survivor_signal", "description": desc, "status": "active"}])
+    _apply_thread_updates(
+        state,
+        [{"thread_id": "survivor_signal", "description": desc, "status": "active"}],
+    )
     # 末期 resolve：只带 title（== 早期 description）
     _apply_thread_updates(state, [{"title": desc, "status": "resolved"}])
     threads = state["open_threads"]
     assert len(threads) == 1, f"线索分裂成 {len(threads)} 条"
-    assert _thread_is_resolved({"status": threads[0].get("status")}) or threads[0].get("status") == "resolved"
+    assert threads[0].get("status") == "resolved"
 
 
 def test_evidence_pool_excludes_open_threads() -> None:

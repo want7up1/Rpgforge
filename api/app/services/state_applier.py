@@ -1961,8 +1961,8 @@ def _activity_markers(value: str) -> list[str]:
 
     def add_variants(text: str) -> None:
         add(text)
-        # \u53bb\u52a8\u8bcd\u524d\u7f00\uff08\u63a2\u7d22/\u8425\u6551\u7b49\uff09\u4fdd\u7559\u6838\u5fc3\u540d\u8bcd\uff1b\u4e0d\u518d\u751f\u6210 text[-2:]/text[-3:] \u540e\u7f00\u788e\u7247
-        # \uff08Round 16 \u6559\u8bad\uff1a2-3 \u5b57\u788e\u7247\u4f1a\u8ba9\u5728\u573a\u89d2\u8272\u540d/\u901a\u7528\u8bcd\u8bef\u547d\u4e2d\u3001\u628a\u672a\u6765\u5e55\u8bef\u5224\u4e3a\u5df2\u5728\u53d1\u751f\uff09\u3002
+        # 去前缀保留核心名词，不再生成 2-3 字后缀碎片
+        # （Round 16 教训：碎片会误命中在场角色名、把未来幕误判为已发生）
         for prefix in THREAD_QUEST_TOPIC_PREFIXES:
             if text.startswith(prefix):
                 add(text[len(prefix) :])
@@ -2048,7 +2048,10 @@ def _quest_status_bucket(status: str) -> str:
     # 先排除否定/进行中表述，避免含"完成/解决"二字的"未完成""无法解决""进行中"被误判为已完成。
     if any(
         neg in text
-        for neg in ("未完成", "未达成", "尚未", "无法", "未能", "没完成", "未解决", "进行中", "in_progress")
+        for neg in (
+            "未完成", "未达成", "尚未", "无法", "未能",
+            "没完成", "未解决", "进行中", "in_progress",
+        )
     ):
         return ""
     if any(marker in text for marker in ("失败", "放弃", "failed")):
