@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 20b — 修"新回合重述同场景"：prompt 承接规则 + 开头重复观测 |
+| 最近一轮 | Round 21 — 字数治理：generation_parameters 篇幅硬指标提进 system prompt |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,24 @@
 ---
 
 ## 1. 已完成
+
+### Round 21 (2026-05-29) — 字数治理：generation_parameters 篇幅硬指标提进 system prompt
+
+**背景**：Round 20 观测层在 26 回合实测持续暴露——GM 字数长期不达硬下限（约 70%）、段落/强调频繁越界（最高频 flag）。根因同 Round 18：`generation_parameters`（字数下限/段落/标题/强调数）埋在 user JSON 里，被 current_state_v2 淹没，模型不遵守。
+
+**修复（同 Round 18 机制，把约束从 user 深处提到 system 顶部）**：
+
+- `prompt_builder._generation_parameter_directives`：把 `generation_parameters` 的篇幅约束写成 **system prompt 里的明确数字指令**（不少于 N 字 / 段落 X–Y / 标题 ≤ Z / 强调 X–Y），而非让 GM 去 user JSON 找。
+- `_build_system_content` 增加 `generation_parameters` 参数，在强约束块后追加"本回合输出篇幅硬指标（必须满足，系统会逐项校验）"分节；调用处传入。
+- 与 output_observer 的 generation 校验一一对应，形成"system 指令 + 观测验证"闭环。
+
+**实测**：真实剧本 system 末尾已含具体数字（不少于 1200 字、3–8 段、标题 ≤3、强调 2–4）。SYSTEM 长度约 7996。
+
+**改动文件**：`api/app/services/prompt_builder.py`、`api/tests/test_gameplay.py`（+篇幅断言）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **148 passed**，ruff 通过。
+
+> 待玩家续玩验证：observer 的字数不达标 / 段落越界 / 强调越界 flag 频次是否下降（同 Round 20b 的闭环验证法）。
 
 ### Round 20b (2026-05-29) — 修"新回合带上一回合内容"（同场景重述）
 

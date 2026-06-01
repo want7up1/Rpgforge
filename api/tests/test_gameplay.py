@@ -139,6 +139,10 @@ def test_gm_system_prompt_elevates_hard_constraints(db_session) -> None:
     assert "不要修仙" in system_content
     # 当前幕 forbidden_reveals
     assert "账册真凶" in system_content
+    # Round 21：generation_parameters 篇幅硬指标提进 system（具体数字）
+    assert "本回合输出篇幅硬指标" in system_content
+    assert "不少于 700 字" in system_content
+    assert "3" in system_content and "6 段" in system_content
 
 
 def test_state_ops_projection_keeps_minimal_drops_writing_fields() -> None:
