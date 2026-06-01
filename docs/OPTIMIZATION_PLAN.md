@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 22b — 游戏界面"本回合详情"折叠面板：token/cache/字数/observer |
+| 最近一轮 | Round 22c — 宪法层字节固化：幕级内容移出稳定前缀，可缓存前缀 3467→8510 字符 |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,25 @@
 ---
 
 ## 1. 已完成
+
+### Round 22c (2026-05-29) — 宪法层字节固化（提升 DeepSeek prefix cache 命中）
+
+**诊断**：Round 22b 实测 cache 命中率仅 ~4.5%。逐字节比对两相邻回合 GM 请求发现：system 前 **3467 字符**字节一致，**第 3467 字符开始 diff —— 那是"当前幕未完成锚点列表"**（锚点逐个完成 → 列表每变一次，前缀就在此断裂，后面 4 万字符全 miss）。根因：Round 18 把"当前幕目标/未完成锚点"放进了 system 强约束块，而它会随幕推进变化。
+
+**原理**：DeepSeek prefix cache 按"最长公共前缀"自动命中，从第 1 个 token 起逐 token 比对，**一遇不同 token，后面全部 miss**，命中部分 input 计费约 1/10。所以稳定内容必须尽量长、尽量靠前、逐回合字节一致。
+
+**修复（把会变的移出稳定前缀）**：
+
+- `prompt_builder`：`_HARD_CONSTRAINT_LABELS` 拆成 `_CONSTITUTION_LABELS`（整局不变：must_follow / reveal_rules / continuity_rules / gm_output_rules / core_mechanics / must_not / must_not_become / forbidden_drift / canon_terms）+ `_ACT_BRIEF_LABELS`（随幕变：current_act 目标+锚点 / current_act_forbidden_reveals）。
+- `_build_system_content` 分层顺序：模板 → **宪法层**（稳定）→ **篇幅指引**（generation_parameters 整局不变，稳定）→ **幕级简报**（变化，放最末尾）。新增 `_render_constraint_groups` 复用渲染。
+
+**实测**：可缓存前缀 **3467 → 8510 字符**（宪法+篇幅全进前缀，锚点列表已挪到末尾），前缀长度 ×2.4。GM/director/drift/extractor/compressor 都吃 system，稳定前缀命中对每个 agent 每回合生效。
+
+**改动文件**：`api/app/services/prompt_builder.py`。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **153 passed**、ruff 通过；system 分层结构实测正确（宪法<篇幅<幕简报，前缀不含锚点列表）。
+
+> 待玩家续玩验证：在"本回合详情"面板看 cache 命中率是否从 ~4.5% 明显上升（同幕连续回合应能命中到幕简报之前）。
 
 ### Round 22b (2026-05-29) — 游戏界面"本回合详情"折叠面板（把观测搬到前端）
 

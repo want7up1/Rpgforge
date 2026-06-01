@@ -15,22 +15,29 @@ from app.services.story_settings import (
 )
 
 # system prompt 强约束分节：(分组, key, 标题)。顺序即呈现顺序，与 gm_hard_constraints 对应。
-# 必须类在前（玩家"想看却没看到"的强约束），禁止类居中，命名一致最后。
 _MUST = "本回合/本幕必须落实（强约束，凌驾于风格与节奏）"
 _NOT = "绝对禁止（违反即判失败）"
 _CANON = "命名与一致性"
-_HARD_CONSTRAINT_LABELS: list[tuple[str, str, str]] = [
-    (_MUST, "current_act", "当前幕目标与未完成锚点（本回合必须围绕推进）"),
+
+# 宪法层（整局不变）：放 system 最前，保证逐回合字节一致以命中 DeepSeek prefix cache。
+# 注意：不含 current_act / current_act_forbidden_reveals —— 那是会随幕推进变化的"幕级"
+# 内容，放在 system 末尾的幕级简报里（见 _ACT_BRIEF_LABELS / Round 22c）。
+_CONSTITUTION_LABELS: list[tuple[str, str, str]] = [
     (_MUST, "must_follow", "必须遵守（must_follow）"),
     (_MUST, "reveal_rules", "信息揭露规则（reveal_rules）"),
     (_MUST, "continuity_rules", "连续性规则（continuity_rules）"),
     (_MUST, "gm_output_rules", "GM 输出规则（gm_output_rules）"),
     (_MUST, "core_mechanics", "核心机制规则（core_mechanics）"),
     (_NOT, "must_not", "绝对禁止（must_not）"),
-    (_NOT, "current_act_forbidden_reveals", "当前幕禁止提前揭露（forbidden_reveals）"),
     (_NOT, "must_not_become", "本作绝不能演变成（must_not_become）"),
     (_NOT, "forbidden_drift", "禁止的剧情漂移方向（forbidden_drift）"),
     (_CANON, "canon_terms", "专有名词必须严格沿用原文，不得改写、另译或音译（canon_terms）"),
+]
+
+# 幕级简报（随幕推进变化）：放 system 末尾，cache 前缀在此之前已稳定命中。
+_ACT_BRIEF_LABELS: list[tuple[str, str]] = [
+    ("current_act", "当前幕目标与未完成锚点（本回合必须围绕推进）"),
+    ("current_act_forbidden_reveals", "当前幕禁止提前揭露（forbidden_reveals）"),
 ]
 
 
@@ -109,44 +116,47 @@ class PromptBuilder:
         runtime_story: dict[str, Any] | None,
         generation_parameters: dict[str, int] | None = None,
     ) -> str:
-        """gm_runtime.md 基础规则 + 本剧本强约束 + 输出篇幅硬指标（都提进 system prompt）。
+        """gm_runtime.md 基础规则 + 宪法层强约束 + 篇幅指引 + 幕级简报（都提进 system prompt）。
 
-        强约束/篇幅参数原本埋在 user JSON 里、占比 <4% 且被 current_state_v2 淹没，
-        模型遵守度极低。提到 system 末尾，确保 GM 一定看到。篇幅指标把 generation_parameters
-        的具体数字直接写死进 system（而非让 GM 去 user JSON 深处找），对应 output_observer 的校验。
+        **分层顺序即 DeepSeek prefix cache 友好度的关键**（Round 22c 宪法层字节固化）：
+        前面放整局不变的内容（模板 + 宪法层强约束 + 篇幅指引），逐回合字节一致 → 命中缓存；
+        会随幕推进变化的"幕级简报"（当前幕目标/未完成锚点/当前幕禁止揭露）放最末尾，
+        让缓存断裂点尽量靠后。实测此前断裂在第 ~3467 字符（未完成锚点列表），命中率仅 ~4.5%。
+
+        强约束/篇幅原本埋在 user JSON 里被 current_state_v2 淹没、模型遵守度极低，提进 system
+        确保 GM 一定看到；篇幅指标把 generation_parameters 具体数字写死，对应 output_observer 校验。
         """
         template = load_prompt_template("gm_runtime.md")
         constraints = gm_hard_constraints(runtime_story or {})
 
-        # 按分组聚合各分节，保持 _HARD_CONSTRAINT_LABELS 的顺序。
-        grouped: dict[str, list[str]] = {}
-        order: list[str] = []
-        for group, key, label in _HARD_CONSTRAINT_LABELS:
-            items = constraints.get(key) or []
-            if not items:
-                continue
-            if group not in grouped:
-                grouped[group] = []
-                order.append(group)
-            lines = "\n".join(f"- {item}" for item in items)
-            grouped[group].append(f"〔{label}〕\n{lines}")
-
         sections: list[str] = [template]
 
-        if order:
-            blocks = [f"## {group}\n\n" + "\n\n".join(grouped[group]) for group in order]
-            body = "\n\n".join(blocks)
+        # 1) 宪法层（整局不变）+ 2) 篇幅指引（generation_parameters 整局不变）——稳定前缀。
+        constitution = _render_constraint_groups(constraints, _CONSTITUTION_LABELS)
+        if constitution:
             sections.append(
-                "=== 本剧本不可违反的强约束（最高优先级，凌驾于上文一切风格与节奏要求）===\n"
+                "=== 本剧本不可违反的强约束（宪法层·整局不变·最高优先级）===\n"
                 "以下条目来自剧本设定，必须逐条严格落实；与任何其他指令冲突时以本节为准。\n"
                 "尤其是「必须落实」组——这些不是可选风格，而是每个相关回合都要在 narrative 中"
                 "真实体现的硬性要求。\n\n"
-                f"{body}"
+                f"{constitution}"
             )
-
         directives = _generation_parameter_directives(generation_parameters or {})
         if directives:
             sections.append(directives)
+
+        # 3) 幕级简报（随幕推进变化）—— 放最末尾，缓存前缀在此之前已稳定。
+        act_brief_lines: list[str] = []
+        for key, label in _ACT_BRIEF_LABELS:
+            items = constraints.get(key) or []
+            if items:
+                lines = "\n".join(f"- {item}" for item in items)
+                act_brief_lines.append(f"〔{label}〕\n{lines}")
+        if act_brief_lines:
+            sections.append(
+                "=== 当前幕简报（随剧情推进变化，本回合需围绕推进）===\n"
+                + "\n\n".join(act_brief_lines)
+            )
 
         return "\n\n".join(sections)
 
@@ -178,6 +188,28 @@ def _trim_text(value: str | None, limit: int) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit].rstrip()}..."
+
+
+def _render_constraint_groups(
+    constraints: dict[str, list[str]],
+    labels: list[tuple[str, str, str]],
+) -> str:
+    """按 (分组, key, 标题) 渲染强约束分节，保持 labels 顺序、按分组聚合。"""
+    grouped: dict[str, list[str]] = {}
+    order: list[str] = []
+    for group, key, label in labels:
+        items = constraints.get(key) or []
+        if not items:
+            continue
+        if group not in grouped:
+            grouped[group] = []
+            order.append(group)
+        lines = "\n".join(f"- {item}" for item in items)
+        grouped[group].append(f"〔{label}〕\n{lines}")
+    if not order:
+        return ""
+    blocks = [f"## {group}\n\n" + "\n\n".join(grouped[group]) for group in order]
+    return "\n\n".join(blocks)
 
 
 def _generation_parameter_directives(generation_parameters: dict[str, int] | None) -> str:
