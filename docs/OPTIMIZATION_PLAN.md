@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 22c — 宪法层字节固化：幕级内容移出稳定前缀，可缓存前缀 3467→8510 字符 |
+| 最近一轮 | Round 23 — GM 场景投影：state_v2 砍历史/非在场噪声，实测省 59% |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,23 @@
 ---
 
 ## 1. 已完成
+
+### Round 23 (2026-05-29) — GM 场景投影（支柱 2，省 user token）
+
+设计文档支柱 2 落地。**先用真实数据校准预期**：当前游戏（28 回合）state_v2 仅 6135 字符、占 user 13%（不是之前 97 回合老存档的 25k/41%）；且 state 在 user 末段、不在 system 稳定前缀，**投影只省 token、不提 cache 命中**。当前 ROI 中等、长期游戏（state 膨胀）才大——用户决策"做保守投影"。
+
+**`state_v2.project_state_for_scene`**（保守，仅 GM 用；drift/extractor 仍用全量）：
+
+- 全保留场景/主角必需：active_scene / protagonist_sheet / abilities / conditions / skills / open_threads / story_progress / party。
+- 精简明确噪声：`progression` 砍 `xp_log`（GM 规则 20 不输出 XP）；`quest_log` active 全留、completed 压成 `completed_titles`；`npc_registry` 只留在场（present_npcs ∪ party）；`relationship_tracks` 只留在场角色、`recent_events` 留最近 1 条。
+- **兜底**：present 名单为空时不过滤 NPC/关系（避免砍光）。
+- 接入：`prompt_builder` GM payload 的 `current_state_v2` 用投影。
+
+**实测**：当前游戏 state_v2 **6135 → 2502 字符，省 59%**（长期游戏省更多：非在场 NPC + 大量 completed quest + 关系历史）。
+
+**改动文件**：`api/app/services/state_v2.py`、`api/app/services/prompt_builder.py`、`api/tests/test_scene_projection.py`（新，6 用例）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **159 passed**、ruff 通过。
 
 ### Round 22c (2026-05-29) — 宪法层字节固化（提升 DeepSeek prefix cache 命中）
 
