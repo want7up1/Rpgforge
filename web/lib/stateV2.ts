@@ -448,6 +448,29 @@ function axisLabel(axis: string): string {
   return relationshipAxes.find((item) => item.key === axis)?.label || axis;
 }
 
+// 线索 status 的中文映射。后端可能写入英文枚举（active/resolved…），直显会泄露原始值。
+// 命中已知枚举返回中文；未知/无实义值返回空串，由 UI 决定回退展示（如只显示来源）。
+const threadStatusLabels: Record<string, string> = {
+  active: "进行中",
+  open: "进行中",
+  pending: "进行中",
+  ongoing: "进行中",
+  dormant: "搁置",
+  resolved: "已了结",
+  closed: "已了结",
+  completed: "已了结",
+  done: "已了结",
+  finished: "已了结"
+};
+
+export function threadStatusLabel(status: string): string {
+  const normalized = status.trim();
+  if (!normalized) {
+    return "";
+  }
+  return threadStatusLabels[normalized.toLowerCase()] || normalized;
+}
+
 function identity(item: Record<string, unknown>): string {
   return asString(item.name) || asString(item.id) || asString(item.title) || asString(item.npc);
 }

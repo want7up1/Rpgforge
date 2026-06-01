@@ -12,8 +12,10 @@ import {
   getStateV2FromGame,
   ratioPercent,
   relationshipAxes,
+  threadStatusLabel,
   type AbilityState,
   type ConditionState,
+  type QuestItem,
   type RelationshipTrack,
   type SkillState,
   type StateV2
@@ -351,19 +353,26 @@ function RelationshipCard({ relationship }: { relationship: RelationshipTrack })
 }
 
 function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
+  const { active, completed, failed } = stateV2.quest_log;
+  // 已完成 + 已失败合并到次要折叠区，让玩家看到任务史。hidden 桶是剧情伏笔，刻意不展示（展示=剧透）。
+  const settledQuests: { quest: QuestItem; outcome: "completed" | "failed" }[] = [
+    ...completed.map((quest) => ({ quest, outcome: "completed" as const })),
+    ...failed.map((quest) => ({ quest, outcome: "failed" as const }))
+  ];
+
   return (
     <section className="grid gap-4 xl:grid-cols-2">
       <section className="surface-panel">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="surface-title">任务</h2>
-          <span className="app-pill">{stateV2.quest_log.active.length} 个进行中</span>
+          <span className="app-pill">{active.length} 个进行中</span>
         </div>
         <div className="mt-4 grid gap-3">
-          {stateV2.quest_log.active.length === 0 ? (
+          {active.length === 0 ? (
             <EmptyText>暂无进行中的任务。</EmptyText>
           ) : (
-            stateV2.quest_log.active.map((quest) => (
-              <article className="archive-card archive-card-accent" key={quest.name}>
+            active.map((quest, index) => (
+              <article className="archive-card archive-card-accent" key={`active-${quest.name}-${index}`}>
                 <h3 className="font-semibold">{quest.name}</h3>
                 <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
                   {quest.objective || quest.status}
@@ -372,6 +381,31 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
             ))
           )}
         </div>
+        {settledQuests.length > 0 ? (
+          <details className="mt-3 rounded border border-[color:var(--border)] bg-[color:var(--input)]">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+              已完成 / 已结束（{settledQuests.length}）
+            </summary>
+            <div className="grid gap-2 border-t border-[color:var(--border)] p-3">
+              {settledQuests.map(({ quest, outcome }, index) => (
+                <article
+                  className="rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] p-3"
+                  key={`${outcome}-${quest.name}-${index}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-medium text-[color:var(--muted)]">{quest.name}</h3>
+                    <span className="app-pill">{outcome === "failed" ? "已失败" : "已完成"}</span>
+                  </div>
+                  {quest.objective ? (
+                    <p className="app-wrap-text mt-2 text-xs leading-5 text-[color:var(--muted)]">
+                      {quest.objective}
+                    </p>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </section>
 
       <section className="surface-panel">
@@ -383,18 +417,21 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
           {stateV2.open_threads.active.length === 0 ? (
             <EmptyText>暂无未解线索。</EmptyText>
           ) : (
-            stateV2.open_threads.active.map((thread) => (
-              <article
-                className="archive-card"
-                key={`${thread.title}-${thread.source}`}
-              >
-                <h3 className="font-semibold">{thread.title}</h3>
-                <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
-                  {thread.status}
-                  {thread.source ? ` · ${thread.source}` : ""}
-                </p>
-              </article>
-            ))
+            stateV2.open_threads.active.map((thread, index) => {
+              const statusLabel = threadStatusLabel(thread.status);
+              // status 中文映射；无实义时回退到来源，两者皆空则不渲染附注行。
+              const detail = [statusLabel, thread.source].filter(Boolean).join(" · ");
+              return (
+                <article className="archive-card" key={`${thread.title}-${thread.source}-${index}`}>
+                  <h3 className="font-semibold">{thread.title}</h3>
+                  {detail ? (
+                    <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                      {detail}
+                    </p>
+                  ) : null}
+                </article>
+              );
+            })
           )}
         </div>
       </section>

@@ -17,8 +17,10 @@ from app.services.state_rebuilder import rebuild_game_state, sync_turn_state_del
 
 router = APIRouter(tags=["states"])
 DB_DEPENDENCY = Depends(get_db)
-EDITABLE_STATUSES = {"pending", "edited"}
-REJECTABLE_STATUSES = {"pending", "edited", "approved"}
+# 失败的 delta 也允许人工编辑/拒绝：否则确定性提取失败会卡死存档（无人工出口）。
+# 拒绝后该回合以空 delta 跳过（rebuild 只应用 approved），编辑则覆盖为人工修正版。
+EDITABLE_STATUSES = {"pending", "edited", "failed"}
+REJECTABLE_STATUSES = {"pending", "edited", "approved", "failed"}
 
 
 def state_game_query(game_id: UUID):
