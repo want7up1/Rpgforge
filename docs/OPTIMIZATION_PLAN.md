@@ -15,10 +15,10 @@
 |---|---|
 | 最近一轮 | Round 24 — 修复 LLM-as-Judge（一直坏的）+ 优化后遵循度量化基线 |
 | 完成日期 | 2026-05-29 |
-| 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
-| 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
-| ✅ 验证状态 | 本地 pgvector 实测：迁移 head、102 pytest、trace 端到端、admin JSONB 查询全 OK。详见 §9 |
-| 下一步建议 | **方案已敲定**，见 [`PROMPT_ARCHITECTURE_REDESIGN.md`](PROMPT_ARCHITECTURE_REDESIGN.md) §11（2026-05-29 头脑风暴）。北极星=遵守剧本质量；验证器只观测不重写；遵守与省 token 并行。Round 20（验证器观测层 v1）已落地。**下一步 Round 21：GM 场景投影 state（最大 token 黑洞）**；Round 22 接 DeepSeek 缓存；Round 20b dashboard 展示观测违规率 |
+| 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
+| 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
+| ✅ 验证状态 | 容器内 159 pytest 全过；真实游玩验证两项硬成果：同场景重述修复（对照）、cache 命中率 ~5%→稳态 60%+（对照）。judge 量化基线 canon/safety/state 5/5（偏乐观，无严格改前对照） |
+| 下一步建议 | 核心痛点已解决，**进入维护态**。剩余仅 ROI 递减/不做项，见 [`PROMPT_ARCHITECTURE_REDESIGN.md`](PROMPT_ARCHITECTURE_REDESIGN.md) §7（RAG 暂缓 / 验证器干预数据不支持紧迫 / dashboard 跨回合趋势低优先 / Director-GM 不做）。新问题按"observer 量化 → 改 → 真实游玩验证 → 验证有效再合并"推进 |
 
 ---
 
@@ -652,6 +652,8 @@ prepare_context(1) → retrieve_memory(2) → story_director(3) → gm_runtime(4
 
 ## 3. 路线图
 
+> **现状（2026-05-29）**：本节是 Round 1 时的早期路线图。阶段 0–1（止血 + AI 质量基础设施）已全部落地（见 §1 Round 1–15）。**省 token + 遵循剧本的后续优化已由 Round 16–24 落地，其权威路线图与剩余项见 [`PROMPT_ARCHITECTURE_REDESIGN.md`](PROMPT_ARCHITECTURE_REDESIGN.md) §7。** 本节阶段 2–4 中：2.1 Agent 抽象基类已决策暂缓（见 §4）；2.2/2.3 未做；3.1 已做（telemetry dashboard）、3.2/3.3 未做；4.x 未做。下方条目保留作历史，不再单独推进。
+
 ### 阶段 0 — 止血（建议一周内）
 
 Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值明确。
@@ -856,6 +858,8 @@ ORDER BY rewrite_rate DESC;
 
 ## 7. Round 1 已知遗留疑点
 
+> **现状（2026-05-29）**：本节是 Round 1 落地时的遗留清单，多数已被后续 Round 处理或被新架构覆盖——疑点 1（重写局部修订）、3（drift 触发阈值）相关逻辑已在 Round 16 重构防剧透时调整；trace/observer 基础设施（Round 3/20）已让这些"等数据再定"的项可观测。下方保留作历史参考，新疑点请记到对应 Round 条目或 §4 决策记录。
+
 落地时识别但**没有修**的事项。逐一审视后决定是否进入路线图。
 
 1. **重写能否真的"局部修订"**：完全靠 `gm_runtime.md` 第 27 条让模型自觉。Round 1 没法验证，要等阶段 1.1 trace 上线后看 rewrite 后 narrative 与 previous_gm_output 的相似度。
@@ -888,8 +892,8 @@ ORDER BY rewrite_rate DESC;
 
 ## 9. 容器验证清单
 
-> ✅ **Round 10 已用本地 docker pgvector(pg16) 实测通过**：迁移 upgrade head、全套 69 pytest、trace 端到端、admin 查询全部 OK。
-> 下面清单保留给**生产环境首次部署**复核（生产用 docker-compose 的真实 redis + worker，本地验证未覆盖 RQ worker 实际消费和真实 LLM 调用）。
+> ✅ **持续在容器内验证**：截至 Round 24，`docker compose exec api pytest tests/` 全套 **159 passed**（Round 10 时为 69）；迁移 head、trace 端到端、admin 查询、judge 实跑均 OK。Round 16–24 每轮均 `docker compose up -d --build api worker` 重建 + 真实游玩验证。
+> 下面清单保留给**生产环境首次部署**复核（生产用 docker-compose 的真实 redis + worker）。
 
 ### 9.1 迁移 + 启动
 
