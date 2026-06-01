@@ -98,6 +98,8 @@ export type StoryProgressState = {
   last_advance_turn: number | null;
   last_advance_reason: string;
   last_anchor_update_turn: number | null;
+  next_act: string;
+  current_act_anchor_progress: { done: number; total: number };
   act_history: {
     turn: number | null;
     from_act: string;
@@ -380,6 +382,14 @@ function normalizeThreadItems(value: unknown): ThreadItem[] {
   return [];
 }
 
+function normalizeAnchorProgress(value: unknown): { done: number; total: number } {
+  const p = asRecord(value);
+  return {
+    done: Math.max(0, optionalNumber(p.done) ?? 0),
+    total: Math.max(0, optionalNumber(p.total) ?? 0),
+  };
+}
+
 function normalizeStoryProgress(value: unknown): StoryProgressState {
   const progress = asRecord(value);
   return {
@@ -390,6 +400,8 @@ function normalizeStoryProgress(value: unknown): StoryProgressState {
     last_advance_turn: optionalNumber(progress.last_advance_turn),
     last_advance_reason: asString(progress.last_advance_reason),
     last_anchor_update_turn: optionalNumber(progress.last_anchor_update_turn),
+    next_act: asString(progress.next_act),
+    current_act_anchor_progress: normalizeAnchorProgress(progress.current_act_anchor_progress),
     act_history: asRecordList(progress.act_history)
       .map((item) => ({
         turn: optionalNumber(item.turn),

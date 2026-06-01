@@ -221,3 +221,44 @@ def test_relationship_alias_merge_takes_latest_not_max() -> None:
     _merge_relationship_record(target, incoming)
     assert target["trust"] == 60  # 不再取 max(80,60)=80
     assert target["conflict"] == 5  # 关系下降被保留，而非旧高值 50
+
+
+# ---------- bug 修复：hidden 投影越界（A）+ 锚点进度展示（B）----------
+
+
+def test_scene_projection_hidden_limited_to_near_acts() -> None:
+    """hidden 只投影当前幕 + 下一幕，远期幕不给 GM（修「女主名字提前出现」剧透）。"""
+    from app.services.state_v2 import project_state_for_scene
+
+    v2 = {
+        "story_progress": {"current_act": "act_2", "next_act": "act_3"},
+        "quest_log": {
+            "active": [],
+            "completed": [],
+            "hidden": [
+                {"title": "角色F线", "act_id": "act_2", "objective": "o2"},
+                {"title": "角色A线", "act_id": "act_3", "objective": "o3"},
+                {"title": "角色B线", "act_id": "act_4", "objective": "o4"},
+            ],
+        },
+    }
+    titles = [h["title"] for h in project_state_for_scene(v2)["quest_log"]["hidden"]]
+    assert "角色F线" in titles and "角色A线" in titles  # 当前 + 下一幕给 GM 铺垫
+    assert "角色B线" not in titles  # 远期幕被挡，不剧透
+
+
+def test_story_progress_carries_current_act_anchor_progress() -> None:
+    """story_progress 投影带出当前幕锚点进度（done/total）+ next_act，供前端正确展示（B）。"""
+    from app.services.state_v2 import state_v2_view
+
+    sp = state_v2_view(
+        {
+            "story_progress": {
+                "current_act": "act_2",
+                "next_act": "act_3",
+                "current_act_anchor_progress": {"done": 0, "total": 7},
+            }
+        }
+    )["story_progress"]
+    assert sp["current_act_anchor_progress"] == {"done": 0, "total": 7}
+    assert sp["next_act"] == "act_3"

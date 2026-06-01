@@ -943,6 +943,17 @@ def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: A
 
     _sync_main_quests(state, settings, config, current_act, evidence, activity_evidence)
 
+    # 存当前幕派生进度，供投影/前端用：
+    # B —— 锚点进度按"当前幕"算（done/total），而非全局 completed_anchors 总数（含历史幕）；
+    # A —— hidden 场景投影据 current_act + next_act 限定，给 GM 近期铺垫、不剧透远期幕。
+    progress["next_act"] = transition_target_for_act(config, current_act)
+    required_ids = completion_anchor_ids_for_act(config, current_act, required_only=True)
+    done_ids = {_identity(anchor) for anchor in anchor_target if _identity(anchor)}
+    progress["current_act_anchor_progress"] = {
+        "done": sum(1 for aid in required_ids if aid in done_ids),
+        "total": len(required_ids),
+    }
+
 
 def _advance_story_progress(
     progress: dict[str, Any],

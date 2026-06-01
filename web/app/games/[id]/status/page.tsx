@@ -200,7 +200,12 @@ function formatStoryProgress(progress: StateV2["story_progress"]): string {
 }
 
 function formatAnchorProgress(progress: StateV2["story_progress"]): string {
-  const countLabel = `${progress.completed_anchors.length} 个已完成`;
+  // 显示"本幕已完成/required 总数"，而非全局 completed_anchors（含历史幕）造成的误导。
+  const p = progress.current_act_anchor_progress;
+  const countLabel =
+    p && p.total > 0
+      ? `本幕 ${p.done}/${p.total} 锚点`
+      : `${progress.completed_anchors.length} 个已完成`;
   const readyLabel = progress.ready_for_next_act ? "可进入下一幕" : "未满足过渡条件";
   return `${countLabel} · ${readyLabel}`;
 }
