@@ -335,7 +335,19 @@ def _story_progress(value: Any) -> dict[str, Any]:
         ),
         "act_history": _act_history(progress.get("act_history")),
         "anchor_history": _anchor_history(progress.get("anchor_history")),
+        "next_act": _first_text(progress.get("next_act")),
+        "current_act_anchor_progress": _anchor_progress(
+            progress.get("current_act_anchor_progress")
+        ),
     }
+
+
+def _anchor_progress(value: Any) -> dict[str, int]:
+    """当前幕锚点进度 {done, total}，供前端展示"本幕 done/total"而非全局 completed 总数。"""
+    data = _mapping(value)
+    done = _optional_nonnegative_int(data.get("done")) or 0
+    total = _optional_nonnegative_int(data.get("total")) or 0
+    return {"done": done, "total": total}
 
 
 def _act_history(value: Any) -> list[dict[str, Any]]:
@@ -632,13 +644,15 @@ def project_state_for_scene(state_v2: dict[str, Any] | None) -> dict[str, Any]:
             for q in completed
             if isinstance(q, dict) and (q.get("title") or q.get("name"))
         ]
-        # hidden 任务保留给 GM（用户决策 P3-12）：只给标题 + 目标，让 GM 知道有哪些隐藏目标
-        # 可提前埋线铺垫，不暴露完成过程细节。hidden 是"当前局已存在、玩家未激活的目标"，
-        # 与 next_act 未来幕剧透是两回事（后者另有裁剪机制）。
+        # hidden 任务保留给 GM（用户决策 P3-12）：只给标题 + 目标，让 GM 提前埋线铺垫。
+        # 但只投影"当前幕 + 下一幕"的隐藏目标——给近期铺垫空间，不把远期幕（act_4/5）的
+        # 角色/剧情提前抛给 GM 造成剧透（修 bug：女主名字提前出现）。
+        sp = state_v2.get("story_progress") or {}
+        near_acts = {a for a in (sp.get("current_act"), sp.get("next_act")) if a}
         hidden = [
             {key: q.get(key) for key in ("title", "name", "objective") if q.get(key)}
             for q in (quest_log.get("hidden") or [])
-            if isinstance(q, dict)
+            if isinstance(q, dict) and (not near_acts or q.get("act_id") in near_acts)
         ]
         projected["quest_log"] = {
             "active": quest_log.get("active") or [],

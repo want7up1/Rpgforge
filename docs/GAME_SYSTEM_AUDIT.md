@@ -138,3 +138,32 @@
 - 每阶段新增回归用例（如长句线索 resolve、quest_id 归一、否定句不误判完成、证据池不含线索）。
 - 改 apply/state_applier 逻辑后：**对真实存档跑 `rebuild_game_state` 并 diff，确认存量自动修复且无意外漂移**。
 - prompt 改动记录规则编号到 OPTIMIZATION_PLAN.md。
+
+## 6. 任务系统增强（设计已定，待实现）
+
+> 2026-06-01 用户需求 + 决策。当前任务系统只有主线骨架（`main_quest_path`），**缺支线、缺完成奖励**。本章记录完整设计，待实现（用户：先记录，实现稍后）。
+
+### 需求
+
+1. **主线任务**：推动主线剧情的规定流程。现状有 `main_quest_path` 骨架（流程/锚点/完成判定），需完善：前端清晰展示 + **完成奖励**。
+2. **支线任务**：横向丰富剧情、随剧情进展触发，**GM 即兴**产生。
+3. **完成后才消失**：已有（completed 分桶 + `_preserved_non_main_quests` 保留）。
+4. **完成奖励/加成**：当前完全没有（XP 仅由 GM 即兴 `xp_events` 给、不绑任务），需新增。
+
+### 决策
+
+- **支线 = GM 即兴 + 接受才生效（路线 B）**：GM 剧情里口头抛出支线机会（不建任务）；玩家明确接受/开始执行后 extractor 才创建 `active` 支线（`source="explicit"`）；拒绝/忽略则不建、自然消散。
+- **任务区分展示**：投影 `_quest_log` 加 `track`（`"main"`=主线/锚点派生，`"side"`=explicit 支线）；前端「主线 / 支线」两栏，各含进行中 + 已完成。
+- **奖励维度**：XP（progression/skill）+ 物品（inventory）+ 能力/技能解锁（abilities/skills）+ 属性/关系加成（protagonist/relationships）——全部复用现有 state delta 字段。
+- **奖励方式**：**主线预定义 + 代码自动结算；支线 GM 即兴**。
+  - 主线：剧本 `main_quest_path` 节点加 `reward` 结构；任务完成（status→completed）时代码结算（转对应 delta 应用）+ GM 叙事呈现。
+  - 支线：GM 完成时叙事即兴给，extractor 提取为 xp_events/inventory_add 等 delta（复用现有链路）。
+
+### 待实现模块
+
+- [ ] **M1 支线创建（B）**：`extract_state_delta.md` 规则 21 补"接受才创建支线"引导。
+- [ ] **M2 任务区分展示**：`_quest_log` 加 `track`；前端主线/支线两栏 + 前端类型。
+- [ ] **M3 主线奖励定义**：生成侧 `main_quest_path` 节点加 `reward` 字段 + 生成 prompt 引导 + `validate_story_settings` 校验。
+- [ ] **M4 奖励结算**：任务 status→completed 时主线按 `reward` 自动结算（应用 delta）；**防重复结算**（标记 `reward_granted`，event-sourcing 重放幂等）。
+- [ ] **M5 支线奖励**：extractor 在支线完成回合提取 GM 给的奖励 delta（现有链路，prompt 引导）。
+- [ ] **M6 前端奖励展示**：任务完成时显示获得的奖励。

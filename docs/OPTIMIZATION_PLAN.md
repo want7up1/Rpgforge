@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 29 — 实现计划第一批：GM hidden 投影 + 关系合并取最新（8.1 + 6.1） |
+| 最近一轮 | Round 30 — 修复 8.1 hidden 投影越界（女主提前出现）+ 锚点进度展示误导 |
 | 完成日期 | 2026-06-01 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
@@ -23,6 +23,20 @@
 ---
 
 ## 1. 已完成
+
+### Round 30 (2026-06-01) — 修两个 bug：8.1 hidden 投影越界 + 锚点进度展示
+
+用户续玩 act_2 第 22 回合发现：① 女主名字提前出现 ② 状态页「幕完成锚点 5个已完成·未满足过渡条件」自相矛盾。查实为**两个独立问题**。
+
+**A（真 bug，8.1 副作用）hidden 投影越界**：Round 29 的 8.1 给 GM 投影了**全部** hidden（含 act_4/5 远期女主：角色B/角色C…），GM 据此把还没到的女主提前抛出。修：`project_state_for_scene` 的 hidden 只投影**当前幕 + 下一幕**（`current_act` + 新增派生 `next_act`）。实测真实存档 hidden 10→5 条，act_4/5 远期女主被挡。
+
+**B（展示 bug，既有）锚点进度算错**：前端 `formatAnchorProgress` 用全局 `completed_anchors.length`（含历史 act_1 的 5 个）显示"5个已完成"，但当前幕 act_2 实际 0/7。"未满足过渡条件"本身**正确**（act_2 required 锚点未完成、不该过渡）。修：`story_progress` 新增派生 `current_act_anchor_progress`（当前幕 done/total），前端改显示「本幕 0/7」。
+
+**实现**：`_sync_story_progress_and_quests`（当前幕最终确定后）存 `next_act` + `current_act_anchor_progress`；`state_v2._story_progress` 投影带出（+ `_anchor_progress` 规整）；`project_state_for_scene` 用 `near_acts={current_act,next_act}` 过滤 hidden；前端 `stateV2.ts` 类型/归一 + `formatAnchorProgress` 展示。
+
+**验证**：容器内 `pytest tests/` **180 passed**（+2 用例）、ruff + tsc 全过；真实存档 rebuild 实测 `next_act=act_3`、`anchor_progress={done:0,total:7}`、hidden 限 act_2/3。**部署**：`docker compose up -d --build api worker web`。
+
+> A 的铺垫范围取"当前幕 + 下一幕"（GM 可为即将到来的 act_3 埋线）；若需更严（只当前幕、连下一幕都不提前），改 `near_acts` 一处即可。
 
 ### Round 29 (2026-06-01) — 实现计划第一批：GM hidden 投影 + 关系合并取最新（8.1 + 6.1）
 
