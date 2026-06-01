@@ -13,16 +13,28 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 28 — 游戏系统修复收尾：死代码清理 + 路线图对齐 + 真实续玩验证 |
+| 最近一轮 | Round 29 — 实现计划第一批：GM hidden 投影 + 关系合并取最新（8.1 + 6.1） |
 | 完成日期 | 2026-06-01 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
 | ✅ 验证状态 | 容器内 159 pytest 全过；真实游玩验证两项硬成果：同场景重述修复（对照）、cache 命中率 ~5%→稳态 60%+（对照）。judge 量化基线 canon/safety/state 5/5（偏乐观，无严格改前对照） |
-| 下一步建议 | 游戏系统修复阶段 1-5 + 泳道(6前端/7) + 死代码清理已全部落地（§1 Round 26/27/28，176 pytest + 真实续玩 rebuild 实证）。**P0 + 全部 P1 + 主要 P2 已闭环**。剩余评估后**暂缓**项：3.4 证据池白名单、4.2 _sync_current_act required 校验、5.2 NPC 定位、5.4/6.4 P3 健壮化、6.1 关系合并/分裂——理由（P2 未暴露 / 砍 semantic 后边际收益低 / 避免新脆弱匹配）见 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) §4 |
+| 下一步建议 | 游戏系统修复 + 实现计划**第一批**（8.1 GM hidden 投影 + 6.1 关系取最新）已落地（§1 Round 26-29，178 pytest + 真实存档实证）。**P0 + 全部 P1 + 主要 P2 + 玩法价值项已闭环**。剩余按 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) §4：第二批（库存防负 / `_merge_mapping` 守卫 / 技能能力同名去重，可选）+ 第三批（NPC 定位 / 4.2 / 3.4 脆弱匹配加固，ROI 递减、建议结案）。均为可选 P3/低 ROI 项 |
 
 ---
 
 ## 1. 已完成
+
+### Round 29 (2026-06-01) — 实现计划第一批：GM hidden 投影 + 关系合并取最新（8.1 + 6.1）
+
+按 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) §4 实现计划第一批（玩法价值项）落地。
+
+**8.1（P3-12，用户决策）**：`state_v2.project_state_for_scene` 给 GM 的 quest_log 投影增加 `hidden` 桶（标题 + objective）。**用户决策：hidden 任务给 GM 看、用于剧情铺垫，非防剧透对象**（防剧透由 next_act 裁剪负责；hidden 是"当前局已存在、玩家未激活的目标"）。实测真实存档 GM 投影现含 12 条 hidden（首次收服俘虏 / 角色D异能觉醒 / 救援角色F…），GM 可提前埋线。
+
+**6.1（P2-11）**：`_merge_relationship_record` 数值轴 `max` → 取较新（incoming 是 relationships 列表中较后/较新回合的同人记录）。修复别名合并后"关系只升不降"（和解后降低的 conflict 被旧高值覆盖）。**P2-12 分裂**：现有 `_merge_relationship_aliases`（事件后用 `npc.aliases` 归一）已尽力，根治缺口在 LLM 提取的 `npc.aliases` 完整性，代码层无法无中生有关联缺失别名——保持现状（诚实记录，6.1 勾选表 P2-11 落地 + P2-12 评估为现状已尽力）。
+
+**验证**：容器内 `pytest tests/` **178 passed**（+2 用例：GM 投影保留 hidden、关系合并取较新）、ruff 全过；真实存档 rebuild 回归正常（关系数值不变、GM 投影 hidden 实测 12 条生效）。**部署**：`docker compose up -d --build api worker`。
+
+> 顺带发现：角色G关系 `trust=None`（既有小数据问题，非本轮引入，未处理）。剩余第二批（库存防负 / `_merge_mapping` 守卫 / 技能能力同名去重，可选）+ 第三批（脆弱匹配加固，ROI 递减建议结案）见 §4。
 
 ### Round 28 (2026-06-01) — 游戏系统修复收尾：死代码清理 + 路线图对齐 + 真实续玩验证
 

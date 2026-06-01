@@ -191,3 +191,33 @@ def test_relationship_unknown_axis_skipped() -> None:
     assert all(
         r.get("trust", 0) == 0 for r in state.get("relationships", []) if isinstance(r, dict)
     )
+
+
+# ---------- 第一批：GM hidden 投影（8.1）+ 关系合并取最新（6.1/P2-11）----------
+
+
+def test_scene_projection_keeps_hidden_quests_for_gm() -> None:
+    """project_state_for_scene 保留 hidden 任务（标题+目标）给 GM 铺垫（8.1 / P3-12）。"""
+    from app.services.state_v2 import project_state_for_scene
+
+    v2 = {
+        "quest_log": {
+            "active": [{"name": "A", "objective": "做A"}],
+            "completed": [{"title": "C"}],
+            "hidden": [{"title": "隐藏目标X", "objective": "未来揭示Y", "status": "hidden"}],
+        }
+    }
+    ql = project_state_for_scene(v2)["quest_log"]
+    assert ql["completed_titles"] == ["C"]
+    assert ql["hidden"] == [{"title": "隐藏目标X", "objective": "未来揭示Y"}]
+
+
+def test_relationship_alias_merge_takes_latest_not_max() -> None:
+    """别名合并关系数值取较新（incoming）而非 max，保留"关系下降"（6.1 / P2-11）。"""
+    from app.services.state_applier import _merge_relationship_record
+
+    target = {"npc": "角色D", "trust": 80, "conflict": 50}
+    incoming = {"npc": "角色D", "trust": 60, "conflict": 5}  # 较新：和解后 conflict 降
+    _merge_relationship_record(target, incoming)
+    assert target["trust"] == 60  # 不再取 max(80,60)=80
+    assert target["conflict"] == 5  # 关系下降被保留，而非旧高值 50

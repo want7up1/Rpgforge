@@ -632,9 +632,18 @@ def project_state_for_scene(state_v2: dict[str, Any] | None) -> dict[str, Any]:
             for q in completed
             if isinstance(q, dict) and (q.get("title") or q.get("name"))
         ]
+        # hidden 任务保留给 GM（用户决策 P3-12）：只给标题 + 目标，让 GM 知道有哪些隐藏目标
+        # 可提前埋线铺垫，不暴露完成过程细节。hidden 是"当前局已存在、玩家未激活的目标"，
+        # 与 next_act 未来幕剧透是两回事（后者另有裁剪机制）。
+        hidden = [
+            {key: q.get(key) for key in ("title", "name", "objective") if q.get(key)}
+            for q in (quest_log.get("hidden") or [])
+            if isinstance(q, dict)
+        ]
         projected["quest_log"] = {
             "active": quest_log.get("active") or [],
             "completed_titles": titles,
+            "hidden": hidden,
         }
 
     active_scene = state_v2.get("active_scene") or {}
