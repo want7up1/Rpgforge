@@ -13,16 +13,33 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 26 — 游戏系统修复第一批：契约根治 + 线索 resolve（阶段 1-2 + 结算P0/前端/生成侧泳道并行） |
+| 最近一轮 | Round 27 — 游戏系统修复第二批：砍脆弱字符串匹配 + 状态机 + 基础字段（阶段 3-5） |
 | 完成日期 | 2026-06-01 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
 | ✅ 验证状态 | 容器内 159 pytest 全过；真实游玩验证两项硬成果：同场景重述修复（对照）、cache 命中率 ~5%→稳态 60%+（对照）。judge 量化基线 canon/safety/state 5/5（偏乐观，无严格改前对照） |
-| 下一步建议 | 游戏系统修复进行中（见 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md)）。阶段 1-2（契约+线索）+ 泳道（6前端/7生成侧）已落地验证（§1 Round 26，173 pytest + 真实存档 rebuild 实证）。**下一步阶段 3（砍脆弱字符串匹配，高风险，须 rebuild 回归）→ 4 状态机 → 5 基础字段数值 → 6 关系投影后端** |
+| 下一步建议 | 游戏系统修复阶段 1-5 + 泳道(6前端/7) 已全部落地验证（§1 Round 26/27，176 pytest + 真实存档 rebuild 实证）。**P0 + 全部 P1 + 主要 P2 已闭环**。剩余：阶段 6 后端关系合并/分裂、3.4 证据池白名单、NPC 定位收紧、P3、dead code 清理——均评估后**暂缓**（P2 真实数据未暴露 / 砍 semantic 后边际收益低 / 避免引入新脆弱匹配），理由见 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) |
 
 ---
 
 ## 1. 已完成
+
+### Round 27 (2026-06-01) — 游戏系统修复第二批：砍脆弱字符串匹配 + 状态机 + 基础字段（阶段 3-5）
+
+承接 Round 26，串行落地剧情核心改动（`state_applier`，高风险区，逐阶段 rebuild 回归）。
+
+**阶段 3 砍脆弱字符串匹配（Round 16 教训彻底落地）**：① 锚点完成 `_anchor_completion_reason` 删第③层 `_semantic_completion_matches`（滑窗碎片/字符级模糊/字符顺序匹配），只保留整串(≥6字)+整短语(≥2)高精度命中 + LLM 显式 `completed_anchors`；② 任务完成 `_quest_completion_evident` 删 semantic + 碎片 marker 兜底；③ 活动证据 `_activity_markers` 去掉 2-3 字后缀碎片（保留完整词/去动词前缀），消除"角色D"等在场角色名把未来幕误判为"已在发生"；④ `_quest_status_bucket` 加否定词检测（"未完成/无法解决/进行中"不再判 completed）。
+> `_semantic_completion_matches` 及其依赖（`_anchor_action_*`/`_anchor_key_*`/`_term_fragments`/`_ordered_completion_match`/`_useful_anchor_fragment`）已无引用、成 dead code，待清理轮删除（测试已确认无引用）。
+
+**阶段 4 状态机**：`_apply_story_progress` 加白名单校验（`_anchor_ids_for_acts`）——LLM 显式 `completed_anchors` 只接受"当前幕/已完成幕"的合法 anchor，拒绝未来幕 anchor_id，防 `_sync_current_act_from_completed_anchors` 据此直接跳幕、跳过中间幕 required 校验。
+
+**阶段 5 基础字段数值**：① 库存删除 `_remove_inventory_item` 改按归一名称(item/name/title 跨 str/dict)匹配（修删除指令用 name、库存存 item 键时静默失效，P1）；② `_apply_relationship_event` 未知轴跳过（不默认计入 trust，P2）。
+
+**rebuild 回归验证（真实存档）**：current_act=act_1 不跳幕、completed_acts 空、completed_anchors 3 个不漂移（base_secured 靠整串"建立[地点]"、另两个靠 LLM 显式，砍 semantic 无影响）、线索仍正确 resolved。**诚实权衡**：`main_quest_2`「营救角色D」由 completed→active——它原靠脆弱 semantic 判完成（角色D已救，但 quest completion_signal 与锚点文案仅语义相似、非整串），砍 semantic 后改靠 LLM 显式(规则21)/act 完成兜底；这是"消除脆弱误判"的合理代价，强行加 quest↔anchor 字符串联动会重蹈 Round 16 覆辙，**不做**。
+
+**验证**：容器内 `pytest tests/` **176 passed**（`test_gameplay` 两处旧 semantic 用例已更新为整短语命中/整词活动匹配；新增 `test_game_system_fixes` 否定词/库存/axis 用例）。**部署**：`docker compose up -d --build api worker`。
+
+**评估后暂缓（非遗漏，见 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md)）**：阶段 6 后端关系合并取max/分裂（P2，真实数据未暴露，根治需 npc.aliases 完整性）、阶段 3.4 证据池白名单（砍 semantic 后边际收益低、漏收卡幕风险高）、NPC 场景定位收紧（P2，触发面窄）、P3 项、dead code 清理。
 
 ### Round 26 (2026-06-01) — 游戏系统修复第一批：契约根治 + 线索 resolve（阶段 1-2 + 泳道）
 

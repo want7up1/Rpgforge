@@ -321,16 +321,23 @@ def _narrative_places_npc_in_changed_scene(
     )
 
 
+def _inventory_name(item: Any) -> str:
+    if isinstance(item, dict):
+        return _text(item.get("item") or item.get("name") or item.get("title"))
+    return _text(item)
+
+
 def _remove_inventory_item(inventory: list[Any], item: Any) -> None:
     if item in inventory:
         inventory.remove(item)
         return
-    name = item.get("name") if isinstance(item, dict) else str(item)
+    # 按归一化名称（兼容 item/name/title、跨 str/dict）匹配，避免删除指令用 name、
+    # 而库存项存 item 键时静默匹配失败、物品删不掉。
+    target = _inventory_name(item)
+    if not target:
+        return
     for existing in list(inventory):
-        if isinstance(existing, dict) and existing.get("name") == name:
-            inventory.remove(existing)
-            return
-        if isinstance(existing, str) and existing == name:
+        if _inventory_name(existing) == target:
             inventory.remove(existing)
             return
 
@@ -860,6 +867,17 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
     if not isinstance(anchor_target, list):
         anchor_target = []
         progress["completed_anchors"] = anchor_target
+    # 白名单校验：只接受属于"当前幕或已完成幕"的锚点，拒绝 LLM 误报的未来幕 anchor_id；
+    # 否则 _sync_current_act_from_completed_anchors 会据"最远完成锚点"直接跳幕、跳过中间幕
+    # 的 required 校验（剧透/破坏剧情）。剧本无锚点时不过滤（兜底）。
+    legal_acts = {previous_act, *(_text(act) for act in completed_target if _text(act))}
+    legal_anchor_ids = _anchor_ids_for_acts(config, legal_acts)
+    if legal_anchor_ids:
+        completed_anchors = [
+            anchor_id
+            for anchor_id in completed_anchors
+            if _identity(anchor_id) in legal_anchor_ids
+        ]
     new_anchor_ids: list[str] = []
     for anchor_id in completed_anchors:
         if anchor_id and anchor_id not in anchor_target:
@@ -1045,6 +1063,22 @@ def _advance_story_progress(
         del history[:-20]
 
 
+def _anchor_ids_for_acts(config: Any, act_ids: set[str]) -> set[str]:
+    """收集给定幕集合（当前幕 + 已完成幕）下所有 completion_anchors 的 id，作为合法白名单。"""
+    ids: set[str] = set()
+    if not act_ids:
+        return ids
+    for act in _script_acts(config):
+        if not set(_act_identifiers(act)) & act_ids:
+            continue
+        for anchor in act.get("completion_anchors") or []:
+            if isinstance(anchor, dict):
+                anchor_id = _text(anchor.get("id"))
+                if anchor_id:
+                    ids.add(anchor_id)
+    return ids
+
+
 def _sync_current_act_from_completed_anchors(
     progress: dict[str, Any],
     config: Any,
@@ -1160,14 +1194,9 @@ def _anchor_completion_reason(anchor: dict[str, Any], evidence: Any) -> str:
         if len(matched) >= 2 and len(matched) >= max(2, len(phrases) // 2):
             return f"根据当前状态证据补全：{'；'.join(matched[:3])}"
 
-    semantic_text = _text(anchor.get("completion_signal")) or "\n".join(
-        _text(anchor.get(key)) for key in ("title", "description")
-    )
-    for unit in evidence_units:
-        semantic_matches = _semantic_completion_matches(semantic_text, unit)
-        if semantic_matches:
-            return f"根据当前状态证据补全：{'；'.join(semantic_matches[:4])}"
-
+    # Round 16 教训：不再用滑窗碎片/字符级模糊反推锚点完成（误判率高、会被当前角色名与
+    # 通用词触发）。锚点自动完成只信整串 completion_signal/title/description（≥6 字）+ 整短语
+    # 高精度命中；其余靠 LLM 显式 completed_anchors（extract_state_delta 规则 10）。
     return ""
 
 
@@ -1910,10 +1939,12 @@ def _activity_text_matches(source_text: str, activity_evidence: str) -> bool:
     if not source_text or not activity_evidence:
         return False
 
+    # 整短语（≥6 字）高精度命中。
     for phrase in _meaningful_phrases(source_text):
         if len(phrase) >= 6 and phrase in activity_evidence:
             return True
-
+    # 完整词 marker ≥2 命中。markers 已去掉 2-3 字后缀碎片（见 _activity_markers），只用
+    # 分词完整词 / 去动词前缀的核心名词，避免碎片把在场角色名、通用词误判为活动证据。
     markers = _activity_markers(source_text)
     matched = [marker for marker in markers if marker in activity_evidence]
     return len(matched) >= 2
@@ -1930,13 +1961,12 @@ def _activity_markers(value: str) -> list[str]:
 
     def add_variants(text: str) -> None:
         add(text)
+        # \u53bb\u52a8\u8bcd\u524d\u7f00\uff08\u63a2\u7d22/\u8425\u6551\u7b49\uff09\u4fdd\u7559\u6838\u5fc3\u540d\u8bcd\uff1b\u4e0d\u518d\u751f\u6210 text[-2:]/text[-3:] \u540e\u7f00\u788e\u7247
+        # \uff08Round 16 \u6559\u8bad\uff1a2-3 \u5b57\u788e\u7247\u4f1a\u8ba9\u5728\u573a\u89d2\u8272\u540d/\u901a\u7528\u8bcd\u8bef\u547d\u4e2d\u3001\u628a\u672a\u6765\u5e55\u8bef\u5224\u4e3a\u5df2\u5728\u53d1\u751f\uff09\u3002
         for prefix in THREAD_QUEST_TOPIC_PREFIXES:
             if text.startswith(prefix):
                 add(text[len(prefix) :])
                 break
-        if re.fullmatch(r"[\u4e00-\u9fff]{2,5}", text):
-            add(text[-2:])
-            add(text[-3:])
 
     for phrase in re.split(r"[\s,，、。；;：:（）()——\-及和与]+", value):
         text = _text(phrase)
@@ -1965,13 +1995,8 @@ def _quest_completion_evident(quest: dict[str, Any], evidence: Any) -> bool:
             return True
         if any(len(item) >= 6 and item in unit for item in _meaningful_phrases(phrase)):
             return True
-        if _semantic_completion_matches(phrase, unit):
-            return True
-    markers = _activity_markers(phrase)
-    for unit in evidence_units:
-        matched = [marker for marker in markers if marker in unit]
-        if len(matched) >= max(3, min(4, len(markers))):
-            return True
+    # Round 16 教训：去掉 _semantic_completion_matches 与 _activity_markers 碎片兜底，
+    # 任务完成只信整串 completion_signal / 整短语（≥6 字）高精度命中，避免碎片误判。
     return False
 
 
@@ -2020,9 +2045,18 @@ def _preserved_non_main_quests(value: Any, main_quest_keys: set[str]) -> list[An
 
 def _quest_status_bucket(status: str) -> str:
     text = _text(status).lower()
+    # 先排除否定/进行中表述，避免含"完成/解决"二字的"未完成""无法解决""进行中"被误判为已完成。
+    if any(
+        neg in text
+        for neg in ("未完成", "未达成", "尚未", "无法", "未能", "没完成", "未解决", "进行中", "in_progress")
+    ):
+        return ""
     if any(marker in text for marker in ("失败", "放弃", "failed")):
         return "failed"
-    if any(marker in text for marker in ("完成", "解决", "closed", "complete", "done")):
+    if any(
+        marker in text
+        for marker in ("完成", "解决", "closed", "complete", "completed", "done", "已完成")
+    ):
         return "completed"
     return ""
 

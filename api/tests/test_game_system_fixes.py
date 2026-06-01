@@ -146,3 +146,45 @@ def test_evidence_pool_excludes_open_threads() -> None:
     blob = "\n".join(_state_evidence_units(state))
     assert "秘密线索XYZ" not in blob
     assert "事实ABC已发生" in blob
+
+
+# ---------- 阶段 3：砍脆弱字符串匹配 ----------
+
+
+def test_quest_status_bucket_rejects_negation() -> None:
+    """否定/进行中表述不被误判为完成（修 P2-4）。"""
+    from app.services.state_applier import _quest_status_bucket
+
+    assert _quest_status_bucket("未完成") == ""
+    assert _quest_status_bucket("尚未完成") == ""
+    assert _quest_status_bucket("无法解决") == ""
+    assert _quest_status_bucket("进行中") == ""
+    assert _quest_status_bucket("已完成") == "completed"
+    assert _quest_status_bucket("completed") == "completed"
+    assert _quest_status_bucket("failed") == "failed"
+
+
+# ---------- 阶段 5：基础字段与数值 ----------
+
+
+def test_inventory_remove_matches_across_item_and_name_keys() -> None:
+    """删除指令用 name、库存项存 item 键时也能匹配删除（修 P1-5）。"""
+    from app.services.state_applier import _apply_inventory
+
+    state = {"inventory": [{"item": "压缩干粮", "quantity": 3}]}
+    _apply_inventory(state, {"inventory_remove": [{"name": "压缩干粮"}]})
+    assert state["inventory"] == []
+
+
+def test_relationship_unknown_axis_skipped() -> None:
+    """未知关系轴不默认计入 trust（修 P2-10）。"""
+    from app.services.quantified_state import apply_quantified_state_events
+
+    state: dict = {}
+    apply_quantified_state_events(
+        state,
+        {"relationship_events": [{"npc": "测试NPC", "axis": "romance", "intensity": "major"}]},
+    )
+    assert all(
+        r.get("trust", 0) == 0 for r in state.get("relationships", []) if isinstance(r, dict)
+    )

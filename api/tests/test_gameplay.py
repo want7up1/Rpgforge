@@ -585,7 +585,7 @@ def test_state_delta_uses_configured_anchor_evidence_across_genres(
     assert next_state["story_progress"]["ready_for_next_act"] is False
 
 
-def test_state_delta_infers_anchor_from_semantic_completion_signal(
+def test_state_delta_infers_anchor_from_completion_signal_phrase(
     db_session,
 ) -> None:
     config = build_generated_config()
@@ -649,10 +649,9 @@ def test_state_delta_infers_anchor_from_semantic_completion_signal(
         **state.state_json,
         "location": {"current": "[地点]·通讯塔塔顶"},
         "known_facts": [
-            (
-                "无线电锁定北偏东二十度方向，完整截获角色B的求援广播；"
-                "信号源为北方研究所废墟通讯塔顶。"
-            )
+            # 整串包含 act_4_ye_found / main_quest_10 的 completion_signal（整短语高精度命中，
+            # 非脆弱 semantic 碎片）；ye_awakening 的 signal 未出现 → 不完成。
+            "追踪广播信号至研究所顶部，发现角色B独自一人在通讯塔广播求援。",
         ],
         "npcs": [
             {

@@ -252,7 +252,10 @@ def _apply_relationship_event(state: dict[str, Any], event: Any) -> None:
     if not npc_name:
         return
 
-    axis = RELATIONSHIP_AXES.get(_text(event.get("axis") or event.get("type")), "trust")
+    axis = RELATIONSHIP_AXES.get(_text(event.get("axis") or event.get("type")))
+    if axis is None:
+        # 未知轴（拼写错误/表外轴如 romance/desire）不默认计入 trust，避免污染信任值与 stage。
+        return
     relation = _upsert_named(state["relationships"], npc_name, id_key="npc")
     relation.setdefault("npc", npc_name)
     relation.setdefault("recent_events", [])
