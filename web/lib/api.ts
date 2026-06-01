@@ -516,6 +516,34 @@ export async function getTurns(gameId: string): Promise<TurnRead[]> {
   return requestJson<TurnRead[]>(`/api/games/${gameId}/turns`);
 }
 
+export type TurnAgentCost = {
+  agent: string;
+  model: string | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
+  tokens_reasoning: number | null;
+  cache_hit_tokens: number | null;
+  cache_miss_tokens: number | null;
+};
+
+export type TurnInsights = {
+  turn_id: string;
+  observation: Record<string, unknown> | null;
+  agents: TurnAgentCost[];
+  total_tokens_input: number;
+  total_tokens_output: number;
+  total_cache_hit_tokens: number;
+  total_cache_miss_tokens: number;
+  cache_hit_rate: number | null;
+};
+
+export async function fetchTurnInsights(
+  gameId: string,
+  turnId: string
+): Promise<TurnInsights> {
+  return requestJson<TurnInsights>(`/api/games/${gameId}/turns/${turnId}/insights`);
+}
+
 export async function createTurn(
   gameId: string,
   payload:

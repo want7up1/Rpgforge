@@ -3,7 +3,7 @@ from time import monotonic
 from typing import Literal
 
 from app.config import Settings, settings
-from app.services.agent_traces import extract_usage, record_trace
+from app.services.agent_traces import extract_cache_usage, extract_usage, record_trace
 from app.services.deepseek_client import (
     ChatCompletionResult,
     ChatCompletionStreamChunk,
@@ -201,7 +201,7 @@ class ModelRouter:
             tokens_input=tokens_in,
             tokens_output=tokens_out,
             tokens_reasoning=tokens_reason,
-            extras=trace_extras,
+            extras=_with_cache_extras(trace_extras, result.raw),
         )
         return result
 
@@ -217,14 +217,15 @@ class ModelRouter:
         extras: dict,
     ) -> AsyncIterator[ChatCompletionStreamChunk]:
         # 流式：在 generator 内部累积 content / reasoning，最后落 trace。
-        # 注意 stream 接口 DeepSeek 不返回 usage（除非显式 include_usage），
-        # 所以 tokens_* 字段会是 None；可以接受。
+        # 已开启 include_usage（见 deepseek_client），末尾 usage chunk 带 token + prefix
+        # cache 命中，捕获后落 trace（补全过去缺失的 GM 流式 token 观测）。
         start = monotonic()
         thinking = self._thinking_mode(reasoning_effort)
         trace_extras = {**extras, "thinking": thinking}
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         observed_model: str | None = None
+        last_usage: dict | None = None
         error: Exception | None = None
         try:
             async for chunk in self.client.chat_completion_stream(
@@ -237,6 +238,8 @@ class ModelRouter:
             ):
                 if chunk.model:
                     observed_model = chunk.model
+                if chunk.usage:
+                    last_usage = chunk.usage
                 if chunk.content_delta:
                     content_parts.append(chunk.content_delta)
                 if chunk.reasoning_delta:
@@ -257,6 +260,8 @@ class ModelRouter:
             else:
                 status = "success"
                 err_msg = None
+            raw_usage = {"usage": last_usage} if last_usage else None
+            tokens_in, tokens_out, tokens_reason = extract_usage(raw_usage)
             record_trace(
                 task_type=task_type,
                 model=observed_model or model,
@@ -266,7 +271,10 @@ class ModelRouter:
                 latency_ms=int((monotonic() - start) * 1000),
                 status=status,
                 error_message=err_msg,
-                extras=trace_extras,
+                tokens_input=tokens_in,
+                tokens_output=tokens_out,
+                tokens_reasoning=tokens_reason,
+                extras=_with_cache_extras(trace_extras, raw_usage),
             )
 
     @staticmethod
@@ -293,3 +301,16 @@ class ModelRouter:
             if slot == "pro"
             else effective_settings.flash_model
         )
+
+
+def _with_cache_extras(trace_extras: dict, raw: dict | None) -> dict:
+    """把 DeepSeek prefix cache 命中/未命中 token 并入 trace extras（缺失则不加）。"""
+    hit, miss = extract_cache_usage(raw)
+    if hit is None and miss is None:
+        return trace_extras
+    merged = dict(trace_extras)
+    if hit is not None:
+        merged["cache_hit_tokens"] = hit
+    if miss is not None:
+        merged["cache_miss_tokens"] = miss
+    return merged

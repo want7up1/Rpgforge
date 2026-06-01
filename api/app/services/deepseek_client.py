@@ -34,6 +34,8 @@ class ChatCompletionStreamChunk:
     content_delta: str = ""
     reasoning_delta: str = ""
     model: str | None = None
+    # include_usage 开启后，末尾 usage chunk 带完整 usage（含 prefix cache 命中）。
+    usage: dict[str, Any] | None = None
 
 
 class DeepSeekClient:
@@ -152,14 +154,26 @@ class DeepSeekClient:
                             continue
                         try:
                             event = json.loads(data_line)
-                            choice = event["choices"][0]
-                            delta = choice.get("delta") or {}
-                        except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
+                        except json.JSONDecodeError as exc:
                             raise DeepSeekAPIError("DeepSeek API 流式返回结构不符合预期。") from exc
+                        usage = event.get("usage")
+                        usage = usage if isinstance(usage, dict) else None
+                        choices = event.get("choices") or []
+                        if not choices:
+                            # include_usage 的末尾 chunk：choices 为空，只带 usage。
+                            if usage is not None:
+                                yield ChatCompletionStreamChunk(
+                                    model=str(event.get("model") or model),
+                                    usage=usage,
+                                )
+                            continue
+                        first = choices[0] if isinstance(choices[0], dict) else {}
+                        delta = first.get("delta") or {}
                         yield ChatCompletionStreamChunk(
                             content_delta=str(delta.get("content") or ""),
                             reasoning_delta=str(delta.get("reasoning_content") or ""),
                             model=str(event.get("model") or model),
+                            usage=usage,
                         )
         except httpx.HTTPStatusError as exc:
             body = exc.response.text[:1000]
@@ -195,6 +209,9 @@ class DeepSeekClient:
             "stream": stream,
             "thinking": {"type": thinking},
         }
+        if stream:
+            # 让流式也返回 usage（含 prefix cache 命中），用于 telemetry 观测。
+            payload["stream_options"] = {"include_usage": True}
         if thinking == "disabled":
             payload["temperature"] = temperature
         if json_mode:

@@ -7,10 +7,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal, get_db
+from app.models.agent_trace import AgentTrace
 from app.models.game import Game
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
-from app.schemas.turn import TurnCreate, TurnJobCreateResponse, TurnJobRead, TurnRead
+from app.schemas.turn import (
+    TurnAgentCost,
+    TurnCreate,
+    TurnInsights,
+    TurnJobCreateResponse,
+    TurnJobRead,
+    TurnRead,
+)
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
 from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
 from app.services.job_queue import enqueue_turn_job, reconcile_turn_job_liveness
@@ -104,6 +112,78 @@ def list_turns(game_id: UUID, db: Session = DB_DEPENDENCY) -> list[Turn]:
             select(Turn).where(Turn.game_id == game_id).order_by(Turn.turn_number.asc())
         ).all()
     )
+
+
+@router.get("/{turn_id}/insights", response_model=TurnInsights)
+def get_turn_insights(
+    game_id: UUID,
+    turn_id: UUID,
+    db: Session = DB_DEPENDENCY,
+) -> TurnInsights:
+    """本回合的观测（output_observation）+ 各 agent token/cache 消耗。
+
+    供游戏界面"本回合详情"折叠面板按需拉取。链路：Turn → TurnJob(turn_id) →
+    AgentTrace(job_kind='turn', job_id=turn_job.id)。
+    """
+    get_game_or_404_for_gameplay(db, game_id)
+    turn = db.scalars(
+        select(Turn).where(Turn.id == turn_id, Turn.game_id == game_id)
+    ).first()
+    if turn is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="回合不存在。")
+
+    turn_job = db.scalars(
+        select(TurnJob)
+        .where(TurnJob.turn_id == turn_id, TurnJob.game_id == game_id)
+        .order_by(TurnJob.created_at.desc())
+    ).first()
+
+    observation: dict | None = None
+    agents: list[TurnAgentCost] = []
+    if turn_job is not None:
+        runtime_inputs = turn_job.turn_runtime_inputs or {}
+        if isinstance(runtime_inputs, dict):
+            obs = runtime_inputs.get("output_observation")
+            observation = obs if isinstance(obs, dict) else None
+        traces = db.scalars(
+            select(AgentTrace)
+            .where(AgentTrace.job_kind == "turn", AgentTrace.job_id == turn_job.id)
+            .order_by(AgentTrace.created_at.asc())
+        ).all()
+        for trace in traces:
+            extras = trace.extras if isinstance(trace.extras, dict) else {}
+            agents.append(
+                TurnAgentCost(
+                    agent=trace.agent,
+                    model=trace.model,
+                    tokens_input=trace.tokens_input,
+                    tokens_output=trace.tokens_output,
+                    tokens_reasoning=trace.tokens_reasoning,
+                    cache_hit_tokens=_int_or_none(extras.get("cache_hit_tokens")),
+                    cache_miss_tokens=_int_or_none(extras.get("cache_miss_tokens")),
+                )
+            )
+
+    total_in = sum(a.tokens_input or 0 for a in agents)
+    total_out = sum(a.tokens_output or 0 for a in agents)
+    total_hit = sum(a.cache_hit_tokens or 0 for a in agents)
+    total_miss = sum(a.cache_miss_tokens or 0 for a in agents)
+    hit_rate = (total_hit / (total_hit + total_miss)) if (total_hit + total_miss) else None
+
+    return TurnInsights(
+        turn_id=turn_id,
+        observation=observation,
+        agents=agents,
+        total_tokens_input=total_in,
+        total_tokens_output=total_out,
+        total_cache_hit_tokens=total_hit,
+        total_cache_miss_tokens=total_miss,
+        cache_hit_rate=hit_rate,
+    )
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) else None
 
 
 @router.post("", response_model=TurnRead, status_code=status.HTTP_201_CREATED)
