@@ -120,6 +120,23 @@ def extract_usage(raw: dict[str, Any] | None) -> tuple[int | None, int | None, i
     return (tokens_input, tokens_output, tokens_reasoning)
 
 
+def extract_cache_usage(raw: dict[str, Any] | None) -> tuple[int | None, int | None]:
+    """从 DeepSeek 响应抽 prefix cache 命中/未命中 token（DeepSeek 官方自动缓存特性）。
+
+    命中部分 input 计费约为未命中的 1/10，是省 token 的核心杠杆（见
+    docs/PROMPT_ARCHITECTURE_REDESIGN.md 阶段 2）。返回 (cache_hit, cache_miss)。
+    """
+    if not isinstance(raw, dict):
+        return (None, None)
+    usage = raw.get("usage")
+    if not isinstance(usage, dict):
+        return (None, None)
+    return (
+        _int_or_none(usage.get("prompt_cache_hit_tokens")),
+        _int_or_none(usage.get("prompt_cache_miss_tokens")),
+    )
+
+
 def _int_or_none(value: Any) -> int | None:
     if value is None:
         return None

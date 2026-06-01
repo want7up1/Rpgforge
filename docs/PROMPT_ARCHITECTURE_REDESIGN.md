@@ -272,8 +272,10 @@
 落地序列：
 
 - **Round 20（线 B 起步）✅ 已落地**：验证器观测层 v1（`output_observer.py`）——generation_parameters 达标 + forbidden_reveals 整串命中 + canon 使用度 + 角色提及；**只写 telemetry**（`TurnJob.turn_runtime_inputs.output_observation`）；不干预生成。真实数据已暴露：GM 字数普遍仅达硬下限 70%、canon 14 专名每回合仅用 2-3 个。在场一致性留 v1.1（present_npcs 数据常空）。dashboard 展示 → Round 20b。
-- **Round 21（线 A）**：GM 场景投影 state（支柱 2，最大 token 黑洞）。
-- **Round 22（线 A）**：宪法层固化为字节稳定前缀 + 接通 DeepSeek prefix cache + GM 流式加 `stream_options.include_usage` 补 token/cache 观测。
+- **Round 20b ✅ 已落地**：修"新回合重述同场景"——gm_runtime.md 承接规则 + observer 开头重复检测。真实游玩对照证明明显改善。
+- **Round 21 ✅ 已落地（实际是字数治理，非场景投影）**：generation_parameters 篇幅指引提进 system（下限硬、上限让位于剧本详细描写）。注：原计划"Round 21=场景投影"未做，编号顺延——**场景投影（支柱 2）仍未做**，见下。
+- **Round 22（线 A）✅ 观测部分已落地**：流式加 `stream_options.include_usage` + `extract_cache_usage`，GM 流式 token 与 prefix cache 命中/未命中落进 `agent_traces.tokens_*` 与 `extras.cache_hit_tokens/cache_miss_tokens`。**这是"接通 caching"的可观测前提**——先看见命中率，再决定是否固化前缀。注：DeepSeek 自动 prefix cache 本就在工作（system 已是稳定前缀），本轮先量化现状；若命中率不足，再做"宪法层字节固化"提升。
+- **仍未做（设计文档剩余）**：① 场景投影 state（支柱 2，state_v2 占 user 41%，最大 token 黑洞）；② 宪法层字节固化（若 Round 22 观测显示命中率不足）；③ 剧本设定 RAG 化（支柱 4）；④ 验证器"干预"部分（canon/在场代码校验+轻量纠正）；⑤ dashboard 可视化（cache 命中率/token 趋势/observer 违规率）；⑥ turn_judge 系统化遵循度量化；⑦ 阶段 5 Director-GM 合并（默认不做）。
 - **持续**：turn_judge 评 canon_fidelity / safety / 状态一致性，观测风格类与整体遵守度趋势。
 
 ### 11.6 一句话总纲
