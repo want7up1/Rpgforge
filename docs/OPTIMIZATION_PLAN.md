@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 20 — 验证器观测层 v1：GM 输出后确定性校验，只写 telemetry 不重写 |
+| 最近一轮 | Round 20b — 修"新回合重述同场景"：prompt 承接规则 + 开头重复观测 |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,25 @@
 ---
 
 ## 1. 已完成
+
+### Round 20b (2026-05-29) — 修"新回合带上一回合内容"（同场景重述）
+
+**用户反馈现象**："有的时候新回合会带有上一回合的内容。"
+
+**诊断（数据驱动，非代码 bug）**：
+
+- 数据库最终 narrative 干净（difflib 检测无大段相邻重复）、前端流式用 `narrative_buffer` 全量替换、`streamTurnJob` 的 `latestJob` 每回合从空初始化——**流式/存储链路没有粘连 bug**。
+- 真正根因是 **GM 行为**：同一场景连续回合，GM 每回合用**逐字相同的 `### 场景标题` + 开场环境描写句**起头，而非承接上一回合推进。实测该游戏 19 回合中 6→7、7→8、13→14、18→19 的新回合开头与上一回合逐字重复 18–25 字（如反复用 `### [地点]厨房\n\n发电机低沉的嗡鸣声`）。`gm_runtime.md` 规则 12 只禁"无切换乱用标题"，没禁"同场景重复标题/开场"。
+
+**修复（治本 prompt + 观测验证，符合敲定方案，不重写不改形态）**：
+
+- `gm_runtime.md` 规则 12 追加：本回合与 recent_turns 最近一回合同场景（未明显切换）时，**不要重复上一回合的 `###` 场景标题和开场环境描写**，直接承接结尾与玩家行动推进。
+- `output_observer.observe_gm_output` 加 `previous_narrative` 参数 + `_observe_opening_repeat`：比较两回合开头窗口（各 60 字）的公共前缀，≥12 字则 flag（`opening_repeat`）。
+- `gameplay._record_output_observation` 把 `recent_turns[-1].gm_output` 作为 previous_narrative 传入——这样能用 telemetry 验证 prompt 改动是否真减少了重述。
+
+**改动文件**：`api/app/prompts/gm_runtime.md`、`api/app/services/output_observer.py`、`api/app/services/gameplay.py`、`api/tests/test_output_observer.py`（+2 用例）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **148 passed**，ruff 通过。
 
 ### Round 20 (2026-05-29) — 验证器观测层 v1（敲定方案线 B 起步：只观测不重写）
 

@@ -92,6 +92,38 @@ def test_observer_canon_unused_tracked() -> None:
     assert obs["forbidden_reveal_hits"] == []
 
 
+def test_observer_flags_opening_repeat() -> None:
+    """新回合开头逐字重复上一回合开头 → flag（重述同场景，Round 20b）。"""
+    prev = "### [地点]厨房\n\n发电机低沉的嗡鸣声中，主角坐下。"
+    cur = "### [地点]厨房\n\n发电机低沉的嗡鸣声里，他起身走向角色D。"
+    obs = observe_gm_output(
+        narrative=cur,
+        visible_clues=[],
+        action_options=_options(4),
+        runtime_story=_RUNTIME_STORY,
+        generation_parameters=_GEN_PARAMS,
+        previous_narrative=prev,
+    )
+    assert obs["opening_repeat"]["repeat_chars"] >= 12
+    assert any("开头与上一回合重复" in f for f in obs["flags"])
+
+
+def test_observer_no_opening_repeat_when_scene_changes() -> None:
+    """场景切换、开头不同 → 不 flag。"""
+    prev = "### [地点]厨房\n\n发电机低沉的嗡鸣声中，主角坐下。"
+    cur = "### 城南医院·后勤通道\n\n消毒水的气味扑面而来，角色D紧跟其后。"
+    obs = observe_gm_output(
+        narrative=cur,
+        visible_clues=[],
+        action_options=_options(4),
+        runtime_story=_RUNTIME_STORY,
+        generation_parameters=_GEN_PARAMS,
+        previous_narrative=prev,
+    )
+    assert obs["opening_repeat"]["repeat_chars"] < 12
+    assert not any("开头与上一回合重复" in f for f in obs["flags"])
+
+
 def test_observer_robust_to_empty_inputs() -> None:
     obs = observe_gm_output(
         narrative="",

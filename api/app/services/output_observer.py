@@ -26,6 +26,9 @@ _HEADING_RE = re.compile(r"^#{3,4}\s+\S", re.MULTILINE)
 # 重点强调：成对 **...**（不跨行、内部非空非星号）。
 _EMPHASIS_RE = re.compile(r"\*\*[^*\n]+\*\*")
 _BIG = 10**9
+# 开头重复检测：比较两回合各自前 N 字，公共前缀 >= 阈值则判为"重述同场景"。
+_OPENING_WINDOW = 60
+_OPENING_REPEAT_MIN_CHARS = 12
 
 
 def observe_gm_output(
@@ -35,6 +38,7 @@ def observe_gm_output(
     action_options: list[Any] | None,
     runtime_story: dict[str, Any] | None,
     generation_parameters: dict[str, int] | None,
+    previous_narrative: str | None = None,
 ) -> dict[str, Any]:
     """对一次 GM 输出做确定性观测，返回可 JSON 序列化的观测结果（含人类可读 flags）。"""
     narrative = narrative or ""
@@ -51,18 +55,46 @@ def observe_gm_output(
     forbidden_hits = _observe_forbidden(full_text, rs)
     canon = _observe_canon(narrative, rs)
     characters_mentioned = _observe_characters(full_text, rs)
+    opening_repeat = _observe_opening_repeat(narrative, previous_narrative or "")
 
     flags = list(gen_flags)
     if forbidden_hits:
         flags.append("命中当前幕禁止揭露项（整串）：" + "、".join(forbidden_hits[:5]))
+    if opening_repeat["repeat_chars"] >= _OPENING_REPEAT_MIN_CHARS:
+        flags.append(
+            f"开头与上一回合重复 {opening_repeat['repeat_chars']} 字"
+            f"（疑似重述同场景）：{opening_repeat['repeat_text'][:40]}"
+        )
 
     return {
         "generation": generation,
         "forbidden_reveal_hits": forbidden_hits,
         "canon": canon,
         "characters_mentioned": characters_mentioned,
+        "opening_repeat": opening_repeat,
         "flags": flags,
     }
+
+
+def _observe_opening_repeat(narrative: str, previous_narrative: str) -> dict[str, Any]:
+    """检测本回合开头是否逐字重复上一回合开头（GM 在同场景重述场景标题/开场环境）。
+
+    取两回合各自的开头窗口做最长公共前缀式匹配（整串、去除两端空白后比较）。这是
+    "新回合带上一回合内容"的主要机制（见 Round 20b 诊断）。只观测、写 flag，不重写。
+    """
+    cur = (narrative or "").strip()
+    prev = (previous_narrative or "").strip()
+    if not cur or not prev:
+        return {"repeat_chars": 0, "repeat_text": ""}
+    head_cur = cur[:_OPENING_WINDOW]
+    head_prev = prev[:_OPENING_WINDOW]
+    # 逐字符求公共前缀长度。
+    common = 0
+    for a, b in zip(head_cur, head_prev, strict=False):
+        if a != b:
+            break
+        common += 1
+    return {"repeat_chars": common, "repeat_text": cur[:common]}
 
 
 def _observe_generation(
