@@ -5,7 +5,7 @@ from app.models.game import Game
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput
 from app.services.prompt_loader import load_prompt_template
-from app.services.state_v2 import state_v2_view
+from app.services.state_v2 import project_state_for_scene, state_v2_view
 from app.services.story_settings import (
     StoryMaterialResult,
     build_runtime_story,
@@ -89,7 +89,8 @@ class PromptBuilder:
             "related_story_materials": [
                 self._retrieval_payload(result) for result in (related_materials or [])
             ],
-            "current_state_v2": state_v2,
+            # GM 只需当前场景相关状态，用场景投影砍掉历史/非在场噪声（省 token）。
+            "current_state_v2": project_state_for_scene(state_v2),
             "memory_summaries": summaries or {},
             "story_director": story_director or {},
             "drift_rewrite_instruction": drift_rewrite_instruction or "",

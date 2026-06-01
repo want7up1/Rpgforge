@@ -599,3 +599,62 @@ def _bool(value: Any, default: bool) -> bool:
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
+
+
+def project_state_for_scene(state_v2: dict[str, Any] | None) -> dict[str, Any]:
+    """GM 场景投影（Round 23）：只给 GM 写作用，砍掉用不到的历史/非在场噪声。
+
+    保留当前场景写作所需（active_scene / protagonist_sheet / abilities / conditions /
+    party / story_progress / skills / open_threads 全保留）；精简：
+    - progression：砍 xp_log（XP 历史明细，GM 规则 20 不输出 XP）。
+    - quest_log：active 全留；completed 压成 completed_titles（只留标题，知道做过什么）。
+    - npc_registry：只留在场（present_npcs ∪ party）。
+    - relationship_tracks：只留在场角色；recent_events 只留最近 1 条。
+
+    **兜底**：present 名单为空时不过滤 npc_registry / relationship_tracks（避免砍光）。
+    仅 GM 用此投影；DriftValidator / StateExtractor 仍用全量 state（判状态冲突 / 算 delta 需要全）。
+    """
+    if not isinstance(state_v2, dict):
+        return state_v2
+    projected = dict(state_v2)
+
+    progression = state_v2.get("progression")
+    if isinstance(progression, dict) and "xp_log" in progression:
+        projected["progression"] = {k: v for k, v in progression.items() if k != "xp_log"}
+
+    quest_log = state_v2.get("quest_log")
+    if isinstance(quest_log, dict):
+        completed = quest_log.get("completed") or []
+        titles = [
+            (q.get("title") or q.get("name"))
+            for q in completed
+            if isinstance(q, dict) and (q.get("title") or q.get("name"))
+        ]
+        projected["quest_log"] = {
+            "active": quest_log.get("active") or [],
+            "completed_titles": titles,
+        }
+
+    active_scene = state_v2.get("active_scene") or {}
+    present = set(active_scene.get("present_npcs") or []) | set(state_v2.get("party") or [])
+
+    if present:
+        npcs = state_v2.get("npc_registry")
+        if isinstance(npcs, list):
+            projected["npc_registry"] = [
+                n for n in npcs if isinstance(n, dict) and n.get("name") in present
+            ]
+        rels = state_v2.get("relationship_tracks")
+        if isinstance(rels, list):
+            slim: list[dict[str, Any]] = []
+            for relation in rels:
+                if not isinstance(relation, dict) or relation.get("npc") not in present:
+                    continue
+                trimmed = dict(relation)
+                events = trimmed.get("recent_events")
+                if isinstance(events, list) and len(events) > 1:
+                    trimmed["recent_events"] = events[-1:]
+                slim.append(trimmed)
+            projected["relationship_tracks"] = slim
+
+    return projected

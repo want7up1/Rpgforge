@@ -127,74 +127,39 @@
 
 ---
 
-## 7. 分阶段路线图
+## 7. 分阶段路线图（状态总览，截至 Round 23）
 
-> 每阶段独立上线、独立验证、可回退。预估收益为每回合 input 降幅的量级估计，需以真实 trace 复核。
+> 每阶段独立上线、独立验证、可回退。各阶段**详细改动 + 实测数据见 `OPTIMIZATION_PLAN.md` 对应 Round 条目**，此处只留状态与判断。
 
-### 阶段 0 — 基线（已完成）
-- Round 18：剧本强约束提进 GM system prompt（宪法层雏形）。
-- Round 19：StateExtractor/Compressor 用精简 runtime_story 投影（支柱 2/4 局部验证，实测 runtime_story 17.5k→6k，省 66%）。
-- **作用**：验证"按需注入"方向有效且不破坏功能，为后续阶段铺路。
+| 阶段 | 支柱 / 内容 | 状态 |
+|---|---|---|
+| 0 基线 | 强约束进 system / 状态运算投影 | ✅ Round 18 / 19 |
+| 1 GM 场景投影 | 支柱 2：GM 吃 state 投影而非全量 | ✅ Round 23（实测省 59%；**待真实游玩验证不丢状态**） |
+| 2 宪法层固化 + caching | 支柱 1：稳定前缀命中 DeepSeek prefix cache | ✅ Round 22 / 22c（命中率 ~5% → 稳态 60%+，已对照验证） |
+| 3 机械约束代码化 | 支柱 3：canon/在场 代码校验 + 纠正 | ◐ **观测版已做**（Round 20，只标记）；**干预版暂缓**——observer 实测 canon"低使用"大多是后期专名的合理现象、问题不严重，且代码纠正有 Round 16 误判风险，数据不支持紧迫 |
+| 4 剧本设定 RAG 化 | 支柱 4：角色/地点按相关性注入 | ⏸ **暂缓**——当前游戏角色个位数、收益递减；长期角色变多时再议 |
+| 5 Director-GM 合并 | 减一次 LLM 调用 | ❌ **不做**——前置（充足 trace/judge）未满足，盲目合并损质量（见 §11.4） |
 
-### 阶段 1 — GM 场景投影 state（支柱 2）｜ 收益★★★ 风险★★
-- **目标**：GM 不再吃全量 `state_v2`（25k），改吃**场景投影**。
-- **改动**：
-  - `state_v2.py` 或新模块加 `project_state_for_scene(state_v2)`：返回在场角色（`active_scene` + `npc_registry` 中在场者）、当前位置、活跃 `open_threads`、`conditions`、`protagonist_sheet` 摘要；剔除非在场 NPC 全量、已完成 quest、历史 progression 明细。
-  - `prompt_builder.build_runtime_messages`：GM 的 `current_state_v2` 改用投影。
-  - **DriftValidator 仍用较全状态**（判状态冲突需要），或单独投影。
-- **验收**：
-  - GM user 中 state 部分字符数下降 ≥ 50%。
-  - 回归测试：投影保留在场实体/活跃线索/主角摘要；不丢当前场景必需状态。
-  - 真实游玩 5-10 回合：剧情未出现"忘记在场角色/当前位置"的状态断裂。
-- **风险/回退**：投影过激可能让 GM 丢失需要的状态 → 保守起步（宁可多留），按 trace 观察后收紧。回退 = 改回全量。
+**结论**：省 token 两大主力（支柱 1 cache + 支柱 2 投影）已落地验证；遵循类（防剧透 / 强约束 / 同场景重述 / 字数）也已解决。剩余项偏"遵循增强 / 可观测性"，ROI 递减。
 
-### 阶段 2 — 固化宪法层 + 接通 DeepSeek caching（支柱 1）｜ 收益★★★ 风险★★
-- **目标**：把 GM（及其他 Pro/Flash 调用）的稳定内容固化成**字节一致的前缀**，命中 DeepSeek prefix cache。
-- **改动**：
-  - 重排 GM messages：`system = 宪法层(整局稳定)`；user 开头放 `幕级简报(过幕才变)`，再放回合动态。确保宪法层 + 幕简报在 prompt 最前、序列化确定性（固定 key 顺序、固定文案、无时间戳/随机序）。
-  - 流式调用加 `stream_options={"include_usage": true}`，拿到 `prompt_cache_hit_tokens`；落入 `agent_traces`（补全 GM 流式 telemetry）。
-  - admin dashboard 加 cache 命中率指标。
-- **验收**：
-  - 同一局连续回合，trace 显示 `prompt_cache_hit_tokens` > 0 且占稳定层比例高（目标命中率 > 80% 的稳定前缀）。
-  - 过幕回合命中率短暂下降、之后回升（验证幕简报边界正确）。
-- **风险/回退**：前缀若不小心掺入每回合变内容 → 命中率骤降，dashboard 可发现。回退 = 不影响功能，仅失去缓存红利。
+### 收尾候选（择需而做，非必须）
 
-### 阶段 3 — 机械约束代码化（支柱 3）｜ 收益★★（遵循↑）风险★★
-- **目标**：canon_terms 一致性、角色在场一致、未来幕实体未提前出现，用代码在 GM 输出后确定性校验。
-- **改动**：
-  - 新增 `canon_checker`：检测 narrative 是否出现 canon_terms 的**错写变体**（基于人工精确指定的别名表，**整串匹配**），或漏用。命中 → 标记 telemetry / 触发轻量重写。
-  - 在场/位置一致性校验：narrative 提到的角色是否与 `active_scene` 矛盾。
-  - **严禁**从未来幕文本自动生成子串黑名单（Round 16 已否决）。
-- **验收**：
-  - 注入已知违例（专名错写）的伪输出，校验器能命中。
-  - 真实游玩：canon 不一致 / 角色穿越 类问题下降（用 turn_judge 的 canon_fidelity 维度量化前后）。
-- **风险/回退**：误报 → 保守阈值 + 只标记不强制重写起步。
-
-### 阶段 4 — 剧本设定 RAG 化（支柱 4）｜ 收益★★ 风险★★
-- **目标**：`core_characters` / 地点 / 机制按本回合相关性注入，而非全量。
-- **改动**：
-  - 扩展 `retrieve_story_materials` 的思路到角色/地点：基于玩家输入 + 当前场景 + 近期剧情检索相关实体，`always_on` 主角恒在。
-  - GM 的 `core_characters` 改为"在场 + 检索命中"子集 + 主角。
-- **验收**：GM user 中 core_characters 部分字符下降；真实游玩未出现"该出场的角色设定缺失"。
-- **风险/回退**：漏召回关键角色 → `always_on` 兜底 + 在场角色强制注入。
-
-### 阶段 5（可选，激进）— agent 职责重划 / Director-GM 评估｜ 收益★ 风险★★★
-- **目标**：评估 Director 与 GM 是否可在共享缓存前缀下合并/简化，减少一次 LLM 调用。
-- **前置**：必须先有阶段 1-3 + 充足 trace + judge 数据；否则盲目合并损害质量。
-- **默认结论**：暂不做（见 `OPTIMIZATION_PLAN` §4 已有"不引入框架/不做大重构"的克制原则）。仅在数据证明 Director 收益低时再议。
+- **judge 系统化量化**：用 `turn_judge` 对改前 / 改后回合系统打分（canon_fidelity / safety / 状态一致性），给整轮优化一个量化总结。最具收尾价值——此前一直靠 observer + 人工看，从未系统跑过 judge。
+- **dashboard 可视化**：把 cache 命中率 / token 趋势 / observer 违规率聚合到 `/admin`。注：游戏界面"本回合详情"面板（Round 22b）已覆盖单回合查看，dashboard 仅为跨回合趋势，优先级低。
 
 ---
 
 ## 8. 横切关注点
 
 ### 8.1 可观测性（先行）
-- 阶段 2 接通 `include_usage` 后，`agent_traces` 能记录 cache hit/miss。
-- admin dashboard 增加：每回合平均 input token、cache 命中率、各 agent token 趋势。
-- **没有度量就不要优化**：每阶段前后用同一批回合对比 token 与 judge 评分。
+- ✅ Round 22：`include_usage` 接通，`agent_traces` 记录 cache hit/miss + 补全 GM 流式 token。
+- ✅ Round 22b：游戏界面"本回合详情"面板（单回合 token / cache / 字数 / observer）。
+- ⏳ 跨回合 dashboard 趋势（平均 input token、命中率趋势）未做——收尾候选，优先级低（单回合查看已被面板覆盖）。
+- **原则：没有度量就不要优化**——每阶段前后用同一批回合对比 token 与 judge 评分。
 
 ### 8.2 遵循度的量化
-- 用既有 `turn_judge`（opt-in）的 `canon_fidelity` / `safety` / `state_consistency` 维度，对重构前后同剧本回合打分，量化"遵循是否变好"。
-- 不靠主观感觉；每个声称"遵循更好"的阶段都要有评分对比。
+- ⏳ **仍未系统跑**——此前一路靠 observer + 人工看；用 `turn_judge`（canon_fidelity / safety / state_consistency）对改前/改后同剧本回合系统打分，是当前最具收尾价值的候选。
+- 原则：不靠主观感觉；每个声称"遵循更好"的阶段都要有评分对比。
 
 ### 8.3 回归测试策略
 - 每个投影/裁剪函数都是纯函数 → 必有单测（锁定"保留什么、砍什么"）。
@@ -263,20 +228,12 @@
 - **不让 AI 输出 `selected_transition` 选剧情节点**。现状"锚点完成 → 代码驱动过幕"比"AI 选 transition"更稳，后者把跳幕权交还 AI、更易幻觉。
 - **不做验证器"机械裁剪文本"**。连贯 narrative 切一段会断裂（Round 16 教训）；验证器只标记，未来若干预也是"轻量重写指引"而非裁剪。
 
-### 11.5 两条并行线 + 执行序列（落地为 Round）
+### 11.5 两条并行线（已落地）
 
-**线 A — 省 token（与遵守一致，靠精简而非牺牲）**：支柱 2 GM 场景投影 state（砍 41% 黑洞）+ 支柱 1 宪法层固化接通 DeepSeek prefix cache。
+- **线 A — 省 token**（靠精简而非牺牲）：支柱 2 GM 场景投影（Round 23）+ 支柱 1 宪法层固化接通 prefix cache（Round 22/22c）。✅
+- **线 B — 遵守观测**：支柱 3 验证器观测层（Round 20，只标记）+ 同场景重述修复（Round 20b）+ 字数治理（Round 21）。✅
 
-**线 B — 遵守观测**：支柱 3 验证器观测层（canon 整串 + 未授权实体/在场 + 提前揭露检测，只标记）+ turn_judge 评风格类遵守度。
-
-落地序列：
-
-- **Round 20（线 B 起步）✅ 已落地**：验证器观测层 v1（`output_observer.py`）——generation_parameters 达标 + forbidden_reveals 整串命中 + canon 使用度 + 角色提及；**只写 telemetry**（`TurnJob.turn_runtime_inputs.output_observation`）；不干预生成。真实数据已暴露：GM 字数普遍仅达硬下限 70%、canon 14 专名每回合仅用 2-3 个。在场一致性留 v1.1（present_npcs 数据常空）。dashboard 展示 → Round 20b。
-- **Round 20b ✅ 已落地**：修"新回合重述同场景"——gm_runtime.md 承接规则 + observer 开头重复检测。真实游玩对照证明明显改善。
-- **Round 21 ✅ 已落地（实际是字数治理，非场景投影）**：generation_parameters 篇幅指引提进 system（下限硬、上限让位于剧本详细描写）。注：原计划"Round 21=场景投影"未做，编号顺延——**场景投影（支柱 2）仍未做**，见下。
-- **Round 22（线 A）✅ 观测部分已落地**：流式加 `stream_options.include_usage` + `extract_cache_usage`，GM 流式 token 与 prefix cache 命中/未命中落进 `agent_traces.tokens_*` 与 `extras.cache_hit_tokens/cache_miss_tokens`。**这是"接通 caching"的可观测前提**——先看见命中率，再决定是否固化前缀。注：DeepSeek 自动 prefix cache 本就在工作（system 已是稳定前缀），本轮先量化现状；若命中率不足，再做"宪法层字节固化"提升。
-- **仍未做（设计文档剩余）**：① 场景投影 state（支柱 2，state_v2 占 user 41%，最大 token 黑洞）；② 宪法层字节固化（若 Round 22 观测显示命中率不足）；③ 剧本设定 RAG 化（支柱 4）；④ 验证器"干预"部分（canon/在场代码校验+轻量纠正）；⑤ dashboard 可视化（cache 命中率/token 趋势/observer 违规率）；⑥ turn_judge 系统化遵循度量化；⑦ 阶段 5 Director-GM 合并（默认不做）。
-- **持续**：turn_judge 评 canon_fidelity / safety / 状态一致性，观测风格类与整体遵守度趋势。
+> 完整落地状态与剩余项见 §7 路线图（截至 Round 23）。两条线核心均已落地验证；剩余为收尾候选（judge 量化 / dashboard），见 §7 末。
 
 ### 11.6 一句话总纲
 
