@@ -72,7 +72,7 @@
 - **[P3-9]** `_merge_recent_events`(`:737`) 按 dict 全等去重，模板化交互被误合并。
 - **[P3-10]** `_merge_relationship_aliases` 在 apply 流程被调用两次（`:170`+`:172`），170 冗余。
 - **[P3-11]** `FAILED_SETTLEMENT_STATUSES`(`state_settlement.py:26`) 为死常量，无引用。
-- **[P3-12]** `project_state_for_scene`(`state_v2.py:604`) 丢弃 hidden 任务桶——可能是有意防剧透，待与剧情 Agent 确认并补 docstring。
+- **[P3-12]** `project_state_for_scene`(`state_v2.py:604`) 丢弃 hidden 任务桶。**决策（用户 2026-06-01）：hidden 任务应保留给 GM 看、用于剧情铺垫**——GM 需要知道隐藏目标的存在以提前埋线，hidden **不是**对 GM 的防剧透对象（防剧透由 next_act 裁剪 / forbidden_reveals 等机制负责）。→ 待实现，见 §4 阶段 8.1。
 - **[P3-13]** `core_mechanics_outline` 未列入 outline 截断重试的必保字段（`game_generator.py:351`）。
 
 ## 3. 已验证健康（放心清单，无需改动）
@@ -118,7 +118,7 @@
 - [ ] **5.4 `_merge_mapping`/`_apply_location`/`total_xp`/条件裸串/reason dict** 健壮化。→ P3-3~P3-7
 
 ### 阶段 6 — 关系 / 投影 / 前端
-- [ ] **6.1 关系合并取最新（带 turn）而非 max + 事件前别名归一**。→ P2-11、P2-12
+- [x] **6.1 关系合并取最新（带 turn）而非 max + 事件前别名归一**。→ P2-11、P2-12
 - [x] **6.2 前端显示已完成任务**。→ P1-6
 - [x] **6.3 线索 status 中文映射**。→ P2-15
 - [ ] **6.4 技能/能力同名处理 + recent_events 带 turn 去重 + 删冗余别名归一调用**。→ P3-8~P3-10
@@ -127,6 +127,9 @@
 - [x] **7.1 `validate_story_settings` 最小基数校验**（act_plan 非空、每幕 required 锚点 ≥1）。→ P2-13
 - [x] **7.2 act_plan/main_quest_path 空分区触发重试**。→ P2-14
 - [x] **7.3 outline 回退字段映射**（`completion_anchor_plan`→`completion_anchors`，补 title）。→ P1-7、P1-8
+
+### 阶段 8 — 投影补充（按用户决策）
+- [x] **8.1 `project_state_for_scene` 保留 hidden 任务桶给 GM**（用户 2026-06-01 决策：hidden 用于 GM 剧情铺垫，非防剧透对象）。当前 GM 投影把 `quest_log` 重建为仅 `{active, completed_titles}`、**丢弃 hidden**；改为保留 hidden（至少标题/objective）传给 GM，使其能提前为隐藏目标埋线。与 next_act 裁剪等既有防剧透机制不冲突——那针对「未来幕剧情」，hidden quest 是「当前局已存在、玩家尚未激活的目标」。→ P3-12
 
 ## 5. 验证与部署约定
 

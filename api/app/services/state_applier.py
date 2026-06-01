@@ -677,12 +677,12 @@ def _preserve_name_aliases(existing: dict[str, Any], update: dict[str, Any]) -> 
 
 def _merge_relationship_record(target: dict[str, Any], incoming: dict[str, Any]) -> None:
     for key in ("trust", "affection", "respect", "fear", "loyalty", "conflict"):
-        target_value = _numeric(target.get(key))
         incoming_value = _numeric(incoming.get(key))
         if incoming_value is None:
             continue
-        if target_value is None or incoming_value > target_value:
-            target[key] = int(incoming_value)
+        # 取较新值（incoming 是 relationships 列表中较后、即较新回合添加的同人记录）而非 max；
+        # 否则别名合并后关系只升不降——和解后降低的 conflict 会被旧的高值覆盖（P2-11）。
+        target[key] = int(incoming_value)
 
     for key, value in incoming.items():
         if key in {"trust", "affection", "respect", "fear", "loyalty", "conflict"}:
