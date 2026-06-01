@@ -120,14 +120,13 @@ def _observe_generation(
     flags: list[str] = []
     if chars < min_chars:
         flags.append(f"narrative 字数 {chars} < 硬下限 {min_chars}")
-    if not (para_min <= paragraphs <= para_max):
-        flags.append(f"段落数 {paragraphs} 越界 [{para_min},{para_max}]")
-    if headings > heading_max:
-        flags.append(f"场景标题数 {headings} > 上限 {heading_max}")
-    if not (emph_min <= emphasis <= emph_max):
-        flags.append(f"强调数 {emphasis} 越界 [{emph_min},{emph_max}]")
+    if paragraphs < para_min:
+        flags.append(f"段落数 {paragraphs} < 下限 {para_min}（疑似挤成一坨）")
     if option_count != 4:
         flags.append(f"行动选项数 {option_count} ≠ 4")
+    # 段落/标题/强调"超上限"不再算违规：剧本 must_follow / core_mechanics 要求"完整详细
+    # 描写"的场景（[剧情规则]、战斗色情化、[剧情规则]、性征刻画等）本就需要大篇幅、多段、
+    # 多强调，上限让位于剧本（用户决策）。各项 count 仍记录在 generation 指标里供观察。
 
     generation = {
         "narrative_chars": chars,

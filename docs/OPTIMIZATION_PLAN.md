@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 20b — 修"新回合重述同场景"：prompt 承接规则 + 开头重复观测 |
+| 最近一轮 | Round 21 — 字数治理：篇幅指引提进 system（下限硬、上限让位于剧本详细描写） |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,27 @@
 ---
 
 ## 1. 已完成
+
+### Round 21 (2026-05-29) — 字数治理：篇幅指引提进 system（下限硬、上限让位于剧本）
+
+**背景**：Round 20 观测层暴露 GM 字数长期不达硬下限（约 70%）。根因同 Round 18：`generation_parameters` 埋在 user JSON 里被淹没。把篇幅约束提到 system 顶部。
+
+**关键修正（用户指出的冲突）**：初版把段落/强调/字数**上限**也作为硬指标写进 system，结果与剧本 `must_follow`/`core_mechanics` 的"详细描写要求"**直接冲突**——该剧本明确要求"[剧情规则]完整描写""战斗色情化着重刻画性征""[剧情规则]完整流程""俘虏完整性征档案"等，这些场景天然需要大篇幅、多段、多强调；而 generation_parameters 是**全局单一上限**（target_max 2500 / paragraph_max 8 / emphasis_max 4），详细场景必然超。即 system 自相矛盾：一边要详细、一边限上限。这是继 Round 16 滑窗、canon 冷落之后**第三次把机械指标当违规**。
+
+**最终方案（用户决策：上限让位于剧本）**：
+
+- `prompt_builder._generation_parameter_directives`：分三层——【硬下限】不少于 N 字（防偷工，与详细描写一致）；【软参考，可被剧本覆盖】段落/标题/强调一般范围；【优先级】凡剧本要求"完整/详细描写"的场景，段落数/强调数/篇幅上限一律让位于剧本，不受软参考限制（但不得低于硬下限）。
+- `output_observer._observe_generation`：**移除**段落/标题/强调"超上限"的违规 flag（详细场景误报）；保留字数不足、段落 < 下限（挤成一坨）、行动选项数≠4。各项 count 仍记录在 generation 指标里供观察。
+
+**实测**：真实剧本 system 末尾篇幅指引按"硬下限 / 软参考 / 让位剧本"三层呈现，消除与 must_follow 的矛盾。
+
+**改动文件**：`api/app/services/prompt_builder.py`、`api/app/services/output_observer.py`、`api/tests/test_gameplay.py`、`api/tests/test_output_observer.py`（+详细场景不误报用例）。
+
+**部署**：`docker compose up -d --build api worker`。**验证**：容器内 `pytest tests/` **149 passed**，ruff 通过。
+
+> 教训补充（§4）：generation_parameters 的**上限**类约束（段落/强调/字数上限）不可作为硬指标凌驾于剧本 must_follow 的详细描写要求——剧本优先级最高。只有**下限**（防偷工）是安全的硬约束。
+
+> 待玩家续玩验证：observer 的字数不达标 / 段落越界 / 强调越界 flag 频次是否下降（同 Round 20b 的闭环验证法）。
 
 ### Round 20b (2026-05-29) — 修"新回合带上一回合内容"（同场景重述）
 
@@ -619,6 +640,7 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
 | 用"未来幕全文切滑动窗口子串黑名单"在代码层拦截剧透（Round 16 已回退） | 子串匹配做语义判断必然大量误杀：跨幕复现的角色/地点会让当前幕合法叙述被判 major 偏离 → 无谓强制重写 + Director 指令被擦成套话 + 成本翻倍。每修一次误杀就加白名单/调窗口 = 修不完的死循环。**正路**：防剧透交 DriftValidator 的 LLM 语义判断；代码层兜底只用**人工精确指定的整串** `forbidden_reveals`（`_enforce_hard_forbidden_reveals`），绝不自动从未来幕文本生成黑名单 |
 | 砍 `current_state_v2` 体积来给约束让位（Round 18 评估后不做） | 实测 state_v2 24915 字符构成是 skills/relationship_tracks/quest_log/protagonist_sheet 等合理的当前状态，非历史垃圾；砍它直接威胁状态一致性，高风险低收益。正解是把强约束提进 system prompt（最高权重、不进被 state 淹没的 user 水域），而非缩小噪声。仅当后续 trace 显示状态遵守仍差时再重评 |
 | 靠事后校验（DriftValidator/Judge）解决"约束不被遵守"（Round 18 明确否决为主手段） | 用户洞察：校验是亡羊补牢，执行/传递没做好时校验只是补漏。根因是强约束没被有效传给 AI（占 user <4% + system 零强化），应先在**传递层**把强约束提进 system prompt 确保 AI 一定看到；校验作为补充而非主手段 |
+| 把 generation_parameters 的**上限**（段落/强调/字数上限）作为硬约束（Round 21 修正） | 与剧本 `must_follow`/`core_mechanics` 的"详细描写要求"（[剧情规则]、战斗色情化、[剧情规则]、性征刻画等）直接冲突——这些场景天然需要大篇幅、多段、多强调，而 generation_parameters 是全局单一上限。剧本优先级最高，上限须让位。只有**字数下限**（防偷工）是安全的硬约束。observer 不再把"超上限"当违规。这是第三次"机械指标误判"（前两次：Round 16 滑窗、canon 冷落） |
 
 ---
 

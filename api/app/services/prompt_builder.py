@@ -65,7 +65,7 @@ class PromptBuilder:
             state_v2 = state_v2_view(state_json)
 
         # 在裁剪前抽取硬红线（裁剪不动 hard_rules/story_core/current_act，但顺序上先抽更稳）。
-        system_content = self._build_system_content(runtime_story)
+        system_content = self._build_system_content(runtime_story, generation_parameters)
         # GM 不应看到完整的未来幕剧情（next_act 细节 / 未来幕主线节点），从源头裁掉。
         gm_runtime_story = redact_runtime_story_for_gm(runtime_story)
 
@@ -105,11 +105,15 @@ class PromptBuilder:
         ]
 
     @staticmethod
-    def _build_system_content(runtime_story: dict[str, Any] | None) -> str:
-        """gm_runtime.md 基础规则 + 本剧本强约束（从 JSON 深层提升到 system prompt）。
+    def _build_system_content(
+        runtime_story: dict[str, Any] | None,
+        generation_parameters: dict[str, int] | None = None,
+    ) -> str:
+        """gm_runtime.md 基础规则 + 本剧本强约束 + 输出篇幅硬指标（都提进 system prompt）。
 
-        强约束在 user JSON 里占比 <4% 且被 current_state_v2 淹没，模型遵守度极低。
-        提到 system 末尾按"必须类 / 禁止类 / 命名一致"分组列出，确保 GM 一定看到。
+        强约束/篇幅参数原本埋在 user JSON 里、占比 <4% 且被 current_state_v2 淹没，
+        模型遵守度极低。提到 system 末尾，确保 GM 一定看到。篇幅指标把 generation_parameters
+        的具体数字直接写死进 system（而非让 GM 去 user JSON 深处找），对应 output_observer 的校验。
         """
         template = load_prompt_template("gm_runtime.md")
         constraints = gm_hard_constraints(runtime_story or {})
@@ -127,19 +131,24 @@ class PromptBuilder:
             lines = "\n".join(f"- {item}" for item in items)
             grouped[group].append(f"〔{label}〕\n{lines}")
 
-        if not order:
-            return template
+        sections: list[str] = [template]
 
-        blocks = [f"## {group}\n\n" + "\n\n".join(grouped[group]) for group in order]
-        body = "\n\n".join(blocks)
-        return (
-            f"{template}\n\n"
-            "=== 本剧本不可违反的强约束（最高优先级，凌驾于上文一切风格与节奏要求）===\n"
-            "以下条目来自剧本设定，必须逐条严格落实；与任何其他指令冲突时以本节为准。\n"
-            "尤其是「必须落实」组——这些不是可选风格，而是每个相关回合都要在 narrative 中"
-            "真实体现的硬性要求。\n\n"
-            f"{body}"
-        )
+        if order:
+            blocks = [f"## {group}\n\n" + "\n\n".join(grouped[group]) for group in order]
+            body = "\n\n".join(blocks)
+            sections.append(
+                "=== 本剧本不可违反的强约束（最高优先级，凌驾于上文一切风格与节奏要求）===\n"
+                "以下条目来自剧本设定，必须逐条严格落实；与任何其他指令冲突时以本节为准。\n"
+                "尤其是「必须落实」组——这些不是可选风格，而是每个相关回合都要在 narrative 中"
+                "真实体现的硬性要求。\n\n"
+                f"{body}"
+            )
+
+        directives = _generation_parameter_directives(generation_parameters or {})
+        if directives:
+            sections.append(directives)
+
+        return "\n\n".join(sections)
 
     def _retrieval_payload(self, result: StoryMaterialResult) -> dict[str, object]:
         payload = dict(result.material)
@@ -169,3 +178,57 @@ def _trim_text(value: str | None, limit: int) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit].rstrip()}..."
+
+
+def _generation_parameter_directives(generation_parameters: dict[str, int] | None) -> str:
+    """把 generation_parameters 的篇幅约束写成 system prompt 里的明确数字指令。
+
+    Round 20 观测层实测：GM 长期字数不达硬下限（~70%）、段落/强调频繁越界——因为这些
+    数量约束埋在 user JSON 的 generation_parameters 里，模型不遵守。这里把具体数字直接
+    提进 system，对应 output_observer 的 generation 校验。
+    """
+    gp = generation_parameters if isinstance(generation_parameters, dict) else {}
+    if not gp:
+        return ""
+
+    def _int(key: str) -> int | None:
+        value = gp.get(key)
+        return int(value) if isinstance(value, int) else None
+
+    nmin = _int("narrative_min_chars")
+    tmin = _int("narrative_target_min_chars")
+    tmax = _int("narrative_target_max_chars")
+    pmin = _int("paragraph_min")
+    pmax = _int("paragraph_max")
+    smax = _int("scene_heading_max")
+    emin = _int("emphasis_min")
+    emax = _int("emphasis_max")
+
+    lines: list[str] = []
+    if nmin:
+        target = f"（一般目标 {tmin}–{tmax} 字）" if tmin and tmax else ""
+        lines.append(
+            f"- 【硬下限】narrative 正文不少于 {nmin} 字{target}；字数不足视为偷工，"
+            "宁可补充感官细节、身体反应、NPC 反应、场景推进，也不要草草收尾。"
+        )
+    soft: list[str] = []
+    if pmin and pmax:
+        soft.append(f"自然段一般 {pmin}–{pmax} 段")
+    if smax is not None:
+        soft.append(f"场景标题（`###`）一般不超过 {smax} 个、同场景承接时通常 0 个")
+    if emin is not None and emax:
+        soft.append(f"重点强调（`**`）一般 {emin}–{emax} 处")
+    if soft:
+        lines.append(
+            "- 【软参考，可被剧本覆盖】" + "；".join(soft) + "，用于避免无意义注水或碎段。"
+        )
+    if nmin or soft:
+        lines.append(
+            "- 【优先级】凡 hard_rules / core_mechanics 要求“完整/详细描写”的场景"
+            "（如[剧情规则]、战斗色情化、[剧情规则]、性征刻画、日常调教等），必须优先写完整；"
+            "此时段落数、强调数与篇幅上限一律让位于剧本要求，不受上述软参考限制（但仍不得低于硬下限）。"
+        )
+    if not lines:
+        return ""
+
+    return "=== 本回合输出篇幅指引 ===\n" + "\n".join(lines)

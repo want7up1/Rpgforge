@@ -139,6 +139,10 @@ def test_gm_system_prompt_elevates_hard_constraints(db_session) -> None:
     assert "不要修仙" in system_content
     # 当前幕 forbidden_reveals
     assert "账册真凶" in system_content
+    # Round 21：generation_parameters 篇幅指引提进 system（下限硬、上限软且让位于剧本）
+    assert "本回合输出篇幅指引" in system_content
+    assert "不少于 700 字" in system_content  # 硬下限保留
+    assert "让位于剧本" in system_content  # 上限让位于详细描写要求
 
 
 def test_state_ops_projection_keeps_minimal_drops_writing_fields() -> None:

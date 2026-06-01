@@ -60,7 +60,7 @@ def test_observer_reports_generation_metrics_when_compliant() -> None:
 
 
 def test_observer_flags_violations() -> None:
-    # 字数不足、段落不足、选项数不对、强调过多、命中 forbidden 整串。
+    # 字数不足、段落挤成一坨、选项数不对、命中 forbidden 整串。
     narrative = "账册真凶就是沈砚。**A****B****C****D**"
     obs = observe_gm_output(
         narrative=narrative,
@@ -71,12 +71,32 @@ def test_observer_flags_violations() -> None:
     )
     flags = obs["flags"]
     assert any("字数" in f for f in flags)
-    assert any("段落数" in f for f in flags)
+    assert any("段落数" in f for f in flags)  # 段落 < 下限（挤成一坨）仍报
     assert any("行动选项数" in f for f in flags)
-    assert any("强调数" in f for f in flags)
+    # 强调"超上限"不再算违规（让位于剧本详细描写要求）。
+    assert not any("强调数" in f for f in flags)
     # 当前幕 forbidden_reveals 整串命中。
     assert "账册真凶" in obs["forbidden_reveal_hits"]
     assert any("禁止揭露" in f for f in flags)
+
+
+def test_observer_does_not_flag_detailed_scene_overflow() -> None:
+    """详细描写场景（大篇幅、多段、多强调）不应被判违规——上限让位于剧本。"""
+    narrative = (
+        "环境铺垫。\n\n前戏调情，**敏感带**反应。\n\n插入抽插，**身体痉挛**。\n\n"
+        "高潮射精，**[能量]**注入。\n\n事后余韵，**情感值提升**。\n\n"
+        "她的**乳房**、**臀**、**腰**都被细致刻画。" + "细节" * 400
+    )
+    obs = observe_gm_output(
+        narrative=narrative,
+        visible_clues=[],
+        action_options=_options(4),
+        runtime_story=_RUNTIME_STORY,
+        generation_parameters=_GEN_PARAMS,
+    )
+    # 字数足、段落足、选项对、强调虽多但不报警。
+    assert obs["flags"] == []
+    assert obs["generation"]["emphasis_count"] >= 7  # 强调确实超上限，但不进 flags
 
 
 def test_observer_canon_unused_tracked() -> None:
