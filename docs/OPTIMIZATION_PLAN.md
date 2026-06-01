@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 23 — GM 场景投影：state_v2 砍历史/非在场噪声，实测省 59% |
+| 最近一轮 | Round 24 — 修复 LLM-as-Judge（一直坏的）+ 优化后遵循度量化基线 |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,29 @@
 ---
 
 ## 1. 已完成
+
+### Round 24 (2026-05-29) — 修复 LLM-as-Judge + 优化后遵循度量化基线（收尾）
+
+收尾轮：用 turn_judge 给整轮优化一个量化总结。**结果先暴露了一个真 bug**：judge 从 Round 5 起**一直是坏的**——`turn_judge` 用 `use_pro(max_tokens=1200)` 且默认 `reasoning_effort="high"`，reasoning 吃光 token 导致输出 JSON 全部截断（unterminated string）或空内容，所以 `turn_evaluations` 表一直是 0 条（从未成功评过一次）。
+
+**修复**：`turn_judge` 调用改 `max_tokens=3000` + `reasoning_effort=None`（judge 是结构化评分，不需要 reasoning）。修复后 judge 正常评分。
+
+**优化后遵循度量化基线**（当前游戏 14 回合全为 Round 16–23 代码生成，评最近 5 回合）：
+
+| 维度 | 评分 /5 |
+|---|---|
+| canon_fidelity（剧本设定一致） | **5** |
+| safety（无泄露/提前揭露） | **5** |
+| state_consistency（状态一致） | **5** |
+| prose_quality / freshness | 5 |
+| pacing（节奏） | 4 |
+| overall | **4.83** |
+
+**诚实局限**：① 5 回合分数完全一致，可能含 LLM judge 评分趋同/宽松偏差；② 旧存档已删，**无严格"改前"对照**，这是"优化后绝对水平"而非"提升了多少"。但 canon/safety/state 满分至少佐证：当前**遵循剧本设定、不提前揭露、状态一致**都处于高水平——与本轮优化目标一致。
+
+**改动文件**：`api/app/services/turn_judge.py`。**部署**：`docker compose up -d --build api worker`。**验证**：`pytest tests/` **159 passed**、ruff 通过；judge 实跑 5 回合全部成功落库（此前全失败）。
+
+> 这是 Round 16–24 大优化的收尾。省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/面板/judge）均已落地验证。后续若需，按 `PROMPT_ARCHITECTURE_REDESIGN.md` §7 收尾候选（dashboard 跨回合趋势）。
 
 ### Round 23 (2026-05-29) — GM 场景投影（支柱 2，省 user token）
 
