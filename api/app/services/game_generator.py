@@ -35,6 +35,15 @@ FINALIZE_SECTION_RETRIES = 1
 FINALIZE_SECTION_CONCURRENCY = 4
 
 
+# 这些 list 分区一旦为空就会让 _merge_finalize_payload 回退到结构更差的 outline
+# 骨架（completion_anchor_plan 字段错位、main_quest 缺 title），进而导致运行时
+# 锚点/转幕判定全面失效（审查 P1-7/P1-8/P2-14）。因此把空数组视为生成失败，
+# 交给 _generate_finalize_section 的既有重试机制重跑，而不是静默放行。
+REQUIRED_NONEMPTY_SECTIONS: frozenset[str] = frozenset(
+    {"act_plan", "main_quest_path", "core_characters"}
+)
+
+
 @dataclass(frozen=True)
 class FinalizeSectionSpec:
     key: str
@@ -440,6 +449,11 @@ class GameGeneratorService:
         if spec.kind == "list":
             if not isinstance(data, list):
                 raise ModelOutputValidationError(f"{spec.key} 分区必须是 JSON array。")
+            if not data and spec.key in REQUIRED_NONEMPTY_SECTIONS:
+                # 空数组对关键分区不可接受：触发既有局部重试，避免滑向劣质 outline 回退。
+                raise ModelOutputValidationError(
+                    f"{spec.key} 分区不能为空数组。"
+                )
             return data
         if not isinstance(data, dict):
             raise ModelOutputValidationError(f"{spec.key} 分区必须是 JSON object。")
@@ -473,9 +487,9 @@ class GameGeneratorService:
                     "story_core": _merge_story_core(request, outline),
                     "core_characters": _list(sections.get("core_characters")),
                     "act_plan": _list(sections.get("act_plan"))
-                    or _list(outline.get("act_plan_outline")),
+                    or _act_plan_from_outline(outline.get("act_plan_outline")),
                     "main_quest_path": _list(sections.get("main_quest_path"))
-                    or _list(outline.get("main_quest_path_outline")),
+                    or _main_quest_path_from_outline(outline.get("main_quest_path_outline")),
                     "core_mechanics": _list(sections.get("core_mechanics"))
                     or _list(outline.get("core_mechanics_outline")),
                     "action_style_rules": _list(sections.get("action_style_rules")),
@@ -619,6 +633,85 @@ def _merge_hard_rules(
             ]
         ),
     }
+
+
+def _act_plan_from_outline(outline_acts: Any) -> list[dict[str, Any]]:
+    """把 outline 的 act_plan_outline 映射成运行时 act_plan 形状（P1-7 兜底）。
+
+    outline 每幕用 `completion_anchor_plan`（字符串数组）描述完成锚点，而运行时
+    `normalize_story_settings._act` 只读 `completion_anchors`（对象数组，需
+    id/required/completion_signal）。直接回退会让每幕 completion_anchors 落空，
+    导致 required 锚点恒为空、自动转幕兜底全失效。这里把每条字符串包装成锚点骨架，
+    让 normalize 后仍能产出可用的 required 锚点。
+    """
+    acts: list[dict[str, Any]] = []
+    for act_index, raw in enumerate(_list(outline_acts)):
+        if not isinstance(raw, dict):
+            continue
+        act = dict(raw)
+        act_id = _string(act.get("id") or act.get("key")) or f"act_{act_index + 1}"
+        # 已是对象数组（少数 outline 直接给全）则保留，仅当缺失/为字符串规划时才合成。
+        existing_anchors = _list(act.get("completion_anchors"))
+        if not existing_anchors:
+            anchors: list[dict[str, Any]] = []
+            for anchor_index, plan in enumerate(_list(act.get("completion_anchor_plan"))):
+                signal = _string(plan) if not isinstance(plan, dict) else _string(
+                    plan.get("completion_signal") or plan.get("signal") or plan.get("title")
+                )
+                if not signal:
+                    continue
+                anchors.append(
+                    {
+                        "id": f"{act_id}_anchor_{anchor_index + 1}",
+                        "title": _truncate_title(signal),
+                        "required": True,
+                        "completion_signal": signal,
+                    }
+                )
+            act["completion_anchors"] = anchors
+        acts.append(act)
+    return acts
+
+
+def _main_quest_path_from_outline(outline_quests: Any) -> list[dict[str, Any]]:
+    """把 outline 的 main_quest_path_outline 映射成运行时 main_quest_path 形状（P1-8 兜底）。
+
+    outline 节点没有 id/title（只有 act_id/objective/player_visible/completion_signal），
+    运行时 `_quest` 会合成 id，但 title 落到占位符“未命名主线节点”。这里用 objective
+    截断兜底 title（id 仍交给 normalize 合成，保证唯一），让玩家可见标题不再是占位符。
+    """
+    quests: list[dict[str, Any]] = []
+    for raw in _list(outline_quests):
+        if not isinstance(raw, dict):
+            continue
+        quest = dict(raw)
+        if not _string(quest.get("title") or quest.get("name")):
+            source = _string(quest.get("objective") or quest.get("goal")) or _string(
+                quest.get("player_visible")
+            )
+            if source:
+                quest["title"] = _truncate_title(source)
+        quests.append(quest)
+    return quests
+
+
+def _truncate_title(text: str, *, limit: int = 24) -> str:
+    """从一句话目标/信号里截出简短标题。
+
+    思路同 state_applier._anchor_quest_title（但本泳道不 import 它）：优先在第一个
+    句读分隔符处断开，否则按长度截断。
+    """
+    cleaned = _string(text)
+    if not cleaned:
+        return ""
+    for separator in ("——", "。", "；", ";", "，", ","):
+        if separator in cleaned:
+            cleaned = cleaned.split(separator, 1)[0].strip()
+            break
+    cleaned = cleaned.strip(" ，,。；;")
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit].rstrip()
+    return cleaned
 
 
 def _string(value: Any) -> str:

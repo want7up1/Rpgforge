@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,6 +8,8 @@ from app.models.game import GameConfig
 from app.models.turn import Turn
 from app.services.generation_parameters import normalize_generation_parameters
 from app.services.text_vectorizer import extract_terms
+
+logger = logging.getLogger(__name__)
 
 STORY_SETTINGS_FORMAT_VERSION = "rpgforge.story.v2"
 ACT_LIMIT = 8
@@ -597,13 +600,16 @@ def validate_story_settings(settings: Any) -> dict[str, Any]:
         character_names.add(name)
     act_ids: set[str] = set()
     anchor_ids: set[str] = set()
-    for index, act in enumerate(_records(story.get("act_plan"))):
+    acts = _records(story.get("act_plan"))
+    acts_without_required_anchor: list[str] = []
+    for index, act in enumerate(acts):
         act_id = _act_identity(act)
         if not act_id:
             raise ValueError(f"act_plan[{index}].id 不能为空。")
         if act_id in act_ids:
             raise ValueError(f"act_plan[{index}].id 重复：{act_id}")
         act_ids.add(act_id)
+        has_required_anchor = False
         for anchor_index, anchor in enumerate(_records(act.get("completion_anchors"))):
             anchor_id = _text(anchor.get("id"))
             if not anchor_id:
@@ -614,6 +620,22 @@ def validate_story_settings(settings: Any) -> dict[str, Any]:
             if anchor_id in anchor_ids:
                 raise ValueError(f"完成锚点 id 重复：{anchor_id}")
             anchor_ids.add(anchor_id)
+            if _bool(anchor.get("required"), True):
+                has_required_anchor = True
+        if not has_required_anchor:
+            acts_without_required_anchor.append(act_id)
+    # 最小基数：仅告警 + 记日志，不 raise（P2-13）。
+    # 原因：默认/手动剧本（default_story_settings）act_plan 合法地为空，旧存档也可能
+    # 缺 required 锚点；硬拒绝会破坏手动建游戏与既有存档加载。运行时已有 Director 兜底。
+    if not acts:
+        logger.warning(
+            "story_settings 校验：act_plan 为空，运行时转幕/锚点判定将完全依赖 Director LLM。"
+        )
+    elif acts_without_required_anchor:
+        logger.warning(
+            "story_settings 校验：以下幕缺少 required 完成锚点，自动转幕兜底对其失效：%s",
+            "、".join(acts_without_required_anchor),
+        )
     return story
 
 

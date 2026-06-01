@@ -284,9 +284,11 @@ def _thread_item(thread: Any) -> dict[str, Any]:
 
 
 def _thread_is_resolved(thread: dict[str, Any]) -> bool:
-    text = "\n".join(_first_text(thread.get(key)) for key in ("title", "status"))
+    # 只看显式 status/state，不拿 title 做子串匹配——否则"调查未完成的仪式""解决粮食危机"
+    # 这类含"完成/解决"字样的活跃线索会被误判已解决，从"未解线索"里消失。
+    status = _first_text(thread.get("status"), thread.get("state")).lower()
     return any(
-        marker in text
+        marker in status
         for marker in ("完成", "解决", "关闭", "resolved", "closed", "complete", "done", "finished")
     )
 

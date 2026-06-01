@@ -20,6 +20,9 @@
 17. 如果多个同场 NPC 在本回合明确移动或互动于同一新地点，也必须把该地点输出为 location_change，确保全局 active_scene 跟随主视角。
 18. 不要把纯时间标题（如“清晨”“夜晚”“片刻后”）当作 location_change。
 19. 如果 GM 输出明确写出某个 NPC 被带到新地点、正在当前场景互动、同处 location_change 指向的地点，或本回合的互动只能发生在新场景中，则在该 NPC 的 npc_updates 中写入 location；不要只更新 status/attitude。
+20. quest_updates 管理任务状态变化。主线任务状态由系统按剧本与证据自动派生，你只在任务状态发生明确变化时输出，且必须用 `id` 字段携带该任务在 runtime_story.main_quest_path 中的 id（字段名就是 `id`，不要用 `quest_id`）：`{"id": "main_quest_2", "status": "completed", "progress": "一句话当前进展"}`。status 取值 active|completed|failed。禁止输出既无 id 又无 title 的空任务。
+21. open_thread_updates 管理未解线索/伏笔。新增线索用 `{"id": "稳定的英文蛇形 id", "title": "简短线索名", "status": "active"}`，title 要短、可复用（便于跨回合关联），不要写整段长句叙述。当某条线索描述的事已在本回合解决（包括其对应的任务或锚点已完成），输出 `{"id": "原线索的 id", "action": "resolve"}` 关闭它——resolve 时必须带回原来的 id。
+22. faction_updates 用 `{"id": "势力 id", "name": "势力名", "status": "..."}`；new_lore_candidates / new_known_facts / new_hidden_facts 都是字符串数组，每条一句话陈述句。
 
 输出结构：
 {
@@ -29,14 +32,33 @@
   "inventory_add": [],
   "inventory_remove": [],
   "npc_updates": [],
-  "quest_updates": [],
-  "faction_updates": [],
+  "quest_updates": [
+    {
+      "id": "对应 main_quest_path 的 id（字段名用 id，不要用 quest_id）",
+      "status": "active|completed|failed",
+      "progress": "一句话当前进展（可选）"
+    }
+  ],
+  "faction_updates": [
+    {
+      "id": "势力 id",
+      "name": "势力名",
+      "status": "势力当前状态/态度"
+    }
+  ],
   "protagonist_updates": {},
   "variable_updates": {},
   "new_lore_candidates": [],
   "new_known_facts": [],
   "new_hidden_facts": [],
-  "open_thread_updates": [],
+  "open_thread_updates": [
+    {
+      "id": "稳定英文蛇形 id；resolve 时必须带回同一 id",
+      "title": "简短线索名（勿写长句）",
+      "status": "active",
+      "action": "仅在关闭线索时填 resolve"
+    }
+  ],
   "xp_events": [
     {
       "category": "story|discovery|survival|social|combat|craft",

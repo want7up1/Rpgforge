@@ -138,6 +138,8 @@ STATE_EVIDENCE_EXCLUDED_KEYS = {
     "variables",
     "hidden_facts",
     "story_progress",
+    # 未解线索是"未完成的目标描述"，不能当作"锚点已完成的证据"，否则自我实现式误判完成。
+    "open_threads",
 }
 
 
@@ -398,7 +400,8 @@ def _apply_upserts(state: dict[str, Any], key: str, updates: list[Any]) -> None:
         update = _normalized_upsert_update(update, collection_key=key)
         identifiers = _identity_candidates(update)
         if not identifiers:
-            collection.append(update)
+            # 归一后仍无任何身份键（id/name/title/...）的记录无法识别/去重/展示，
+            # 多为 LLM 产出的空壳（僵尸记录），直接丢弃。
             continue
         existing = _find_existing_by_identity(collection, identifiers)
         if existing is None:
@@ -420,6 +423,14 @@ def _normalized_upsert_update(
     }
     _merge_patch_fields(normalized, update.get("fields"))
     _merge_patch_fields(normalized, update.get("changes"))
+
+    # LLM 常用 {entity}_id 作为身份键（如 quest_id/npc_id/thread_id），归一到标准 id；
+    # 否则下游 _identity_candidates 取不到身份 → 记录被当成新行 append（僵尸记录根源）。
+    if not _has_value(normalized.get("id")):
+        for alias_key in ("quest_id", "npc_id", "faction_id", "thread_id", "entity_id"):
+            if _has_value(normalized.get(alias_key)):
+                normalized["id"] = deepcopy(normalized[alias_key])
+                break
 
     if collection_key == "npcs" and _has_value(normalized.get("condition")):
         normalized.setdefault("status", deepcopy(normalized["condition"]))
@@ -537,6 +548,13 @@ def _clean_thread_record(record: dict[str, Any]) -> dict[str, Any]:
     }
     _merge_patch_fields(cleaned, record.get("fields"))
     _merge_patch_fields(cleaned, record.get("changes"))
+    # LLM 常用 thread_id 作为线索身份键，归一到标准 id；否则 _thread_key 退化为按
+    # title/description 匹配 → 跨回合 resolve 时 id 漂移、关不掉旧线索。
+    if not _has_value(cleaned.get("id")):
+        for alias_key in ("thread_id", "entity_id"):
+            if _has_value(cleaned.get(alias_key)):
+                cleaned["id"] = deepcopy(cleaned[alias_key])
+                break
     if not _thread_key(cleaned) and not _thread_title(cleaned):
         return {}
     if not _text(cleaned.get("status") or cleaned.get("state")):
@@ -608,7 +626,10 @@ def _find_thread(
 
 def _thread_identity_values(record: dict[str, Any]) -> list[str]:
     values: list[str] = []
-    for key in ("id", "key", "title", "name"):
+    # 含 description：线索常一次带 thread_id+description（无 title）、另一次 resolve 只带
+    # title，而 description 与 title 往往同文；纳入 description 才能跨形态匹配同一线索、
+    # 避免归一后 id-key 与 title-key 对不上而分裂成两条。
+    for key in ("id", "key", "title", "name", "description"):
         text = _text(record.get(key))
         if text and text not in values:
             values.append(text)
@@ -616,8 +637,18 @@ def _thread_identity_values(record: dict[str, Any]) -> list[str]:
 
 
 def _merge_thread_record(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    target_resolved = _thread_action_resolves(
+        _text(target.get("status") or target.get("state")).lower()
+    )
     for key, value in incoming.items():
         if not _has_value(value):
+            continue
+        # 已 resolve 的线索不被普通 active 更新降级——LLM 再次提及不应让已关闭线索复活。
+        if (
+            key in {"status", "state"}
+            and target_resolved
+            and not _thread_action_resolves(_text(value).lower())
+        ):
             continue
         target[key] = value
 
@@ -1568,6 +1599,11 @@ def _thread_matches_completed_anchor(
     if thread_values.intersection(anchor_values):
         return True
 
+    # 子串兜底：已完成锚点的专名主题词（≥3 字）出现在线索文本中即判关联，
+    # 解决"线索是长句、_quest_thread_topic 返回空"导致的永不 resolve（仅已完成项，非剧透）。
+    if _completed_topic_in_thread(anchor, thread, ("title", "description", "completion_signal")):
+        return True
+
     thread_topics = {
         topic
         for key in ("title", "name")
@@ -1615,6 +1651,9 @@ def _thread_matches_completed_quest(thread: dict[str, Any], quest: dict[str, Any
     if thread_values.intersection(quest_values):
         return True
 
+    if _completed_topic_in_thread(quest, thread, ("title", "name")):
+        return True
+
     thread_topics = {
         topic
         for key in ("title", "name")
@@ -1639,6 +1678,28 @@ def _quest_thread_topic(value: str) -> str:
             topic = topic[: -len(suffix)]
             break
     return topic if 2 <= len(topic) <= 12 else ""
+
+
+def _completed_topic_in_thread(
+    record: dict[str, Any],
+    thread: dict[str, Any],
+    keys: tuple[str, ...],
+) -> bool:
+    """已完成的 anchor/quest 的专名主题词（≥3 字）作为子串出现在线索文本中即判关联。
+
+    仅用于已完成项（已发生的事实、非未来剧透），方向安全；要求 ≥3 字避免"星域/火光"
+    类短词误撞。解决线索为长句时 _quest_thread_topic 返回空、topic 交集永空 → 永不 resolve。
+    """
+    blob = _compact_text(
+        "\n".join(_text(thread.get(key)) for key in ("title", "name", "description"))
+    )
+    if not blob:
+        return False
+    for key in keys:
+        topic = _quest_thread_topic(_text(record.get(key)))
+        if len(topic) >= 3 and topic in blob:
+            return True
+    return False
 
 
 def _derived_quest_status(

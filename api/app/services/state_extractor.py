@@ -16,6 +16,10 @@ from app.services.story_settings import (
 )
 
 STATE_EXTRACTOR_TIMEOUT_SECONDS = 150.0
+# state delta 是全链路最大的结构化输出（库存/NPC/任务/线索/xp/技能/关系/lore 多段并存），
+# 4096 在高密度回合会截断导致整回合状态丢失。提到 8000（与 GM_REWRITE 同档），
+# 配合 json_utils 的尾部修补兜底，进一步降低截断丢回合的概率。
+STATE_EXTRACTOR_MAX_TOKENS = 8000
 SCENE_HEADING_RE = re.compile(r"^\s{0,3}#{3,4}\s+(.+?)\s*$", re.MULTILINE)
 PLACE_HINTS = (
     "基地",
@@ -169,7 +173,7 @@ class StateExtractor:
                     "state_delta_extract",
                     messages,
                     json_mode=True,
-                    max_tokens=4096,
+                    max_tokens=STATE_EXTRACTOR_MAX_TOKENS,
                     reasoning_effort=None,
                     respect_route=False,
                 ),
@@ -180,7 +184,7 @@ class StateExtractor:
                 f"状态提取超过 {int(STATE_EXTRACTOR_TIMEOUT_SECONDS)} 秒。"
             ) from exc
         try:
-            parsed = parse_json_object(result.content)
+            parsed = parse_json_object(result.content, repair_truncated=True)
             delta = StateDeltaExtraction.model_validate(parsed).model_dump()
             _backfill_scene_location_change(delta, current_state, turn)
             return delta
