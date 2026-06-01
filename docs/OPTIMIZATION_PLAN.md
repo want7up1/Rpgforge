@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 22 — 接通 DeepSeek prefix cache 观测：流式 include_usage + cache token 落 trace |
+| 最近一轮 | Round 22b — 游戏界面"本回合详情"折叠面板：token/cache/字数/observer |
 | 完成日期 | 2026-05-29 |
 | 文档卫生 | 2026-05-28 完成：归档 `PROJECT_GUIDE.md` / 补 CHANGELOG / 加文档现状索引（§5.3） |
 | 当前阶段 | AI 质量闭环完整 + 全链路测试覆盖。Round 1–15 本地 pgvector 实测 **102 tests pass** |
@@ -23,6 +23,26 @@
 ---
 
 ## 1. 已完成
+
+### Round 22b (2026-05-29) — 游戏界面"本回合详情"折叠面板（把观测搬到前端）
+
+用户要求：把 token/cache/字数/observer 直接显示在游戏界面，兼顾桌面/移动。决策（头脑风暴）：**每回合折叠面板**（`<details>`，默认收起，不伤沉浸；原生响应式，桌面移动统一），显示全部四类。
+
+**后端**：
+
+- `GET /api/games/{game_id}/turns/{turn_id}/insights`（`gameplay.py`）：聚合该回合 observation（`turn_job.turn_runtime_inputs.output_observation`）+ 各 agent token/cache（`agent_traces` where job_kind='turn' job_id=turn_job.id）+ 总计/命中率。schema `TurnInsights` / `TurnAgentCost`（`schemas/turn.py`）。
+- 链路：Turn → TurnJob(turn_id) → AgentTrace。
+
+**前端**：
+
+- `lib/api.ts`：`fetchTurnInsights` + `TurnInsights`/`TurnAgentCost` 类型。
+- `play/page.tsx`：`TurnInsightsPanel` 组件——最新回合结算卡下方的 `<details>`，**展开时才按需拉取**（onToggle，避免每回合请求）；显示本回合 token、缓存命中率、篇幅（字数/达标/段落）、canon 使用、各 agent token、质量观测 flags。
+
+**实测发现（首次端到端看见）**：真实回合 insights —— GM 流式 token 终于有数（in≈24k）；**全回合总 token≈70k，cache 命中率仅 ~4.5%**。→ 命中率低，印证设计文档"宪法层字节固化"（仍未做）值得做：当前 system 虽稳定但实际命中少，固化前缀可大幅提升。
+
+**改动文件**：`api/app/routers/gameplay.py`、`api/app/schemas/turn.py`、`web/lib/api.ts`、`web/app/games/[id]/play/page.tsx`。
+
+**部署**：`docker compose up -d --build api worker web`。**验证**：后端 `pytest tests/` **153 passed**、ruff 通过；web `next build`（含 tsc+lint）通过；endpoint 真实回合实测数据正确。
 
 ### Round 22 (2026-05-29) — 接通 DeepSeek prefix cache 观测（省 token 杠杆的度量前提）
 

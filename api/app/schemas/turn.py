@@ -57,6 +57,31 @@ class TurnRead(BaseModel):
     created_at: datetime
 
 
+class TurnAgentCost(BaseModel):
+    """单个 agent 在某回合的 token / cache 消耗。"""
+
+    agent: str
+    model: str | None = None
+    tokens_input: int | None = None
+    tokens_output: int | None = None
+    tokens_reasoning: int | None = None
+    cache_hit_tokens: int | None = None
+    cache_miss_tokens: int | None = None
+
+
+class TurnInsights(BaseModel):
+    """游戏界面"本回合详情"折叠面板的数据：观测 + token/cache。"""
+
+    turn_id: UUID
+    observation: dict[str, Any] | None = None
+    agents: list[TurnAgentCost] = Field(default_factory=list)
+    total_tokens_input: int = 0
+    total_tokens_output: int = 0
+    total_cache_hit_tokens: int = 0
+    total_cache_miss_tokens: int = 0
+    cache_hit_rate: float | None = None
+
+
 TurnJobStatus = Literal["pending", "running", "completed", "failed"]
 TurnJobMaintenanceStatus = Literal["pending", "running", "completed", "failed", "skipped"]
 

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { CharacterModal } from "@/components/CharacterModal";
@@ -19,10 +19,12 @@ import {
 import { buildTurnSettlement, type TurnSettlementView } from "@/lib/gameExperience";
 import {
   createTurnJob,
+  fetchTurnInsights,
   getActiveTurnJob,
   getCharacters,
   getGame,
-  getTurns
+  getTurns,
+  type TurnInsights
 } from "@/lib/api";
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
 import {
@@ -814,6 +816,10 @@ function StoryPanel({
         <TurnSettlementCard settlement={settlement} />
       ) : null}
 
+      {!pending && latestTurn ? (
+        <TurnInsightsPanel gameId={latestTurn.game_id} turnId={latestTurn.id} />
+      ) : null}
+
       {maintenanceActive ? (
         <section className="app-status">
           <strong className="block text-[color:var(--foreground)]">上一回合状态提取中</strong>
@@ -895,6 +901,99 @@ function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) 
         </details>
       ) : null}
     </article>
+  );
+}
+
+function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string }) {
+  const [data, setData] = useState<TurnInsights | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  // 折叠面板展开时才按需拉取，避免每回合都请求。
+  const handleToggle = useCallback(
+    (event: SyntheticEvent<HTMLDetailsElement>) => {
+      if (!event.currentTarget.open || loaded || loading) return;
+      setLoading(true);
+      setError(null);
+      fetchTurnInsights(gameId, turnId)
+        .then((result) => {
+          setData(result);
+          setLoaded(true);
+        })
+        .catch(() => setError("加载本回合详情失败。"))
+        .finally(() => setLoading(false));
+    },
+    [gameId, turnId, loaded, loading]
+  );
+
+  const obs = data?.observation as
+    | { generation?: Record<string, number | boolean>; flags?: string[];
+        canon?: { used?: number; total?: number } }
+    | undefined;
+  const gen = obs?.generation;
+  const flags = obs?.flags ?? [];
+  const hitRate =
+    data?.cache_hit_rate != null ? `${Math.round(data.cache_hit_rate * 100)}%` : "—";
+
+  return (
+    <details className="generation-detail-panel" onToggle={handleToggle}>
+      <summary>本回合详情 · 成本与质量</summary>
+      {loading ? (
+        <p className="mt-2 text-sm text-[color:var(--muted)]">加载中…</p>
+      ) : error ? (
+        <p className="mt-2 text-sm text-[color:var(--muted)]">{error}</p>
+      ) : data ? (
+        <dl className="generation-detail-grid">
+          <div>
+            <dt>本回合 token</dt>
+            <dd>
+              输入 {data.total_tokens_input} · 输出 {data.total_tokens_output}
+            </dd>
+          </div>
+          <div>
+            <dt>缓存命中率</dt>
+            <dd>
+              {hitRate}（命中 {data.total_cache_hit_tokens} / 未命中{" "}
+              {data.total_cache_miss_tokens}）
+            </dd>
+          </div>
+          {gen ? (
+            <div>
+              <dt>篇幅</dt>
+              <dd>
+                {gen.narrative_chars} 字 · {gen.meets_min_chars ? "达标" : "未达硬下限"} ·{" "}
+                {gen.paragraph_count} 段
+              </dd>
+            </div>
+          ) : null}
+          {obs?.canon ? (
+            <div>
+              <dt>canon 使用</dt>
+              <dd>
+                {obs.canon.used ?? 0}/{obs.canon.total ?? 0} 个专名
+              </dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>各 agent token</dt>
+            <dd>
+              {data.agents.length === 0
+                ? "—"
+                : data.agents
+                    .map((a) => `${a.agent} ${a.tokens_input ?? "?"}`)
+                    .join(" · ")}
+            </dd>
+          </div>
+          <div>
+            <dt>质量观测</dt>
+            <dd>{flags.length === 0 ? "无异常" : flags.join("；")}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-2 text-sm text-[color:var(--muted)]">展开加载本回合 token / 缓存 / 质量观测。</p>
+      )}
+    </details>
   );
 }
 
