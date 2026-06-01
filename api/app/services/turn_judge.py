@@ -94,7 +94,10 @@ class TurnJudge:
                     "turn_judge",
                     messages,
                     json_mode=True,
-                    max_tokens=1200,
+                    # judge 是结构化评分，不需要 reasoning；开 reasoning 会吃光 token 导致
+                    # 输出 JSON 被截断/空（原 max_tokens=1200 + high reasoning 必然失败）。
+                    max_tokens=3000,
+                    reasoning_effort=None,
                 ),
                 timeout=TURN_JUDGE_TIMEOUT_SECONDS,
             )
