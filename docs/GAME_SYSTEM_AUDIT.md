@@ -85,46 +85,48 @@
 
 ## 4. 分阶段修复路线图
 
+> **进度（Round 26-28）**：✅ 已完成 19 项（阶段 1-2 全 + 3.1-3.3 + 4.1 + 5.1/5.3 + 6 前端 + 7）+ dead code 已清理（Round 28）。⏳ 未勾项（3.4/4.2/5.2/5.4/6.1/6.4 + P3）均评估后暂缓，理由见 §2 各条与 OPTIMIZATION_PLAN Round 27/28。真实续玩已验证新回合线索/任务状态正确流转（角色I线索：已了结 resolved、对应未完成锚点的保持 active）。
+
 > 排序原则：先治根因与止血（阶段 1），再修用户可见 bug（阶段 2），再彻底落实 Round 16 教训（阶段 3），最后健壮性与体验。每阶段可独立交付、独立验证。改 apply 逻辑后**必须对真实存档跑一次 rebuild diff 回归**（重放幂等是前提）。
 
 ### 阶段 1 — 止血与契约根治（最高优先，最廉价、影响面最大）
-- [ ] **1.1 字段契约**：`extract_state_delta.md` 补 `quest_updates`/`open_thread_updates`/`faction_updates` item 模板（新增规则）；统一用 `id`。→ P1-1、R1
-- [ ] **1.2 身份键归一**：`_identity_candidates`/`_thread_key`/`_thread_identity_values`/`_existing_quest_statuses` 纳入 `quest_id`/`thread_id`。→ P1-1
-- [ ] **1.3 P0 软锁**：`failed` 加入 `REJECTABLE_STATUSES`；StateDelta 加 `attempt_count` 上限自动降级。→ P0-1
-- [ ] **1.4 截断兜底**：extractor 提高 max_tokens / reason 限长 + 尾部尽力解析。→ P2-7
+- [x] **1.1 字段契约**：`extract_state_delta.md` 补 `quest_updates`/`open_thread_updates`/`faction_updates` item 模板（新增规则）；统一用 `id`。→ P1-1、R1
+- [x] **1.2 身份键归一**：`_identity_candidates`/`_thread_key`/`_thread_identity_values`/`_existing_quest_statuses` 纳入 `quest_id`/`thread_id`。→ P1-1
+- [x] **1.3 P0 软锁**：`failed` 加入 `REJECTABLE_STATUSES`；StateDelta 加 `attempt_count` 上限自动降级。→ P0-1
+- [x] **1.4 截断兜底**：extractor 提高 max_tokens / reason 限长 + 尾部尽力解析。→ P2-7
 
 ### 阶段 2 — 线索/任务/锚点 resolve 与分桶修正（含用户最初报的 bug）
-- [ ] **2.1 线索匹配靠 id 关联**（`thread_id`↔锚点/quest `id`），子串兜底（已完成项主题词 ≥3 字）。→ P1-2
-- [ ] **2.2 `_thread_is_resolved` 不子串判 title**，只看显式 status/action。→ P1-4
-- [ ] **2.3 `_merge_thread_record` status 单调保护**。→ P1-3
-- [ ] **2.4 证据池排除 `open_threads`**。→ P2-1
+- [x] **2.1 线索匹配靠 id 关联**（`thread_id`↔锚点/quest `id`），子串兜底（已完成项主题词 ≥3 字）。→ P1-2
+- [x] **2.2 `_thread_is_resolved` 不子串判 title**，只看显式 status/action。→ P1-4
+- [x] **2.3 `_merge_thread_record` status 单调保护**。→ P1-3
+- [x] **2.4 证据池排除 `open_threads`**。→ P2-1
 
 ### 阶段 3 — 砍脆弱字符串匹配（Round 16 教训彻底落地）
-- [ ] **3.1 删 `_term_fragments` 滑窗 + `_anchor_key_term_evident` 模糊匹配**；锚点完成只信显式 + 整串 signal。→ P2-2、P2-3
-- [ ] **3.2 `_quest_status_bucket` 精确枚举 + 否定词检测**。→ P2-4
-- [ ] **3.3 `_act_activity_evident` 排除当前角色名 + 去片段**。→ P2-5
+- [x] **3.1 删 `_term_fragments` 滑窗 + `_anchor_key_term_evident` 模糊匹配**；锚点完成只信显式 + 整串 signal。→ P2-2、P2-3
+- [x] **3.2 `_quest_status_bucket` 精确枚举 + 否定词检测**。→ P2-4
+- [x] **3.3 `_act_activity_evident` 排除当前角色名 + 去片段**。→ P2-5
 - [ ] **3.4 证据池改白名单**（只收成果性字段）。→ P3-2
 
 ### 阶段 4 — 状态机与推进健壮性
-- [ ] **4.1 显式 `completed_anchors` 白名单校验**（拒绝未来幕/非法 anchor_id）。→ P3-1
+- [x] **4.1 显式 `completed_anchors` 白名单校验**（拒绝未来幕/非法 anchor_id）。→ P3-1
 - [ ] **4.2 `_sync_current_act_from_completed_anchors` 走 required 校验**；重放时 anchors 可重算。→ P2-6
 
 ### 阶段 5 — 基础字段与数值
-- [ ] **5.1 库存删除键归一 + 部分扣减 + 防负 + 非数值保留**。→ P1-5、P2-8
+- [x] **5.1 库存删除键归一 + 部分扣减 + 防负 + 非数值保留**。→ P1-5、P2-8
 - [ ] **5.2 NPC 场景定位收紧匹配**（显式移动模式 + 名称边界）。→ P2-9
-- [ ] **5.3 axis 未命中跳过（不默认 trust）**。→ P2-10
+- [x] **5.3 axis 未命中跳过（不默认 trust）**。→ P2-10
 - [ ] **5.4 `_merge_mapping`/`_apply_location`/`total_xp`/条件裸串/reason dict** 健壮化。→ P3-3~P3-7
 
 ### 阶段 6 — 关系 / 投影 / 前端
 - [ ] **6.1 关系合并取最新（带 turn）而非 max + 事件前别名归一**。→ P2-11、P2-12
-- [ ] **6.2 前端显示已完成任务**。→ P1-6
-- [ ] **6.3 线索 status 中文映射**。→ P2-15
+- [x] **6.2 前端显示已完成任务**。→ P1-6
+- [x] **6.3 线索 status 中文映射**。→ P2-15
 - [ ] **6.4 技能/能力同名处理 + recent_events 带 turn 去重 + 删冗余别名归一调用**。→ P3-8~P3-10
 
 ### 阶段 7 — 生成侧防线
-- [ ] **7.1 `validate_story_settings` 最小基数校验**（act_plan 非空、每幕 required 锚点 ≥1）。→ P2-13
-- [ ] **7.2 act_plan/main_quest_path 空分区触发重试**。→ P2-14
-- [ ] **7.3 outline 回退字段映射**（`completion_anchor_plan`→`completion_anchors`，补 title）。→ P1-7、P1-8
+- [x] **7.1 `validate_story_settings` 最小基数校验**（act_plan 非空、每幕 required 锚点 ≥1）。→ P2-13
+- [x] **7.2 act_plan/main_quest_path 空分区触发重试**。→ P2-14
+- [x] **7.3 outline 回退字段映射**（`completion_anchor_plan`→`completion_anchors`，补 title）。→ P1-7、P1-8
 
 ## 5. 验证与部署约定
 

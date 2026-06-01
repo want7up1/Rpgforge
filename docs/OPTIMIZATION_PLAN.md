@@ -13,16 +13,30 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 27 — 游戏系统修复第二批：砍脆弱字符串匹配 + 状态机 + 基础字段（阶段 3-5） |
+| 最近一轮 | Round 28 — 游戏系统修复收尾：死代码清理 + 路线图对齐 + 真实续玩验证 |
 | 完成日期 | 2026-06-01 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
 | ✅ 验证状态 | 容器内 159 pytest 全过；真实游玩验证两项硬成果：同场景重述修复（对照）、cache 命中率 ~5%→稳态 60%+（对照）。judge 量化基线 canon/safety/state 5/5（偏乐观，无严格改前对照） |
-| 下一步建议 | 游戏系统修复阶段 1-5 + 泳道(6前端/7) 已全部落地验证（§1 Round 26/27，176 pytest + 真实存档 rebuild 实证）。**P0 + 全部 P1 + 主要 P2 已闭环**。剩余：阶段 6 后端关系合并/分裂、3.4 证据池白名单、NPC 定位收紧、P3、dead code 清理——均评估后**暂缓**（P2 真实数据未暴露 / 砍 semantic 后边际收益低 / 避免引入新脆弱匹配），理由见 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) |
+| 下一步建议 | 游戏系统修复阶段 1-5 + 泳道(6前端/7) + 死代码清理已全部落地（§1 Round 26/27/28，176 pytest + 真实续玩 rebuild 实证）。**P0 + 全部 P1 + 主要 P2 已闭环**。剩余评估后**暂缓**项：3.4 证据池白名单、4.2 _sync_current_act required 校验、5.2 NPC 定位、5.4/6.4 P3 健壮化、6.1 关系合并/分裂——理由（P2 未暴露 / 砍 semantic 后边际收益低 / 避免新脆弱匹配）见 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) §4 |
 
 ---
 
 ## 1. 已完成
+
+### Round 28 (2026-06-01) — 游戏系统修复收尾：死代码清理 + 路线图对齐 + 真实续玩验证
+
+承接 Round 26/27，清理阶段 3 砍脆弱匹配后遗留的 dead code，对齐审查文档路线图勾选。
+
+**死代码清理**：删除 `state_applier.py` 中阶段 3 砍掉调用后已无引用的 8 个脆弱匹配函数（`_semantic_completion_matches`/`_anchor_action_terms`/`_anchor_action_evident`/`_anchor_key_terms`/`_anchor_key_term_evident`/`_term_fragments`/`_ordered_completion_match`/`_useful_anchor_fragment`）+ 4 个仅它们引用的常量（`ANCHOR_ACTION_TERMS`/`ANCHOR_ACTION_EQUIVALENTS`/`ANCHOR_TERM_SPLIT_RE`/`ANCHOR_TERM_STOPWORDS`），约 200 行。保留仍被引用的 `_compact_text`/`_activity_markers`/`_meaningful_phrases`/`THREAD_QUEST_TOPIC_PREFIXES`/`ACTIVITY_MARKER_STOPWORDS`。用字符串边界 + assert 精确删除，`ruff` 确认无未使用 import 残留。
+
+**真实续玩验证（意外收获）**：用户合并部署后续玩数回合，产生新剧情（角色I线索）。rebuild 实测新回合状态正确流转——4 条线索中 3 条已了结 `resolved`、"角色I的囚徒"对应**未完成**锚点 `act_1_first_captive`（首次收服俘虏）正确保持 `active`，v2 投影前端显示 1 条未解线索。**证明 Round 26-27 修复（id 归一管理线索、锚点联动 resolve、prompt 规则 20/21）在真实新回合工作正常**。
+
+**路线图对齐**：`GAME_SYSTEM_AUDIT.md` §4 勾选 19 个已完成项（阶段 1-2 全 + 3.1-3.3 + 4.1 + 5.1/5.3 + 6 前端 + 7）。
+
+**诚实 nuance**：个别勾选项只落地核心——5.1 做了"删除键归一"(P1)，"部分扣减/防负/非数值保留"(P2-8) 暂缓；3.3 做了"去碎片"(P2-5 主因)，"排除当前角色名"额外加固暂缓。
+
+**验证**：容器内 `pytest tests/` **176 passed**、`ruff check` 全过；真实存档 rebuild 回归无异常漂移。**部署**：`docker compose up -d --build api worker`。
 
 ### Round 27 (2026-06-01) — 游戏系统修复第二批：砍脆弱字符串匹配 + 状态机 + 基础字段（阶段 3-5）
 
