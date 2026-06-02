@@ -1,23 +1,64 @@
-# RPGForge
+<p align="center">
+  <img src="web/public/rpg-deepseek-logo.png" alt="RPGForge" width="200" />
+</p>
 
-RPGForge is a Docker-first AI text RPG engine for creating and playing structured, long-running narrative games.
+<h1 align="center">RPGForge</h1>
 
-It combines a rule/world generator, a focused play interface, persistent game state, worldbook retrieval, character archives, Markdown narrative rendering, and server-side streaming jobs for AI output. The project is currently in early public preview and is intended for self-hosted experimentation.
+<p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 
-## Features
+<p align="center"><em>Your own AI Game Master. Pick any world, and play a long-running text RPG where the story remembers you.</em></p>
 
-- AI-assisted game setup with interview, outline, and parallel section generation.
-- DeepSeek model routing for rule generation, story output, director checks, drift validation, state extraction, and memory compression.
-- Turn-based gameplay with streamed narrative output, A/B/C/D choices, and free-form player actions.
-- Structured state v2 with player status, XP, abilities, skill proficiency, NPC relationships, quests, conditions, and open threads.
-- Story director and drift validator layers to keep gameplay closer to the original rules and world assumptions.
-- Worldbook retrieval with deterministic local vectors and pgvector.
-- Context summaries for turn, chapter, and long-term memory.
-- Character archives with user-uploaded portrait images.
-- Mobile-friendly play UI, desktop dashboard pages, uploaded character portraits, and Markdown story rendering.
-- Single public web port in Docker; the browser talks to Next.js, and Next.js proxies API traffic internally.
+---
 
-## Architecture
+RPGForge is a self-hosted AI text RPG engine. You describe the kind of adventure you want — a cyberpunk heist, a wuxia revenge tale, survival horror, a slice-of-life academy — and the AI interviews you, builds the whole world and ruleset, then runs it as your Game Master, turn after turn.
+
+It's currently in early public preview and built to be self-hosted with Docker.
+
+## What it feels like to play
+
+- **You bring the idea, the AI builds the world.** Answer a short interview and RPGForge generates a complete, playable game: setting, rules, factions, characters, and an opening scene.
+- **Every turn is real storytelling.** The AI writes the scene as it streams in, then offers you A/B/C/D choices — or just type whatever you want to do instead.
+- **Your character actually grows.** XP, abilities, skill proficiency, conditions, quests, and open story threads are tracked as real game state, not just flavor text.
+- **NPCs remember you.** Relationships shift based on what you actually do, and the world keeps the receipts.
+- **The story stays on track.** Behind the scenes, a "story director" and a "drift validator" keep every turn faithful to the world and rules you started with — so the AI doesn't quietly forget the plot.
+- **It remembers the long game.** Turn, chapter, and long-term memory layers let a single adventure run for a very long time without losing the thread.
+- **Play anywhere.** A mobile-friendly play screen, a desktop dashboard, character archives with portraits, and clean Markdown storytelling.
+
+## Quick Start (play it yourself)
+
+RPGForge runs as a Docker stack — one command and a browser is all you need.
+
+Requirements: Docker 29+ and Docker Compose v2.
+
+1. Copy the environment file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Add a DeepSeek API key — either in `.env` (`DEEPSEEK_API_KEY=...`) or later on the in-app `/settings` page.
+
+3. Start everything:
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. Open the game:
+   - Web: http://localhost:3000
+   - On your phone (same Wi-Fi): `http://<your-computer-lan-ip>:3000`
+
+Then hit **New Game**, answer the interview, and start playing.
+
+> Only the web port is exposed by default. The browser talks to Next.js, which proxies everything to the API inside Docker. Not sure it's up? Check http://localhost:3000/health.
+
+---
+
+## Self-hosting & development
+
+The rest of this document is for people running, configuring, or hacking on RPGForge.
+
+### Architecture
 
 ```text
 Browser
@@ -42,36 +83,14 @@ Services are defined in `docker-compose.yml`:
 - `postgres`: PostgreSQL with pgvector.
 - `redis`: job queue and progress cache.
 
-## Requirements
+### Requirements
 
 - Docker 29+
 - Docker Compose v2
 - Node.js 22+ for local frontend development
 - Python 3.11+ for local backend development
 
-## Quick Start
-
-Copy the environment file:
-
-```bash
-cp .env.example .env
-```
-
-Start the stack:
-
-```bash
-docker compose up -d --build
-```
-
-Open the app:
-
-- Web: http://localhost:3000
-- Health check through the web proxy: http://localhost:3000/health
-- Same-LAN mobile testing: `http://<computer-lan-ip>:3000`
-
-Only the web service exposes a host port by default. API requests go through the Next.js proxy to the Docker-internal FastAPI service.
-
-## Configuration
+### Configuration
 
 Set secrets in `.env` or in the app settings page. Do not commit `.env`.
 
@@ -90,7 +109,7 @@ Important variables:
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more details.
 
-## Development
+### Development
 
 Run the backend locally:
 
@@ -116,7 +135,7 @@ Apply database migrations from `api/`:
 alembic upgrade head
 ```
 
-## Checks
+### Checks
 
 Backend:
 
@@ -141,7 +160,7 @@ docker compose up -d --build api worker web
 docker compose ps
 ```
 
-## Observability & AI Quality
+### Observability & AI quality
 
 Every LLM call (story director, GM, drift validator, state extractor, context
 compressor, judge, generator) is recorded in the `agent_traces` table with its
@@ -176,7 +195,7 @@ python -m scripts.judge_turn --game-id <UUID> --last 1     # LLM-as-Judge score 
 
 See [Optimization Plan](docs/OPTIMIZATION_PLAN.md) for the full design and roadmap.
 
-## Documentation
+### Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Configuration](docs/CONFIGURATION.md)
@@ -185,7 +204,7 @@ See [Optimization Plan](docs/OPTIMIZATION_PLAN.md) for the full design and roadm
 - [AI Story Runtime Guide](docs/AI_STORY_RUNTIME_GUIDE.md)
 - [Optimization Plan](docs/OPTIMIZATION_PLAN.md)
 
-## Security
+### Security
 
 RPGForge is built for self-hosting. Before exposing it publicly:
 
@@ -197,7 +216,7 @@ RPGForge is built for self-hosting. Before exposing it publicly:
 
 See [SECURITY.md](SECURITY.md).
 
-## Roadmap
+### Roadmap
 
 - Improve real-play stability and long-session memory behavior.
 - Add import/export flows for game templates and game saves.
