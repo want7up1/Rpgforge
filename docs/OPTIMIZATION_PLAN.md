@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 32 — 游戏方向审查（多 Agent 并行，只审查不改码），产出 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) |
-| 完成日期 | 2026-06-02 |
+| 最近一轮 | Round 33 — 游戏方向第一梯队落地：B1 结局闭环 + C1 开局序章 + C2 目标条 + C3 引导卡 |
+| 完成日期 | 2026-06-03 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
@@ -24,6 +24,34 @@
 ---
 
 ## 1. 已完成
+
+### Round 33 (2026-06-03) — 游戏方向第一梯队落地（B1 结局闭环 + C1 开局序章 + C2 目标条 + C3 引导卡）
+
+承接 Round 32 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4，落地第一梯队全部 4 项（低成本、立竿见影）。执行顺序：C2/C3（纯前端速赢）→ B1（核心链路）→ C1（生成管线）。
+
+**B1 结局闭环（P0，最刺眼）**：补齐「打通后无结局」。
+- 末幕检测：`state_applier._sync_story_progress_and_quests` 末尾——`current_act` 是 `act_plan` 最后一幕且 `_computed_ready_for_next_act` 为 True（末幕 required 锚点全完成）→ 幂等置 `story_progress["campaign_complete"]=True`（随 state 持久化、rebuild 时确定性重算）。
+- 尾声生成：新增 `epilogue_generator.py::EpilogueGenerator`（Pro 自由文本，独立 `EPILOGUE_TIMEOUT_SECONDS=180`，失败/超时返回空串走 fallback）+ 新 prompt `generate_epilogue.md`。
+- 触发与置状态：`turn_maintenance_jobs._finalize_campaign_if_complete`（`_apply_delta` 后调用）——检测 campaign_complete 且 `game.status!="completed"` → 生成 epilogue → 置 `game.status="completed"`，epilogue 写入 **live state + initial_state**（后者保证 rebuild 重放不丢，尾声不随 delta 重算）。LLM 调用在 session 之外，避免长事务。`game.status` 从此首次被赋予「通关」语义（此前恒为 `draft`/`active`，B1 勘误见 Round 32）。
+- 前端：`game.status==="completed"` → play 页切 `CampaignEndingCard`（尾声正文 + 旅程回顾 + 开新档），停用输入框。`GameRead.status` 既有，无需改 schema。
+
+**C2 play 页目标条（P0）**：主界面看不到目标 → 修。
+- 后端：`_sync_story_progress_and_quests` 派生 `current_act_title`/`current_act_objective`（`_act_record_for` 取自 `act_plan`）写入 story_progress；`state_v2._story_progress` 投影带出（连同 `campaign_complete`/`epilogue`）。
+- 前端：story 列顶部固定 `ObjectivePanel`（当前幕目标 + 本幕锚点进度 + active 任务前 2 条 + 首条未解线索），数据全取自 stateV2。
+
+**C3 首次引导卡（P0）**：零新手引导 → 修。
+- 前端：首次进 play 弹一次性 `OnboardingCard`（`localStorage` key `rpgforge.onboarding.play.v1` 记忆），解释四种输入模式 +「你可以尝试任何行动」；四模式说明抽成共享 `MODE_GUIDE`，模式按钮加 `title` tooltip。
+
+**C1 开局序章（P0，最重，触及生成管线）**：空白冷启动 → 修。
+- 新增 `opening_scene_generator.py::OpeningSceneGenerator`（Pro 自由文本，独立 `OPENING_TIMEOUT_SECONDS=150`，fallback 空串）+ 新 prompt `generate_opening.md`。
+- `routers/generator.py::generator_create_game` 改 `async`，建游戏后 `_generate_opening_scene` 生成开场写入 **turn 0**（display-only：`state_delta_json={}`、不产生 StateDelta、不参与 rebuild 重放；`_next_turn_number` 仍从 1 起）。失败静默跳过保持原空开局。**仅 AI 生成流程接入**，手动建游戏（`games.py`，空白 config）不接。
+- 前端：turn 0 特判——隐藏「玩家行动」块/结算卡/insights，GM 块标签显示「序章」。
+
+**新增 LLM 调用（遵 CLAUDE.md）**：epilogue / opening 两处均设独立 timeout + fallback。新增 prompt 两个（`generate_epilogue.md` / `generate_opening.md`，全新文件无既有规则编号）。
+
+**验证**：容器内 `pytest tests/` **188 passed**（+8：新增 `tests/test_round33_features.py` 覆盖 campaign_complete 正/负例、非末幕不误判、title/objective 派生、两生成器 fallback/成功）、`ruff check` 全过；web `next build`（tsc+lint）通过。**部署**：`docker compose up -d --build api worker web`。
+
+> 待真实游玩验证：① 打通末幕后是否如期出现「剧终」卡 + 尾声；② 新建 AI 游戏进 play 是否直接看到序章而非空白框；③ 目标条/引导卡展示。第二梯队（A1 判定层等）见审查文档 §4，未动。
 
 ### Round 32 (2026-06-02) — 游戏方向审查（多 Agent 并行，只审查不改码）
 

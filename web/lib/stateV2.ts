@@ -100,6 +100,10 @@ export type StoryProgressState = {
   last_anchor_update_turn: number | null;
   next_act: string;
   current_act_anchor_progress: { done: number; total: number };
+  current_act_title: string;
+  current_act_objective: string;
+  campaign_complete: boolean;
+  epilogue: string;
   act_history: {
     turn: number | null;
     from_act: string;
@@ -402,6 +406,10 @@ function normalizeStoryProgress(value: unknown): StoryProgressState {
     last_anchor_update_turn: optionalNumber(progress.last_anchor_update_turn),
     next_act: asString(progress.next_act),
     current_act_anchor_progress: normalizeAnchorProgress(progress.current_act_anchor_progress),
+    current_act_title: asString(progress.current_act_title),
+    current_act_objective: asString(progress.current_act_objective),
+    campaign_complete: asBoolean(progress.campaign_complete, false),
+    epilogue: asString(progress.epilogue),
     act_history: asRecordList(progress.act_history)
       .map((item) => ({
         turn: optionalNumber(item.turn),

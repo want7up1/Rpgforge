@@ -953,6 +953,16 @@ def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: A
         "done": sum(1 for aid in required_ids if aid in done_ids),
         "total": len(required_ids),
     }
+    # C2 目标条：把当前幕标题/目标派生进 story_progress，供 state_v2 投影 + 前端 play 页固定展示。
+    current_act_record = _act_record_for(config, current_act)
+    progress["current_act_title"] = _text(current_act_record.get("title"))
+    progress["current_act_objective"] = _text(current_act_record.get("objective"))
+    # B1 结局闭环：末幕（act_plan 最后一幕）required 锚点全完成 → 幂等标记 campaign_complete。
+    # 该标记随 story_progress 持久化、且在每次 rebuild 重放时确定性重算；epilogue 生成与
+    # game.status=completed 由 maintenance 据此触发（见 turn_maintenance_jobs）。
+    if current_act and current_act in _act_identifiers(acts[-1]):
+        if _computed_ready_for_next_act(config, current_act, anchor_target) is True:
+            progress["campaign_complete"] = True
 
 
 def _advance_story_progress(
@@ -2083,6 +2093,15 @@ def _configured_current_act(config: Any) -> str:
 def _act_identity(act: dict[str, Any]) -> str:
     identifiers = _act_identifiers(act)
     return identifiers[0] if identifiers else ""
+
+
+def _act_record_for(config: Any, act_id: str) -> dict[str, Any]:
+    if not act_id:
+        return {}
+    for act in _script_acts(config):
+        if act_id in _act_identifiers(act):
+            return act
+    return {}
 
 
 def _act_identifiers(act: dict[str, Any]) -> list[str]:

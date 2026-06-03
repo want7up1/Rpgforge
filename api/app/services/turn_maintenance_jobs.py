@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -13,11 +14,14 @@ from app.services.agent_traces import set_trace_context
 from app.services.characters import sync_characters_from_game
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
+from app.services.epilogue_generator import EpilogueGenerator
 from app.services.game_activity import touch_game
 from app.services.gameplay import gameplay_game_query
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
 from app.services.state_settlement import record_failed_turn_state_delta
+from app.services.state_v2 import state_v2_view
+from app.services.story_settings import build_runtime_story
 from app.services.turn_jobs import publish_turn_job_snapshot
 
 logger = logging.getLogger(__name__)
@@ -71,6 +75,9 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
         return
 
     _apply_delta(job_id, delta_json)
+
+    # B1 结局闭环：末幕打通后生成尾声并置 game.status=completed（幂等、独立 fallback）。
+    await _finalize_campaign_if_complete(job_id)
 
     if not _should_update_memory(job_id):
         _mark_maintenance_terminal(
@@ -160,6 +167,102 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
         db.add(turn)
         touch_game(db, game.id)
         db.commit()
+
+
+async def _finalize_campaign_if_complete(job_id: UUID) -> None:
+    """末幕打通则生成 epilogue 并置 game.status=completed。
+
+    幂等：game.status 已是 completed 或 campaign_complete 未置时直接返回。
+    epilogue 生成失败/超时返回空串，此时仅置状态、不写尾声正文（前端展示 fallback）。
+    LLM 调用放在 session 之外，避免长事务占用连接。
+    """
+    context = _load_campaign_completion_context(job_id)
+    if context is None:
+        return
+    try:
+        epilogue = await EpilogueGenerator().generate(context["payload"])
+    except Exception:
+        logger.exception("Epilogue generation crashed for job %s", job_id)
+        epilogue = ""
+    _persist_campaign_completion(context["game_id"], epilogue)
+    publish_turn_job_snapshot(job_id)
+
+
+def _load_campaign_completion_context(job_id: UUID) -> dict[str, Any] | None:
+    with SessionLocal() as db:
+        job = db.get(TurnJob, job_id)
+        if job is None or job.turn_id is None:
+            return None
+        game = db.scalars(gameplay_game_query(job.game_id)).first()
+        if game is None or game.state is None or game.status == "completed":
+            return None
+        state_json = game.state.state_json or {}
+        progress = state_json.get("story_progress")
+        if not (isinstance(progress, dict) and progress.get("campaign_complete")):
+            return None
+
+        runtime_story = build_runtime_story(game.config, state_json)
+        view = state_v2_view(state_json)
+        recent = db.scalars(
+            select(Turn)
+            .where(Turn.game_id == game.id)
+            .order_by(Turn.turn_number.desc())
+            .limit(8)
+        ).all()
+        payload = {
+            "game": {
+                "title": game.title,
+                "genre": game.genre,
+                "description": game.description,
+            },
+            "worldview": runtime_story.get("worldview"),
+            "story_core": runtime_story.get("story_core"),
+            "completed_acts": progress.get("completed_acts", []),
+            "protagonist": view.get("protagonist_sheet"),
+            "key_relationships": [
+                {
+                    "npc": rel.get("npc"),
+                    "stage": rel.get("stage"),
+                    "attitude": rel.get("attitude") or rel.get("relationship"),
+                }
+                for rel in (view.get("relationship_tracks") or [])
+            ][:8],
+            "recent_choices": [
+                {"turn": turn.turn_number, "player_input": turn.player_input}
+                for turn in reversed(recent)
+            ],
+        }
+        return {"game_id": game.id, "payload": payload}
+
+
+def _persist_campaign_completion(game_id: Any, epilogue: str) -> None:
+    with SessionLocal() as db:
+        game = db.scalars(gameplay_game_query(game_id)).first()
+        if game is None or game.state is None or game.status == "completed":
+            return
+        game.status = "completed"
+        if epilogue:
+            # 写入 live state（即时展示）+ initial_state（rebuild 重放时保留，
+            # 尾声不随 delta 重算）。JSONB 需整体重新赋值，SQLAlchemy 才能侦测到嵌套变更。
+            game.state.state_json = _with_epilogue(game.state.state_json, epilogue)
+            game.state.initial_state_json = _with_epilogue(
+                game.state.initial_state_json, epilogue
+            )
+        db.add(game)
+        db.add(game.state)
+        touch_game(db, game.id)
+        db.commit()
+
+
+def _with_epilogue(state_json: Any, epilogue: str) -> dict[str, Any]:
+    base = deepcopy(state_json) if isinstance(state_json, dict) else {}
+    progress = base.setdefault("story_progress", {})
+    if not isinstance(progress, dict):
+        progress = {}
+        base["story_progress"] = progress
+    progress["epilogue"] = epilogue
+    progress["campaign_complete"] = True
+    return base
 
 
 def _mark_extractor_failed(job_id: UUID) -> None:
