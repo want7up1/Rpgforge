@@ -25,6 +25,19 @@
 
 ## 1. 已完成
 
+### Round 35 (2026-06-03) — 修「下载填写说明」文档与 schema 漂移
+
+- **背景**：`settings_guide_exporter.py` 的字段说明表是手工硬编码的，schema（`story_settings.py` 的 `normalize_story_settings`）后续加字段后没人同步，导致导出的填写说明文档漏掉了 14 个规范化字段。
+- **补全字段**（导出文档 `_append_field_reference` 已对齐 schema）：
+  - `story_core`：`emotional_arc`、`narrative_style`
+  - `core_characters[]`：`aliases`、`relationship_arc`、`portrait_prompt`
+  - `act_plan[]`：`must_hit_beats`；`completion_anchors[]` 的 `title`/`required`/`description`
+  - `main_quest_path[]`：`optional`
+  - `action_style_rules[]`：`name`
+  - `story_material_library[]`：`priority`（影响 `_material_score` 召回打分）、`visibility`、`enabled`
+- **加护栏测试**：`test_games.py::test_settings_guide_documents_every_normalized_field` —— 用满数组样例过 `normalize_story_settings`，递归收集所有产出字段名，断言每个都在导出 Markdown 里以独立词出现；以后 schema 加字段忘了同步文档会直接报红。
+- 容器内 `pytest -k "guide or normalized_field"` 2 passed。未改 LLM 链路 / prompt 规则编号。
+
 ### Round 34 (2026-06-03) — 游戏方向第二梯队落地（A1 判定层 + A2 数值反哺 + B3/A3 压力与失败 + B5 松绑校验 + C5/C6 重roll与回退）
 
 承接 Round 33，落地 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 **第二梯队全部 5 簇**——把项目从「带强约束的 AI 叙事生成器」推向「真正的游戏」（博弈/失败/能动性）。
