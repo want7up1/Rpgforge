@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal, get_db
+from app.models.game import Game
 from app.models.generator_job import GeneratorChatJob, GeneratorFinalizeJob
+from app.models.turn import Turn
 from app.routers.games import game_detail_response, get_game_or_404
 from app.schemas.generator import (
     GeneratedGameConfig,
@@ -23,11 +25,15 @@ from app.schemas.generator import (
     GeneratorFinalizeRequest,
     GeneratorFinalizeResponse,
 )
+from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
 from app.services.game_creator import create_game_from_config
 from app.services.game_generator import GameGeneratorService, ModelOutputValidationError
 from app.services.generator_stream_events import generator_stream_event_broker
 from app.services.job_queue import enqueue_chat_job, enqueue_finalize_job
+from app.services.opening_scene_generator import OpeningSceneGenerator
+from app.services.state_v2 import state_v2_view
+from app.services.story_settings import build_runtime_story
 from app.services.turn_stream_events import TurnStreamEvent, format_sse_event
 
 router = APIRouter(prefix="/api/generator", tags=["generator"])
@@ -256,12 +262,48 @@ async def stream_finalize_job_events(
     response_model=GeneratorCreateGameResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def generator_create_game(
+async def generator_create_game(
     payload: GeneratorCreateGameRequest,
     db: Session = DB_DEPENDENCY,
 ) -> GeneratorCreateGameResponse:
     game = create_game_from_config(db, payload.generated_config)
+    # C1 开局序章：建好游戏后生成开场白写入 turn 0；失败/超时静默跳过，保持原空开局。
+    await _generate_opening_scene(db, game)
     return GeneratorCreateGameResponse(game=game_detail_response(get_game_or_404(db, game.id)))
+
+
+async def _generate_opening_scene(db: Session, game: Game) -> None:
+    if game.config is None or game.state is None:
+        return
+    state_json = game.state.state_json or {}
+    runtime_story = build_runtime_story(game.config, state_json)
+    view = state_v2_view(state_json)
+    opening_payload = {
+        "game": {"title": game.title, "genre": game.genre, "description": game.description},
+        "worldview": runtime_story.get("worldview"),
+        "story_core": runtime_story.get("story_core"),
+        "home_base": runtime_story.get("home_base"),
+        "current_act": runtime_story.get("current_act"),
+        "protagonist": view.get("protagonist_sheet"),
+    }
+    # 让本次开场 LLM 调用的 agent_trace 可归属（job_kind=opening），便于排查。
+    set_trace_context("opening", game.id)
+    prologue = await OpeningSceneGenerator().generate(opening_payload)
+    if not prologue:
+        return
+    # turn 0 是 display-only：state_delta 为空、不产生 StateDelta 记录，不参与 rebuild 重放；
+    # _next_turn_number 取 max(turn_number)+1 仍为 1，首个真实回合编号不变。
+    db.add(
+        Turn(
+            game_id=game.id,
+            turn_number=0,
+            player_input="（冒险开始）",
+            gm_output=prologue,
+            action_options_json=[],
+            state_delta_json={},
+        )
+    )
+    db.commit()
 
 
 def _chat_job_read(job: GeneratorChatJob) -> GeneratorChatJobRead:

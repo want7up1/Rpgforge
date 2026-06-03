@@ -47,6 +47,16 @@ import type {
 
 type ActionMode = "action" | "say" | "story" | "continue";
 
+const ONBOARDING_KEY = "rpgforge.onboarding.play.v1";
+
+// 四种输入模式的说明，引导卡与模式按钮 tooltip 共用，保证文案一致。
+const MODE_GUIDE: { key: ActionMode; label: string; hint: string }[] = [
+  { key: "action", label: "行动", hint: "做一件事。例：我撬开抽屉翻找钥匙。" },
+  { key: "say", label: "对话", hint: "说一句话。例：我问她，出口在哪？" },
+  { key: "story", label: "叙述", hint: "推动镜头/旁白方向。例：镜头转向门外的脚步声。" },
+  { key: "continue", label: "继续", hint: "留空直接发送，让 GM 顺势推进剧情。" }
+];
+
 type LoadState =
   | { status: "loading" }
   | { status: "ready"; game: GameDetail; turns: TurnRead[]; characters: CharacterRead[] }
@@ -62,6 +72,27 @@ export default function PlayPage() {
   const [turnProcess, setTurnProcess] = useState<TurnJobRead | null>(null);
   const [actionMode, setActionMode] = useState<ActionMode>("action");
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterRead | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // C3 首次引导卡：仅首次进 play 页弹一次，localStorage 记忆后不再打扰。
+  useEffect(() => {
+    try {
+      if (!window.localStorage.getItem(ONBOARDING_KEY)) {
+        setShowOnboarding(true);
+      }
+    } catch {
+      // localStorage 不可用（隐私模式等）时静默跳过，不阻断游戏。
+    }
+  }, []);
+
+  const dismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    try {
+      window.localStorage.setItem(ONBOARDING_KEY, "1");
+    } catch {
+      // 写入失败可接受，最多下次再弹一次。
+    }
+  }, []);
 
   const latestTurn = useMemo(() => {
     if (state.status !== "ready" || state.turns.length === 0) {
@@ -76,6 +107,8 @@ export default function PlayPage() {
   );
   const maintenanceActive = isTurnMaintenanceActive(turnProcess);
   const backgroundMaintenanceActive = isTurnBackgroundMaintenanceActive(turnProcess);
+  // B1 结局闭环：游戏打通后 status=completed，切到「剧终」视图并停用输入框。
+  const isCompleted = state.status === "ready" && state.game.status === "completed";
 
   useEffect(() => {
     document.documentElement.classList.add("gameplay-scroll-lock");
@@ -317,6 +350,10 @@ export default function PlayPage() {
               <section className="adventure-story-scroll">
                 <div className="adventure-story-column">
                   {error ? <div className="app-alert mb-4">{error}</div> : null}
+                  {isCompleted && stateV2 ? (
+                    <CampaignEndingCard gameId={params.id} stateV2={stateV2} />
+                  ) : null}
+                  {!isCompleted && stateV2 ? <ObjectivePanel stateV2={stateV2} /> : null}
                   {stateV2 ? (
                     <PresentCharactersStrip
                       characters={state.characters}
@@ -336,16 +373,24 @@ export default function PlayPage() {
                     maintenanceActive={maintenanceActive}
                     backgroundMaintenanceActive={backgroundMaintenanceActive}
                   />
-                  <AdventureComposer
-                    actionMode={actionMode}
-                    disabled={pending || maintenanceActive}
-                    input={input}
-                    maintenanceActive={maintenanceActive}
-                    onInputChange={setInput}
-                    onModeChange={setActionMode}
-                    onSubmit={handleSubmit}
-                    pending={pending}
-                  />
+                  {isCompleted ? (
+                    <footer className="adventure-composer">
+                      <div className="adventure-composer-inner text-sm text-[color:var(--muted)]">
+                        本场冒险已抵达结局，旅程到此圆满。可在上方开启新的冒险。
+                      </div>
+                    </footer>
+                  ) : (
+                    <AdventureComposer
+                      actionMode={actionMode}
+                      disabled={pending || maintenanceActive}
+                      input={input}
+                      maintenanceActive={maintenanceActive}
+                      onInputChange={setInput}
+                      onModeChange={setActionMode}
+                      onSubmit={handleSubmit}
+                      pending={pending}
+                    />
+                  )}
                 </div>
               </section>
             </main>
@@ -363,6 +408,7 @@ export default function PlayPage() {
               selectedCharacter ? buildCharacterRuntimeView(selectedCharacter, stateV2) : null
             }
           />
+          {showOnboarding ? <OnboardingCard onDismiss={dismissOnboarding} /> : null}
         </>
       )}
     </AppShell>
@@ -543,6 +589,116 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
   );
 }
 
+// B1 结局闭环：打通最后一幕后展示「剧终」卡片——尾声正文 + 旅程回顾 + 开新档入口。
+function CampaignEndingCard({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 }) {
+  const epilogue = stateV2.story_progress.epilogue;
+  const completedActs = stateV2.story_progress.completed_acts.length;
+
+  return (
+    <section className="campaign-ending-card" aria-label="剧终">
+      <div className="campaign-ending-head">
+        <span className="campaign-ending-badge">剧终</span>
+        <span className="text-sm text-[color:var(--muted)]">
+          你走完了这段冒险{completedActs > 0 ? ` · 共 ${completedActs} 幕` : ""}
+        </span>
+      </div>
+      {epilogue ? (
+        <div className="campaign-ending-epilogue">
+          <StoryMarkdown content={epilogue} />
+        </div>
+      ) : (
+        <p className="mt-3 text-sm leading-7 text-[color:var(--muted)]">
+          故事在此落幕。你的抉择把这段旅程带到了终点。
+        </p>
+      )}
+      <div className="campaign-ending-actions">
+        <Link className="app-button app-button-primary" href="/games/new">
+          开启新冒险
+        </Link>
+        <Link className="app-button" href={`/games/${gameId}/history`}>
+          回顾旅程
+        </Link>
+        <Link className="app-button" href="/games">
+          所有存档
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+// C3 首次引导卡：一次性解释四种输入模式 +「你可以尝试任何行动」，降低上手门槛。
+function OnboardingCard({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-label="新手引导">
+      <div className="onboarding-card app-card app-card-pad">
+        <h2 className="text-xl font-black">开始你的冒险</h2>
+        <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+          这是一场由 AI 主持的文字 RPG。<strong className="text-[color:var(--foreground)]">你可以尝试任何行动</strong>
+          ——直接在输入框里写下你想做的事，GM 会据此推进剧情。下方四种输入模式只是帮你表达意图：
+        </p>
+        <ul className="onboarding-mode-list">
+          {MODE_GUIDE.map((mode) => (
+            <li key={mode.key}>
+              <span className="onboarding-mode-name">{mode.label}</span>
+              <span className="onboarding-mode-hint">{mode.hint}</span>
+            </li>
+          ))}
+        </ul>
+        <button className="app-button app-button-primary mt-4 w-full" onClick={onDismiss} type="button">
+          知道了，开始冒险
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// C2 目标条：游玩主界面固定展示「当前幕目标 + 本幕进度 + 进行中任务/未解线索」，
+// 数据全部取自 stateV2（current_act_objective 由后端 story_progress 派生）。
+function ObjectivePanel({ stateV2 }: { stateV2: StateV2 }) {
+  const progress = stateV2.story_progress;
+  const objective = progress.current_act_objective;
+  const actTitle = progress.current_act_title;
+  const anchor = progress.current_act_anchor_progress;
+  const activeQuests = stateV2.quest_log.active.slice(0, 2);
+  const openThread = stateV2.open_threads.active[0];
+
+  // 目标/任务/线索全空时不渲染（如开局第 0 回合尚未生成幕信息），避免空卡片。
+  if (!objective && !actTitle && activeQuests.length === 0 && !openThread) {
+    return null;
+  }
+
+  return (
+    <section className="objective-panel" aria-label="当前目标">
+      <div className="objective-panel-head">
+        <span className="story-label">当前目标</span>
+        {actTitle ? <span className="app-pill">{actTitle}</span> : null}
+        {anchor.total > 0 ? (
+          <span className="objective-panel-progress">
+            本幕 {anchor.done}/{anchor.total}
+          </span>
+        ) : null}
+      </div>
+      {objective ? <p className="objective-panel-objective">{objective}</p> : null}
+      {activeQuests.length > 0 || openThread ? (
+        <ul className="objective-panel-list">
+          {activeQuests.map((quest) => (
+            <li key={quest.name}>
+              <span className="objective-panel-tag">任务</span>
+              {quest.objective || quest.name}
+            </li>
+          ))}
+          {openThread ? (
+            <li key={openThread.title}>
+              <span className="objective-panel-tag objective-panel-tag-thread">线索</span>
+              {openThread.title}
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
 function PresentCharactersStrip({
   characters,
   latestTurn,
@@ -641,12 +797,7 @@ function AdventureComposer({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   pending: boolean;
 }) {
-  const modeOptions: { key: ActionMode; label: string }[] = [
-    { key: "action", label: "行动" },
-    { key: "say", label: "对话" },
-    { key: "story", label: "叙述" },
-    { key: "continue", label: "继续" }
-  ];
+  const modeOptions = MODE_GUIDE;
   let submitLabel = "发送";
   if (pending) {
     submitLabel = "发送中...";
@@ -669,6 +820,7 @@ function AdventureComposer({
               }
               key={mode.key}
               onClick={() => onModeChange(mode.key)}
+              title={mode.hint}
               type="button"
             >
               {mode.label}
@@ -748,7 +900,7 @@ function StoryPanel({
 
   return (
     <div className="grid gap-4">
-      {latestTurn && !pending ? (
+      {latestTurn && !pending && latestTurn.turn_number > 0 ? (
         <article className="story-block story-block-player">
           <div className="story-label">你 · 第 {latestTurn.turn_number} 回合</div>
           <p className="app-wrap-text mt-2 whitespace-pre-wrap text-base leading-8">{latestTurn.player_input}</p>
@@ -795,7 +947,14 @@ function StoryPanel({
 
       <article className="story-block">
         <div className="story-label">
-          GM · {pending ? "实时书写" : latestTurn ? `第 ${latestTurn.turn_number} 回合` : "等待开始"}
+          GM ·{" "}
+          {pending
+            ? "实时书写"
+            : latestTurn
+              ? latestTurn.turn_number > 0
+                ? `第 ${latestTurn.turn_number} 回合`
+                : "序章"
+              : "等待开始"}
         </div>
         {displayedNarrative ? (
           <StoryMarkdown
@@ -812,11 +971,11 @@ function StoryPanel({
         )}
       </article>
 
-      {!pending && settlement ? (
+      {!pending && settlement && latestTurn && latestTurn.turn_number > 0 ? (
         <TurnSettlementCard settlement={settlement} />
       ) : null}
 
-      {!pending && latestTurn ? (
+      {!pending && latestTurn && latestTurn.turn_number > 0 ? (
         <TurnInsightsPanel gameId={latestTurn.game_id} turnId={latestTurn.id} />
       ) : null}
 

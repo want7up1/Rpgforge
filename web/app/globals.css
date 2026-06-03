@@ -1030,6 +1030,143 @@ textarea.app-input {
   border-left-color: var(--accent-strong);
 }
 
+/* C2 目标条 */
+.objective-panel {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--gold);
+  border-radius: 0.625rem;
+  background: rgba(25, 29, 27, 0.55);
+  padding: 0.75rem 0.875rem;
+}
+
+.objective-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.objective-panel-progress {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.objective-panel-objective {
+  margin-top: 0.45rem;
+  font-size: 0.95rem;
+  line-height: 1.55rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.objective-panel-list {
+  margin-top: 0.55rem;
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.objective-panel-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  overflow-wrap: anywhere;
+}
+
+.objective-panel-tag {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.objective-panel-tag-thread {
+  color: var(--accent);
+}
+
+/* B1 剧终卡片 */
+.campaign-ending-card {
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--gold);
+  border-radius: 0.75rem;
+  background: linear-gradient(160deg, rgba(60, 50, 24, 0.45), rgba(25, 29, 27, 0.65));
+  padding: 1.1rem 1.2rem;
+}
+
+.campaign-ending-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.campaign-ending-badge {
+  font-size: 0.85rem;
+  font-weight: 900;
+  letter-spacing: 0.35em;
+  color: var(--gold);
+}
+
+.campaign-ending-epilogue {
+  margin-top: 0.75rem;
+  font-size: 1.02rem;
+  line-height: 1.95rem;
+}
+
+.campaign-ending-actions {
+  margin-top: 1.1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+/* C3 首次引导卡 */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(8, 10, 9, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.onboarding-card {
+  width: min(440px, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.onboarding-mode-list {
+  margin-top: 0.85rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.onboarding-mode-list li {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  line-height: 1.4rem;
+}
+
+.onboarding-mode-name {
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.onboarding-mode-hint {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .present-characters-strip {
   margin-bottom: 1rem;
   border: 1px solid rgba(217, 179, 111, 0.22);

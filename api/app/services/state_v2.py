@@ -339,6 +339,10 @@ def _story_progress(value: Any) -> dict[str, Any]:
         "current_act_anchor_progress": _anchor_progress(
             progress.get("current_act_anchor_progress")
         ),
+        "current_act_title": _first_text(progress.get("current_act_title")),
+        "current_act_objective": _first_text(progress.get("current_act_objective")),
+        "campaign_complete": _bool(progress.get("campaign_complete"), False),
+        "epilogue": _first_text(progress.get("epilogue")),
     }
 
 
