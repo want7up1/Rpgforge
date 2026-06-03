@@ -529,6 +529,7 @@ export type TurnAgentCost = {
 export type TurnInsights = {
   turn_id: string;
   observation: Record<string, unknown> | null;
+  action_outcome: Record<string, unknown> | null;
   agents: TurnAgentCost[];
   total_tokens_input: number;
   total_tokens_output: number;
@@ -542,6 +543,14 @@ export async function fetchTurnInsights(
   turnId: string
 ): Promise<TurnInsights> {
   return requestJson<TurnInsights>(`/api/games/${gameId}/turns/${turnId}/insights`);
+}
+
+// C6 后悔药：回退到第 toTurn 回合（删除其后回合并重建状态），返回剩余回合列表。
+export async function rewindTurns(gameId: string, toTurn: number): Promise<TurnRead[]> {
+  return requestJson<TurnRead[]>(`/api/games/${gameId}/turns/rewind`, {
+    method: "POST",
+    body: JSON.stringify({ to_turn: toTurn })
+  });
 }
 
 export async function createTurn(

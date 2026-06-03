@@ -1087,6 +1087,54 @@ textarea.app-input {
   color: var(--accent);
 }
 
+/* A3 危机条 */
+.crisis-bar {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: rgba(25, 29, 27, 0.5);
+  padding: 0.55rem 0.75rem;
+}
+
+.crisis-bar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.crisis-bar-value {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.crisis-bar-track {
+  margin-top: 0.4rem;
+  height: 0.45rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--soft-panel);
+}
+
+.crisis-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+  background: #4ade80;
+}
+
+.crisis-bar-warn .crisis-bar-fill {
+  background: #fbbf24;
+}
+
+.crisis-bar-danger .crisis-bar-fill {
+  background: #f87171;
+}
+
+.crisis-bar-danger {
+  border-color: rgba(248, 113, 113, 0.55);
+}
+
 /* B1 剧终卡片 */
 .campaign-ending-card {
   margin-bottom: 1.25rem;
@@ -1108,6 +1156,15 @@ textarea.app-input {
   font-weight: 900;
   letter-spacing: 0.35em;
   color: var(--gold);
+}
+
+.campaign-ending-card-defeat {
+  border-color: rgba(248, 113, 113, 0.6);
+  background: linear-gradient(160deg, rgba(60, 24, 24, 0.45), rgba(25, 29, 27, 0.65));
+}
+
+.campaign-ending-card-defeat .campaign-ending-badge {
+  color: #f87171;
 }
 
 .campaign-ending-epilogue {

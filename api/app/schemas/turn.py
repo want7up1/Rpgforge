@@ -27,6 +27,12 @@ class TurnCreate(BaseModel):
         return (self.player_input or "").strip()
 
 
+class TurnRewindRequest(BaseModel):
+    """C6 后悔药：回退到第 to_turn 回合（删除其后的回合）。to_turn=0 回到开局。"""
+
+    to_turn: int = Field(ge=0)
+
+
 class GMRuntimeOutput(BaseModel):
     narrative: str = Field(min_length=1)
     visible_clues: list[str] = Field(default_factory=list)
@@ -74,6 +80,8 @@ class TurnInsights(BaseModel):
 
     turn_id: UUID
     observation: dict[str, Any] | None = None
+    # A1 判定层：本回合行动判定结果（outcome/roll/dc/modifier/breakdown），无判定时为 None。
+    action_outcome: dict[str, Any] | None = None
     agents: list[TurnAgentCost] = Field(default_factory=list)
     total_tokens_input: int = 0
     total_tokens_output: int = 0

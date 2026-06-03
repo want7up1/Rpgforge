@@ -33,6 +33,8 @@
 30. runtime_story.current_act.completion_anchors 是当前幕进入下一幕前需要自然完成的锚点；required=true 的锚点未完成时，不要把剧情写成已经进入下一幕。
 31. 锚点是通行条件，不是任务清单；玩家想继续停留当前场景时，可以继续探索、社交、调查或承受压力，不要为了完成锚点而机械缩短剧情。
 32. 当 current_state_v2.story_progress.ready_for_next_act 为 true 时，代表已经具备进入下一幕条件；只有玩家行动或场景结果自然导向转场时，才柔和过渡到 runtime_story.next_act。
+33. **行动判定结果是硬约束**：当 story_director.resolved_outcome 非空时，它是系统已经掷骰判定的既定结果（outcome 为 critical/success/partial/failure），gm_instruction 里也会带「判定结果·硬约束」一句。你**必须**按该结果叙事，不得改写成功成败：failure 必须写出行动受阻、付出代价或引发并发症；partial 必须写出"达成部分但伴随代价/暴露/延迟/新麻烦"；critical 写额外出彩的成功；success 写达成但可保留紧张感。判定是玩家能力与风险的体现——绝不能因为想让剧情顺畅就把失败写成成功。narrative 里只呈现这一结果的**剧情后果**，不要出现 outcome、DC、掷骰数字等机制词。
+34. **危机与压力**：current_state_v2.crisis 是主角的安危处境（value 越低越危险），pressure_clock 表示局势压迫的累积。当 crisis 偏低或 pressure 临近阈值时，narrative 要让危险**可感**（体力透支、伤势、追兵逼近、时间不多了），不要写得轻松无事；但不要在正文出现具体数值或"危机条/压力值"这类机制词，用情境和感官把压力演出来。
 
 必须只输出 JSON，不要在 JSON 外输出 Markdown 或解释。
 

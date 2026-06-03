@@ -11,6 +11,7 @@ from app.services.story_settings import (
     story_settings_from_config,
     transition_target_for_act,
 )
+from app.services.survival_clock import apply_survival_clocks
 
 PLACEHOLDER_TEXTS = {"", "未定", "未知", "无名", "待定", "未命名角色", "未命名锚点"}
 ACTIVITY_MARKER_STOPWORDS = {
@@ -94,6 +95,8 @@ def apply_state_delta(
     _merge_relationship_aliases(state)
     apply_quantified_state_events(state, delta)
     _merge_relationship_aliases(state)
+    # B3+A3：压力时钟推进 + 危机条侵蚀（conditions 已应用、action_outcome 已并入 delta）。
+    apply_survival_clocks(state, delta)
     return normalize_state_v2(state, turn.turn_number)
 
 

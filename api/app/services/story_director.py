@@ -36,8 +36,19 @@ class StoryDirectorDecision(BaseModel):
     pacing_limit: str = ""
     continuity_notes: list[str] = Field(default_factory=list)
     gm_instruction: str = ""
+    # A1 判定层：Director 为有不确定性的行动标注的判定请求（难度/相关属性/技能/社交对象）。
+    # 纯对话/叙述/继续时为空 dict，跳过判定。
+    action_check: dict[str, Any] = Field(default_factory=dict)
+    # A1 判定层：后端 action_resolver 据 action_check + state 算出的 outcome，喂给 GM 作硬约束。
+    # 非 LLM 产物、不喂回 Director。
+    resolved_outcome: dict[str, Any] = Field(default_factory=dict)
     # Telemetry only: 表示本次决策是否走了本地 fallback，不参与 GM 提示词。
     used_fallback: bool = False
+
+    @field_validator("action_check", "resolved_outcome", mode="before")
+    @classmethod
+    def coerce_mapping(cls, value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
 
     @field_validator(
         "active_material_titles",
