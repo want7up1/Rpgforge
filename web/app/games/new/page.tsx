@@ -435,14 +435,26 @@ export default function NewGamePage() {
                     <JsonBlock data={generatedConfig} />
                   </div>
                 </details>
-                <button
-                  className="app-button app-button-primary"
-                  disabled={pendingAction !== null}
-                  onClick={handleCreateGenerated}
-                  type="button"
-                >
-                  {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="app-button app-button-primary"
+                    disabled={pendingAction !== null}
+                    onClick={handleCreateGenerated}
+                    type="button"
+                  >
+                    {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
+                  </button>
+                  {/* C5 重 roll：不满意当前世界，复用同一份采访结果重新生成一份。 */}
+                  <button
+                    className="app-button"
+                    disabled={pendingAction !== null}
+                    onClick={handleFinalize}
+                    title="复用已确认的设定，重新生成一个冒险世界"
+                    type="button"
+                  >
+                    {pendingAction === "finalize" ? "重新生成中..." : "重新生成"}
+                  </button>
+                </div>
               </div>
             ) : (
               <p className="surface-subtle mt-3">

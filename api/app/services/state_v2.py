@@ -54,8 +54,29 @@ def normalize_state_v2(
         "open_threads": _thread_log(state.get("open_threads")),
         "story_progress": story_progress,
         "relationship_tracks": _relationship_tracks(state.get("relationships"), npcs),
+        # A3 危机条 + B3 压力时钟，供 GM/Director 感知风险、前端展示。
+        "crisis": _crisis_view(state.get("crisis")),
+        "pressure_clock": _pressure_clock_view(state.get("pressure_clock")),
     }
     return state
+
+
+def _crisis_view(value: Any) -> dict[str, int]:
+    data = _mapping(value)
+    maximum = _positive_int(data.get("max"), 100)
+    raw = data.get("value")
+    current = _int(raw, maximum) if raw is not None else maximum
+    return {"value": _clamp(current, 0, maximum), "max": maximum}
+
+
+def _pressure_clock_view(value: Any) -> dict[str, int]:
+    data = _mapping(value)
+    threshold = _positive_int(data.get("threshold"), 10)
+    return {
+        "value": _clamp(_int(data.get("value"), 0), 0, threshold),
+        "threshold": threshold,
+        "triggers": max(0, _int(data.get("triggers"), 0)),
+    }
 
 
 def state_v2_view(state_json: dict[str, Any] | None) -> dict[str, Any]:

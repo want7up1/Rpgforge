@@ -24,6 +24,7 @@ import {
   getCharacters,
   getGame,
   getTurns,
+  rewindTurns,
   type TurnInsights
 } from "@/lib/api";
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
@@ -107,8 +108,44 @@ export default function PlayPage() {
   );
   const maintenanceActive = isTurnMaintenanceActive(turnProcess);
   const backgroundMaintenanceActive = isTurnBackgroundMaintenanceActive(turnProcess);
-  // B1 结局闭环：游戏打通后 status=completed，切到「剧终」视图并停用输入框。
-  const isCompleted = state.status === "ready" && state.game.status === "completed";
+  // B1 结局闭环 + A3 失败出口：completed=通关、defeated=危机归零败局，均切结局视图并停用输入框。
+  const gameStatus = state.status === "ready" ? state.game.status : "";
+  const isCompleted = gameStatus === "completed";
+  const isDefeated = gameStatus === "defeated";
+  const isEnded = isCompleted || isDefeated;
+
+  // C6 后悔药：回退到指定回合（删除其后回合并重建状态），刷新游戏与回合列表。
+  const handleRewind = useCallback(
+    async (toTurn: number) => {
+      if (pending || maintenanceActive) {
+        return;
+      }
+      if (!window.confirm(`确定回退到第 ${toTurn} 回合？其后的剧情将被删除，无法恢复。`)) {
+        return;
+      }
+      setError(null);
+      setPending(true);
+      try {
+        await rewindTurns(params.id, toTurn);
+        const [refreshedGame, refreshedTurns] = await Promise.all([
+          getGame(params.id),
+          getTurns(params.id)
+        ]);
+        setState((current) =>
+          current.status === "ready"
+            ? { ...current, game: refreshedGame, turns: refreshedTurns }
+            : current
+        );
+        setTurnProcess(null);
+        setTurnProgress(null);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "回退失败。");
+      } finally {
+        setPending(false);
+      }
+    },
+    [params.id, pending, maintenanceActive]
+  );
 
   useEffect(() => {
     document.documentElement.classList.add("gameplay-scroll-lock");
@@ -335,6 +372,17 @@ export default function PlayPage() {
                   </p>
                 </div>
                 <div className="adventure-topbar-actions flex flex-wrap justify-end gap-2">
+                  {latestTurn && latestTurn.turn_number > 0 ? (
+                    <button
+                      className="app-button"
+                      disabled={pending || maintenanceActive}
+                      onClick={() => handleRewind(latestTurn.turn_number - 1)}
+                      title="删除最新一回合，回到上一回合重新选择"
+                      type="button"
+                    >
+                      撤销上一回合
+                    </button>
+                  ) : null}
                   <Link className="app-button" href={`/games/${params.id}`}>
                     概览
                   </Link>
@@ -350,10 +398,15 @@ export default function PlayPage() {
               <section className="adventure-story-scroll">
                 <div className="adventure-story-column">
                   {error ? <div className="app-alert mb-4">{error}</div> : null}
-                  {isCompleted && stateV2 ? (
-                    <CampaignEndingCard gameId={params.id} stateV2={stateV2} />
+                  {isEnded && stateV2 ? (
+                    <CampaignEndingCard
+                      gameId={params.id}
+                      outcome={isDefeated ? "defeat" : "victory"}
+                      stateV2={stateV2}
+                    />
                   ) : null}
-                  {!isCompleted && stateV2 ? <ObjectivePanel stateV2={stateV2} /> : null}
+                  {!isEnded && stateV2 ? <CrisisBar stateV2={stateV2} /> : null}
+                  {!isEnded && stateV2 ? <ObjectivePanel stateV2={stateV2} /> : null}
                   {stateV2 ? (
                     <PresentCharactersStrip
                       characters={state.characters}
@@ -373,10 +426,12 @@ export default function PlayPage() {
                     maintenanceActive={maintenanceActive}
                     backgroundMaintenanceActive={backgroundMaintenanceActive}
                   />
-                  {isCompleted ? (
+                  {isEnded ? (
                     <footer className="adventure-composer">
                       <div className="adventure-composer-inner text-sm text-[color:var(--muted)]">
-                        本场冒险已抵达结局，旅程到此圆满。可在上方开启新的冒险。
+                        {isDefeated
+                          ? "主角已倒下，这段旅程到此终结。可在上方开启新的冒险。"
+                          : "本场冒险已抵达结局，旅程到此圆满。可在上方开启新的冒险。"}
                       </div>
                     </footer>
                   ) : (
@@ -589,27 +644,64 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
   );
 }
 
-// B1 结局闭环：打通最后一幕后展示「剧终」卡片——尾声正文 + 旅程回顾 + 开新档入口。
-function CampaignEndingCard({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 }) {
+// A3 危机条：游玩主界面展示主角安危处境（value 越低越危险），让「输」的风险可感。
+function CrisisBar({ stateV2 }: { stateV2: StateV2 }) {
+  const { value, max } = stateV2.crisis;
+  if (max <= 0) {
+    return null;
+  }
+  const percent = ratioPercent(value, max);
+  const level = percent <= 25 ? "danger" : percent <= 55 ? "warn" : "ok";
+  const label = level === "danger" ? "危急" : level === "warn" ? "受创" : "稳健";
+  return (
+    <section className={`crisis-bar crisis-bar-${level}`} aria-label="主角状态">
+      <div className="crisis-bar-head">
+        <span className="story-label">主角状态 · {label}</span>
+        <span className="crisis-bar-value">{value}/{max}</span>
+      </div>
+      <div className="crisis-bar-track">
+        <div className="crisis-bar-fill" style={{ width: `${percent}%` }} />
+      </div>
+    </section>
+  );
+}
+
+// B1 结局闭环 + A3 失败出口：抵达结局后展示卡片——结局正文 + 旅程回顾 + 开新档入口。
+function CampaignEndingCard({
+  gameId,
+  outcome,
+  stateV2
+}: {
+  gameId: string;
+  outcome: "victory" | "defeat";
+  stateV2: StateV2;
+}) {
   const epilogue = stateV2.story_progress.epilogue;
   const completedActs = stateV2.story_progress.completed_acts.length;
+  const isDefeat = outcome === "defeat";
+  const badge = isDefeat ? "败局" : "剧终";
+  const summary = isDefeat
+    ? "你的旅程在此折戟"
+    : `你走完了这段冒险${completedActs > 0 ? ` · 共 ${completedActs} 幕` : ""}`;
+  const fallbackText = isDefeat
+    ? "主角终究没能撑到最后。这段旅程以失败收场。"
+    : "故事在此落幕。你的抉择把这段旅程带到了终点。";
 
   return (
-    <section className="campaign-ending-card" aria-label="剧终">
+    <section
+      className={`campaign-ending-card${isDefeat ? " campaign-ending-card-defeat" : ""}`}
+      aria-label={isDefeat ? "败局" : "剧终"}
+    >
       <div className="campaign-ending-head">
-        <span className="campaign-ending-badge">剧终</span>
-        <span className="text-sm text-[color:var(--muted)]">
-          你走完了这段冒险{completedActs > 0 ? ` · 共 ${completedActs} 幕` : ""}
-        </span>
+        <span className="campaign-ending-badge">{badge}</span>
+        <span className="text-sm text-[color:var(--muted)]">{summary}</span>
       </div>
       {epilogue ? (
         <div className="campaign-ending-epilogue">
           <StoryMarkdown content={epilogue} />
         </div>
       ) : (
-        <p className="mt-3 text-sm leading-7 text-[color:var(--muted)]">
-          故事在此落幕。你的抉择把这段旅程带到了终点。
-        </p>
+        <p className="mt-3 text-sm leading-7 text-[color:var(--muted)]">{fallbackText}</p>
       )}
       <div className="campaign-ending-actions">
         <Link className="app-button app-button-primary" href="/games/new">
@@ -1094,6 +1186,10 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
   const flags = obs?.flags ?? [];
   const hitRate =
     data?.cache_hit_rate != null ? `${Math.round(data.cache_hit_rate * 100)}%` : "—";
+  const check = data?.action_outcome as
+    | { outcome_label?: string; action?: string; roll?: number; modifier?: number; dc?: number }
+    | null
+    | undefined;
 
   return (
     <details className="generation-detail-panel" onToggle={handleToggle}>
@@ -1131,6 +1227,18 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
               <dt>canon 使用</dt>
               <dd>
                 {obs.canon.used ?? 0}/{obs.canon.total ?? 0} 个专名
+              </dd>
+            </div>
+          ) : null}
+          {check?.outcome_label ? (
+            <div>
+              <dt>行动判定</dt>
+              <dd>
+                {check.action ? `${check.action} · ` : ""}
+                {check.outcome_label}
+                {typeof check.roll === "number"
+                  ? `（掷骰 ${check.roll}+${check.modifier ?? 0} vs ${check.dc ?? "?"}）`
+                  : ""}
               </dd>
             </div>
           ) : null}

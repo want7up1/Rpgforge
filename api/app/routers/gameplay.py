@@ -18,6 +18,7 @@ from app.schemas.turn import (
     TurnJobCreateResponse,
     TurnJobRead,
     TurnRead,
+    TurnRewindRequest,
 )
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
 from app.services.gameplay import GameplayService, GameplayValidationError, gameplay_game_query
@@ -28,6 +29,7 @@ from app.services.state_settlement import (
     StateSettlementService,
     record_failed_turn_state_delta,
 )
+from app.services.turn_rewind import rewind_game_to_turn
 from app.services.turn_stream_events import format_sse_event, turn_stream_event_broker
 
 router = APIRouter(prefix="/api/games/{game_id}/turns", tags=["gameplay"])
@@ -114,6 +116,27 @@ def list_turns(game_id: UUID, db: Session = DB_DEPENDENCY) -> list[Turn]:
     )
 
 
+@router.post("/rewind", response_model=list[TurnRead])
+def rewind_turns(
+    game_id: UUID,
+    payload: TurnRewindRequest,
+    db: Session = DB_DEPENDENCY,
+) -> list[Turn]:
+    """C6：回退到第 to_turn 回合（删除其后回合并重建状态）。生成进行中时拒绝。"""
+    game = get_game_or_404_for_gameplay(db, game_id)
+    if _active_turn_job(db, game_id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="本回合任务进行中，请等待完成后再回退。",
+        )
+    rewind_game_to_turn(db, game, payload.to_turn)
+    return list(
+        db.scalars(
+            select(Turn).where(Turn.game_id == game_id).order_by(Turn.turn_number.asc())
+        ).all()
+    )
+
+
 @router.get("/{turn_id}/insights", response_model=TurnInsights)
 def get_turn_insights(
     game_id: UUID,
@@ -139,12 +162,15 @@ def get_turn_insights(
     ).first()
 
     observation: dict | None = None
+    action_outcome: dict | None = None
     agents: list[TurnAgentCost] = []
     if turn_job is not None:
         runtime_inputs = turn_job.turn_runtime_inputs or {}
         if isinstance(runtime_inputs, dict):
             obs = runtime_inputs.get("output_observation")
             observation = obs if isinstance(obs, dict) else None
+            outcome = runtime_inputs.get("action_outcome")
+            action_outcome = outcome if isinstance(outcome, dict) else None
         traces = db.scalars(
             select(AgentTrace)
             .where(AgentTrace.job_kind == "turn", AgentTrace.job_id == turn_job.id)
@@ -173,6 +199,7 @@ def get_turn_insights(
     return TurnInsights(
         turn_id=turn_id,
         observation=observation,
+        action_outcome=action_outcome,
         agents=agents,
         total_tokens_input=total_in,
         total_tokens_output=total_out,

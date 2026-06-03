@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 33 — 游戏方向第一梯队落地：B1 结局闭环 + C1 开局序章 + C2 目标条 + C3 引导卡 |
+| 最近一轮 | Round 34 — 游戏方向第二梯队落地：A1 判定层 + A2 数值反哺 + B3/A3 压力与失败 + B5 松绑校验 + C5/C6 重roll与回退 |
 | 完成日期 | 2026-06-03 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
@@ -24,6 +24,34 @@
 ---
 
 ## 1. 已完成
+
+### Round 34 (2026-06-03) — 游戏方向第二梯队落地（A1 判定层 + A2 数值反哺 + B3/A3 压力与失败 + B5 松绑校验 + C5/C6 重roll与回退）
+
+承接 Round 33，落地 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 **第二梯队全部 5 簇**——把项目从「带强约束的 AI 叙事生成器」推向「真正的游戏」（博弈/失败/能动性）。
+
+**A1 轻量判定层 + A2 数值反哺（P0，地基）**：玩家行动现在有成败之分。
+- 新增 `action_resolver.py`：StoryDirector 标注 `action_check`（难度/相关属性/技能/社交对象，见 `story_director.md` 规则 12 + 输出结构新增 action_check）→ 后端按「等级 + 技能 + 属性 + 关系」算修正、roll d20 vs 难度 DC → outcome（critical/success/partial/failure，nat20 必大成功/nat1 必失败）。**A2 即修正来源**：等级、技能 level+mastery、属性(D&D 式 (attr-10)//2)、关系(trust/affection 相对 50 的 ±5)全部进判定。
+- 接入：`gameplay.generate_turn_runtime_output` 新增 `_resolve_action_outcome`——解析 action_check，把 `build_outcome_instruction` 的硬约束句追加进 gm_instruction，结果存 `StoryDirectorDecision.resolved_outcome` + telemetry `action_outcome`。
+- GM 硬约束：`gm_runtime.md` 新增规则 33——resolved_outcome 非空时必须按既定结果叙事（failure 写受阻/代价、partial 写部分+代价），narrative 不得出现机制词。纯对话/叙述无 action_check → 跳过判定。
+- 观测：`TurnInsights` 新增 `action_outcome`，前端「本回合详情」展示「行动判定 · 成功（掷骰…）」。
+
+**B3 压力时钟兑现 + A3 危机条/失败出口（P0/P1）**：拖延有代价、「输」有出口。
+- `pressure_clock` 此前只是展示文本、从不兑现——新增 `survival_clock.py`，在 `apply_state_delta` 每回合确定性推进：① 压力时钟每回合 +1，到阈值(默认 10)触发 → 侵蚀危机条 + 重置；② **危机条 crisis(0–100)** 受「判定失败 -12/部分 -5」「活跃状态严重度(high -6/medium -3/low -1)」「压力触发 -12」侵蚀，平静回复 +4；归零 → 置 `story_progress.defeat`。
+- 失败结局复用 B1 闭环：`turn_maintenance_jobs._finalize_campaign_if_complete` 泛化为胜利/失败两种——victory→`game.status="completed"`、defeat→`"defeated"`，`EpilogueGenerator` 按 `ending_type` 写不同基调结局（`generate_epilogue.md` 增 victory/defeat 分支）。
+- 判定结果经 `_apply_delta` 并入 `turn.state_delta_json`（持久化、rebuild 可复现）→ survival_clock 据失败侵蚀。`game_creator` 初始化 crisis/pressure_clock，`state_v2` 投影二者（GM 规则 34 据此让危险可感）。
+- 前端：play 页 `CrisisBar`（绿/黄/红三档）；`game.status==="defeated"` → 「败局」结局卡（`CampaignEndingCard` 加 outcome 参数）。
+
+**B5 松绑校验器（P1）**：`drift_validator.md` 新增规则 4b「玩家来源豁免」——玩家主动驱动的剧本外发散探索，只要不提前剧透 forbidden_reveals/hidden_facts，不再判 major。把「忠于剧本」收窄到「不提前剧透真相」。纯 prompt 改动。
+
+**C5 重 roll（P1）**：`web/app/games/new` 生成结果区加「重新生成」按钮——复用已确认采访(`idea/history/confirmed`)重跑 finalize，不满意可换一个世界。纯前端。
+
+**C6 后悔药（P1）**：新增 `turn_rewind.py::rewind_game_to_turn` + `POST /api/games/{id}/turns/rewind`——删除第 N 回合之后的回合（StateDelta 经 FK CASCADE + ORM cascade 一并删），rebuild 从 initial_state 重放剩余 delta（危机/压力/结局全确定性重算），跨过结局则复位 `game.status="active"`。生成进行中拒绝(409)。前端 play 页顶栏「撤销上一回合」(回退到 latest-1)。
+
+**遵 CLAUDE.md**：A1 判定层的 LLM 调用沿用 Director（已有 timeout/fallback），未新增裸 LLM 调用；prompt 改动记录规则编号（story_director 规则12+action_check、gm_runtime 规则33/34、drift_validator 规则4b、generate_epilogue victory/defeat 分支）；新增 state 字段(crisis/pressure_clock/defeat/action_outcome)走 state JSON + 投影，未动 TurnJob 列。crisis/pressure 对**旧存档**：rebuild 时从 initial_state(无该字段)默认 100/0 起算，确定性重放、无需迁移。
+
+**验证**：容器内 `pytest tests/` **209 passed**（+21：`test_action_resolver` 9 / `test_survival_clock` 9 / `test_turn_rewind` 3）、`ruff check` 全过；web `next build`（tsc+lint）通过。**部署**：`docker compose up -d --build api worker web`。
+
+> 待真实游玩验证：① 撬锁/说服等行动是否真的可能失败、失败是否被 GM 写成受阻而非顺利；② 高等级/高技能是否明显更稳；③ 拖延/受创时危机条是否下降、归零是否触发败局结局；④ 玩家发散探索是否不再被 drift 拽回；⑤ 重 roll / 撤销上一回合是否如期工作。第三梯队（B2 结局变体 / B4 多路通关 / A4-A6 / B6-B8 / C7-C9）见审查文档 §4，未动。
 
 ### Round 33 (2026-06-03) — 游戏方向第一梯队落地（B1 结局闭环 + C1 开局序章 + C2 目标条 + C3 引导卡）
 

@@ -36,6 +36,9 @@ def build_default_initial_state(title: str, description: str | None = None) -> d
             "total_xp": 0,
             "xp_log": [],
         },
+        # A3 危机条 + B3 压力时钟（survival_clock 每回合推进）。
+        "crisis": {"value": 100, "max": 100},
+        "pressure_clock": {"value": 0, "threshold": 10, "triggers": 0},
         "skills": [],
         "abilities": [],
         "conditions": [],

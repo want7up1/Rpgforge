@@ -142,6 +142,17 @@ export type RelationshipTrack = {
   recent_events: Record<string, unknown>[];
 };
 
+export type CrisisState = {
+  value: number;
+  max: number;
+};
+
+export type PressureClockState = {
+  value: number;
+  threshold: number;
+  triggers: number;
+};
+
 export type StateV2 = {
   version: number;
   active_scene: ActiveSceneState;
@@ -156,6 +167,8 @@ export type StateV2 = {
   open_threads: ThreadLog;
   story_progress: StoryProgressState;
   relationship_tracks: RelationshipTrack[];
+  crisis: CrisisState;
+  pressure_clock: PressureClockState;
 };
 
 export const relationshipAxes: { key: RelationshipAxis; label: string }[] = [
@@ -192,7 +205,27 @@ export function getStateV2(stateJson: Record<string, unknown> | null | undefined
     story_progress: normalizeStoryProgress(
       firstRecord([rawV2.story_progress, root.story_progress])
     ),
-    relationship_tracks: normalizeRelationships(rawV2.relationship_tracks ?? root.relationships)
+    relationship_tracks: normalizeRelationships(rawV2.relationship_tracks ?? root.relationships),
+    crisis: normalizeCrisis(rawV2.crisis ?? root.crisis),
+    pressure_clock: normalizePressureClock(rawV2.pressure_clock ?? root.pressure_clock)
+  };
+}
+
+function normalizeCrisis(value: unknown): CrisisState {
+  const data = asRecord(value);
+  const max = positiveNumber(data.max, 100);
+  const raw = optionalNumber(data.value);
+  const current = raw === null ? max : raw;
+  return { value: clamp(current, 0, max), max };
+}
+
+function normalizePressureClock(value: unknown): PressureClockState {
+  const data = asRecord(value);
+  const threshold = positiveNumber(data.threshold, 10);
+  return {
+    value: clamp(optionalNumber(data.value) ?? 0, 0, threshold),
+    threshold,
+    triggers: Math.max(0, optionalNumber(data.triggers) ?? 0)
   };
 }
 

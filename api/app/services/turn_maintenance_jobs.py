@@ -151,6 +151,15 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
         if game is None or turn is None:
             return
 
+        # A3：把本回合行动判定结果并入 delta 并持久化，让 survival_clock 据失败侵蚀危机条，
+        # 且 rebuild 重放时可复现（action_outcome 随 turn.state_delta_json / StateDelta 落库）。
+        runtime_inputs = job.turn_runtime_inputs or {}
+        action_outcome = (
+            runtime_inputs.get("action_outcome") if isinstance(runtime_inputs, dict) else None
+        )
+        if isinstance(action_outcome, dict) and action_outcome:
+            delta_json = {**delta_json, "action_outcome": action_outcome}
+
         turn.state_delta_json = delta_json
         job.extractor_failed = False
         if game.state is not None:
@@ -169,36 +178,48 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
         db.commit()
 
 
-async def _finalize_campaign_if_complete(job_id: UUID) -> None:
-    """末幕打通则生成 epilogue 并置 game.status=completed。
+# B1 胜利 / A3 失败 两种结局对应的终态 game.status。
+_ENDED_STATUSES = {"completed", "defeated"}
+_ENDING_STATUS = {"victory": "completed", "defeat": "defeated"}
 
-    幂等：game.status 已是 completed 或 campaign_complete 未置时直接返回。
-    epilogue 生成失败/超时返回空串，此时仅置状态、不写尾声正文（前端展示 fallback）。
+
+async def _finalize_campaign_if_complete(job_id: UUID) -> None:
+    """打通末幕（胜利）或危机条归零（失败）则生成结局并置终态 game.status。
+
+    幂等：game.status 已是终态、或两种结局标记都未置时直接返回。
+    结局生成失败/超时返回空串，此时仅置状态、不写结局正文（前端展示 fallback）。
     LLM 调用放在 session 之外，避免长事务占用连接。
     """
-    context = _load_campaign_completion_context(job_id)
+    context = _load_campaign_ending_context(job_id)
     if context is None:
         return
     try:
         epilogue = await EpilogueGenerator().generate(context["payload"])
     except Exception:
-        logger.exception("Epilogue generation crashed for job %s", job_id)
+        logger.exception("Ending generation crashed for job %s", job_id)
         epilogue = ""
-    _persist_campaign_completion(context["game_id"], epilogue)
+    _persist_campaign_ending(context["game_id"], epilogue, context["status"])
     publish_turn_job_snapshot(job_id)
 
 
-def _load_campaign_completion_context(job_id: UUID) -> dict[str, Any] | None:
+def _load_campaign_ending_context(job_id: UUID) -> dict[str, Any] | None:
     with SessionLocal() as db:
         job = db.get(TurnJob, job_id)
         if job is None or job.turn_id is None:
             return None
         game = db.scalars(gameplay_game_query(job.game_id)).first()
-        if game is None or game.state is None or game.status == "completed":
+        if game is None or game.state is None or game.status in _ENDED_STATUSES:
             return None
         state_json = game.state.state_json or {}
         progress = state_json.get("story_progress")
-        if not (isinstance(progress, dict) and progress.get("campaign_complete")):
+        if not isinstance(progress, dict):
+            return None
+        # 胜利优先于失败（同回合既满足末幕完成又危机归零时，按通关处理）。
+        if progress.get("campaign_complete"):
+            ending_type = "victory"
+        elif progress.get("defeat"):
+            ending_type = "defeat"
+        else:
             return None
 
         runtime_story = build_runtime_story(game.config, state_json)
@@ -210,6 +231,7 @@ def _load_campaign_completion_context(job_id: UUID) -> dict[str, Any] | None:
             .limit(8)
         ).all()
         payload = {
+            "ending_type": ending_type,
             "game": {
                 "title": game.title,
                 "genre": game.genre,
@@ -218,7 +240,9 @@ def _load_campaign_completion_context(job_id: UUID) -> dict[str, Any] | None:
             "worldview": runtime_story.get("worldview"),
             "story_core": runtime_story.get("story_core"),
             "completed_acts": progress.get("completed_acts", []),
+            "current_act": runtime_story.get("current_act"),
             "protagonist": view.get("protagonist_sheet"),
+            "crisis": state_json.get("crisis"),
             "key_relationships": [
                 {
                     "npc": rel.get("npc"),
@@ -232,18 +256,22 @@ def _load_campaign_completion_context(job_id: UUID) -> dict[str, Any] | None:
                 for turn in reversed(recent)
             ],
         }
-        return {"game_id": game.id, "payload": payload}
+        return {
+            "game_id": game.id,
+            "payload": payload,
+            "status": _ENDING_STATUS[ending_type],
+        }
 
 
-def _persist_campaign_completion(game_id: Any, epilogue: str) -> None:
+def _persist_campaign_ending(game_id: Any, epilogue: str, status: str) -> None:
     with SessionLocal() as db:
         game = db.scalars(gameplay_game_query(game_id)).first()
-        if game is None or game.state is None or game.status == "completed":
+        if game is None or game.state is None or game.status in _ENDED_STATUSES:
             return
-        game.status = "completed"
+        game.status = status
         if epilogue:
             # 写入 live state（即时展示）+ initial_state（rebuild 重放时保留，
-            # 尾声不随 delta 重算）。JSONB 需整体重新赋值，SQLAlchemy 才能侦测到嵌套变更。
+            # 结局不随 delta 重算）。JSONB 需整体重新赋值，SQLAlchemy 才能侦测到嵌套变更。
             game.state.state_json = _with_epilogue(game.state.state_json, epilogue)
             game.state.initial_state_json = _with_epilogue(
                 game.state.initial_state_json, epilogue

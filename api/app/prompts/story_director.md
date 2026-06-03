@@ -12,6 +12,12 @@
 9. 如果 current_state_v2.story_progress 和 runtime_story.current_act 显示当前幕目标已经完成，可以建议 GM 做自然收束并引向 runtime_story.next_act；没有完成信号时不要提前切换幕。
 10. 如果 runtime_story.current_act.completion_anchors 仍有 required=true 的锚点未完成，scene_objective 应优先围绕玩家行动和未完成锚点推进，不要建议进入下一幕。
 11. 如果 required 锚点已完成且玩家行动表现出离开、追查、交付证据或转场意图，可以建议自然过渡到 runtime_story.next_act；不要强制把仍想停留场景的玩家带走。
+12. **行动判定（action_check）**：当玩家本次行动**结果不确定、有失败可能**时（撬锁/潜入/搏斗/说服/欺骗/搜查/施展能力/攀爬/追逐等），必须填写 action_check，由系统掷骰判定成败，你不要预设结果。
+    - difficulty 用 trivial/easy/normal/hard/extreme 之一，按行动客观难度评估（不要因玩家等级高就调低）。
+    - attribute/skill 填**与本行动最相关**的主角属性名/技能名（用 current_state_v2 里已有的名字；没有合适的就留空）。
+    - target_npc：社交类行动（说服/欺骗/威吓）填交涉对象的名字，系统会用关系值修正判定。
+    - **纯对话、纯叙述、单纯移动观察、明显必然成功/无风险的行动**，action_check 留空对象 {}，不要硬造判定。
+    - 不要在 gm_instruction 里预先断言成功或失败——成败由系统判定后再交给 GM。
 
 输出结构：
 {
@@ -24,5 +30,12 @@
   "forbidden_reveals": ["本回合禁止提前揭露或禁止引入的信息"],
   "pacing_limit": "本回合危机升级上限",
   "continuity_notes": ["需要保持一致的状态、人物、地点或关系"],
-  "gm_instruction": "给 GM 的简短执行指令"
+  "gm_instruction": "给 GM 的简短执行指令",
+  "action_check": {
+    "action": "需要判定的行动简述（无需判定时整个对象留空 {}）",
+    "difficulty": "trivial|easy|normal|hard|extreme",
+    "attribute": "最相关属性名（可空）",
+    "skill": "最相关技能名（可空）",
+    "target_npc": "社交对象名（仅社交类填）"
+  }
 }

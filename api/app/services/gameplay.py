@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.game import Game
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput, TurnCreate
+from app.services.action_resolver import build_outcome_instruction, resolve_action_check
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
 from app.services.drift_validator import DriftValidator
@@ -70,6 +71,8 @@ class TurnTelemetry:
     drift_validation: dict[str, Any] | None = None
     # Round 20 输出观测层：只观测不重写，结果随 turn_runtime_inputs 落库供 dashboard/调优。
     output_observation: dict[str, Any] | None = None
+    # A1 判定层：本回合行动判定结果（outcome/roll/dc/breakdown），落库供观测与前端展示。
+    action_outcome: dict[str, Any] | None = None
 
     def to_runtime_inputs(self) -> dict[str, Any]:
         """传给 maintenance 阶段 StateExtractor 的 hints，并携带输出观测结果。"""
@@ -80,6 +83,8 @@ class TurnTelemetry:
             payload["drift_validation"] = self.drift_validation
         if self.output_observation:
             payload["output_observation"] = self.output_observation
+        if self.action_outcome:
+            payload["action_outcome"] = self.action_outcome
         return payload
 
 
@@ -231,6 +236,8 @@ class GameplayService:
             director_decision,
             runtime_story=context.runtime_story_bare,
         )
+        # A1 判定层：对 Director 标注的 action_check 算 outcome，作为硬约束注入 gm_instruction。
+        self._resolve_action_outcome(director_decision, context)
         # 完整保存供 maintenance 阶段的 StateExtractor 读取（continuity_notes 等）。
         context.telemetry.director_decision = director_decision.model_dump(
             exclude={"used_fallback"}
@@ -498,6 +505,28 @@ class GameplayService:
             state_v2=context.state_v2,
             previous_runtime_output=previous_runtime_output,
         )
+
+    @staticmethod
+    def _resolve_action_outcome(
+        decision: StoryDirectorDecision,
+        context: TurnRuntimeContext,
+    ) -> None:
+        """A1：解析 action_check → outcome，把硬约束追加进 gm_instruction，并存 telemetry。"""
+        try:
+            result = resolve_action_check(decision.action_check, context.state_v2)
+        except Exception as exc:  # 判定失败绝不影响主回合
+            logger.warning("行动判定失败（game %s）：%s", context.game.id, exc)
+            return
+        if not result:
+            return
+        decision.resolved_outcome = result
+        instruction = build_outcome_instruction(result)
+        decision.gm_instruction = (
+            f"{decision.gm_instruction}\n{instruction}".strip()
+            if decision.gm_instruction
+            else instruction
+        )
+        context.telemetry.action_outcome = result
 
     @staticmethod
     def _enforce_director_reveal_boundaries(
