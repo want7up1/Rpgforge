@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { BoardBlock, BoardField } from "@/lib/generatorBoard";
 
 function fieldToText(field: BoardField): string {
-  return Array.isArray(field.value) ? field.value.join("\n") : field.value;
+  return Array.isArray(field.value) ? field.value.join("\n") : String(field.value);
 }
 function textToFieldValue(field: BoardField, text: string): string | string[] {
   return field.type === "stringList"

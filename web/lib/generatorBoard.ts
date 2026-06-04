@@ -28,13 +28,27 @@ export const BOARD_CATEGORIES: BoardCategoryDef[] = [
   { id: "advanced", label: "高级", icon: "🔧" }
 ];
 
-export type BoardFieldType = "text" | "textarea" | "stringList";
+export type BoardFieldType =
+  | "text" | "textarea" | "number" | "bool"
+  | "stringList" | "objectList" | "keyValue" | "json";
+
+// objectList 每个子对象渲染哪些子字段
+export type SubFieldSpec = {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "bool" | "stringList";
+};
+
+export type BoardFieldValue =
+  | string | number | boolean | string[]
+  | Record<string, unknown> | Record<string, unknown>[];
 
 export type BoardField = {
   key: string;
   label: string;
-  value: string | string[];
+  value: BoardFieldValue;
   type: BoardFieldType;
+  itemFields?: SubFieldSpec[]; // 仅 objectList
 };
 
 // address 决定编辑/删除时写回 source 的位置。
