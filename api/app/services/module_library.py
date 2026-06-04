@@ -106,7 +106,9 @@ def _merge_list_item(
 ) -> None:
     keys = _LIST_IDENTITY[field_name]
     target = merged.setdefault(field_name, [])
-    existing_ids = {ident for it in target if isinstance(it, dict) and (ident := _identity(it, keys))}
+    existing_ids = {
+        ident for it in target if isinstance(it, dict) and (ident := _identity(it, keys))
+    }
     ident = _identity(item, keys)
     new_item = copy.deepcopy(item)
 
@@ -121,12 +123,11 @@ def _merge_list_item(
             target[idx] = new_item
             entry["action"] = "overwritten"
             return
-        # rename（默认）
+        # rename（默认）：先计算唯一 id，act_plan 额外处理 anchor 冲突
         id_key = next(k for k in keys if _text(item.get(k)))
         new_id = _unique_name(existing_ids, ident)
         if field_name == "act_plan":
             anchor_ids = _collect_anchor_ids(target)
-            new_id = _unique_name(existing_ids, ident)
             _reid_act(new_item, new_id)
             # 若 anchor 仍冲突，继续后缀
             while _collect_anchor_ids([new_item]) & anchor_ids:
@@ -160,7 +161,9 @@ def merge_modules_into_settings(
                 if key in _LIST_IDENTITY and isinstance(value, list):
                     for sub in value:
                         if isinstance(sub, dict):
-                            _merge_list_item(merged, key, sub, resolutions.get(module_id, "rename"), entry)
+                            _merge_list_item(
+                                merged, key, sub, resolutions.get(module_id, "rename"), entry
+                            )
                 elif key in _STRING_BUCKETS and isinstance(value, dict):
                     _merge_string_buckets(merged, key, value, report)
         report.entries.append(entry)

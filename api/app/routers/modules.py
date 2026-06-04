@@ -38,7 +38,10 @@ def list_modules(
         rows = [m for m in rows if tag in (m.tags or [])]
     if q:
         needle = q.strip().lower()
-        rows = [m for m in rows if needle in m.name.lower() or needle in (m.description or "").lower()]
+        rows = [
+            m for m in rows
+            if needle in m.name.lower() or needle in (m.description or "").lower()
+        ]
     return rows
 
 
@@ -59,7 +62,9 @@ def create_module(payload: SettingModuleCreate, db: Session = DB_DEPENDENCY) -> 
 
 
 @router.patch("/{module_id}", response_model=SettingModuleRead)
-def patch_module(module_id: UUID, payload: SettingModulePatch, db: Session = DB_DEPENDENCY) -> SettingModule:
+def patch_module(
+    module_id: UUID, payload: SettingModulePatch, db: Session = DB_DEPENDENCY
+) -> SettingModule:
     module = db.get(SettingModule, module_id)
     if module is None:
         raise HTTPException(status_code=404, detail="模块不存在。")
@@ -84,7 +89,11 @@ def delete_module(module_id: UUID, db: Session = DB_DEPENDENCY) -> None:
 @router.get("/export")
 def export_modules(ids: str = "", db: Session = DB_DEPENDENCY) -> Response:
     id_list = [UUID(x) for x in ids.split(",") if x.strip()]
-    rows = list(db.scalars(select(SettingModule).where(SettingModule.id.in_(id_list))).all()) if id_list else []
+    rows = (
+        list(db.scalars(select(SettingModule).where(SettingModule.id.in_(id_list))).all())
+        if id_list
+        else []
+    )
     body = {
         "format_version": MODULE_EXPORT_FORMAT_VERSION,
         "modules": [
@@ -122,11 +131,18 @@ def import_modules(payload: ModuleImportFile, db: Session = DB_DEPENDENCY) -> li
 
 
 @router.post("/merge-preview", response_model=MergePreviewResult)
-async def merge_preview(payload: MergePreviewRequest, db: Session = DB_DEPENDENCY) -> MergePreviewResult:
-    rows = list(db.scalars(select(SettingModule).where(SettingModule.id.in_(payload.module_ids))).all())
+async def merge_preview(
+    payload: MergePreviewRequest, db: Session = DB_DEPENDENCY
+) -> MergePreviewResult:
+    rows = list(
+        db.scalars(select(SettingModule).where(SettingModule.id.in_(payload.module_ids))).all()
+    )
     by_id = {m.id: m for m in rows}
     modules = [
-        {"id": str(mid), "name": by_id[mid].name, "module_type": by_id[mid].module_type, "payload": by_id[mid].payload}
+        {
+            "id": str(mid), "name": by_id[mid].name,
+            "module_type": by_id[mid].module_type, "payload": by_id[mid].payload,
+        }
         for mid in payload.module_ids
         if mid in by_id
     ]

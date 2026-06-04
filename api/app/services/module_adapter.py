@@ -24,7 +24,9 @@ class ModuleAdapter:
     def __init__(self, router: ModelRouter | None = None) -> None:
         self.router = router or ModelRouter()
 
-    async def adapt(self, payload: dict[str, Any], target_context: dict[str, Any]) -> dict[str, Any]:
+    async def adapt(
+        self, payload: dict[str, Any], target_context: dict[str, Any]
+    ) -> dict[str, Any]:
         """返回改写后的 payload；任何异常/结构漂移回退原 payload。"""
         if not isinstance(payload, dict) or not payload:
             return payload
