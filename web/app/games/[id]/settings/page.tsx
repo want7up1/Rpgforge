@@ -83,7 +83,7 @@ function SettingsView({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const settings = asRecord(game.config?.story_settings);
+  const settings = useMemo(() => asRecord(game.config?.story_settings), [game.config?.story_settings]);
   const model: BoardModel = useMemo(() => buildBoardModel({ source: "settings", settings }), [settings]);
 
   async function persist(nextSettings: Record<string, unknown>) {
@@ -96,7 +96,7 @@ function SettingsView({
     } catch (caught) {
       // 回合生成中后端返回 409；其余照常报错。
       const msg = caught instanceof Error ? caught.message : "保存失败。";
-      setError(/409|生成中|正在生成|editable/i.test(msg) ? "回合生成中，暂时不能修改设定，请稍后再试。" : msg);
+      setError(/运行中|生成|提取任务|editable|409/i.test(msg) ? "回合生成中，暂时不能修改设定，请稍后再试。" : msg);
     } finally {
       setSaving(false);
     }
