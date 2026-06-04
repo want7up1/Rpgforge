@@ -1067,6 +1067,26 @@ Round 1 落地后立刻暴露的 3 个尾巴。改动量小、风险低、价值
 - `docs/API.md` 未与最新 router 100% 对齐（Round 1 没改 router 路径，但历史增量可能有遗漏）。优先级低，等阶段 1.1 trace 上线后顺便核对。
 - `CONTRIBUTING.md` 中 "Include tests for backend behavior changes" 与 §4 决策"不堆单元测试"有轻微冲突；AI 链路回归测试方案见 §3 阶段 1.2。
 
+### 5.4 前端：设定看板 / 工坊 / 设定页（2026-06-04 Round 36–39 新建）
+
+> 这套是今天大建设的核心。改前端设定编辑/工坊前，先读对应 `docs/superpowers/specs/2026-06-04-*`。
+
+| 关心的事 | 文件 | 入口符号 / 说明 |
+|---|---|---|
+| **看板纯逻辑**（无 React，vitest 覆盖） | `web/lib/generatorBoard.ts` | `buildBoardModel`（settings/confirmed 两源）、`deriveFields`/`inferType`（字段数据派生）、`writeBlockFields`（无损回写）、`appendItem`/`createEmptyItem`/`newItemBlock`/`ARRAY_SPECS`（新增项）、`isEmptyBlock`、`diffBoard`、锁定工具。**block.id/address 规则不可乱改**（护住生成页 diff 与模块提取） |
+| 看板容器 | `web/components/board/SettingsBoard.tsx` | Tab + 网格 + 弹窗 + 「显示空设定项」开关 + onAddItem |
+| 字段编辑器（8 类型） | `web/components/board/BoardFieldEditor.tsx` | text/textarea/number/bool/stringList/objectList/keyValue/json |
+| 块详情/编辑/新增弹窗 | `web/components/board/BlockDetailModal.tsx` | 类型化 drafts |
+| Tab / 网格(空块折叠+＋新增) | `web/components/board/BoardTabs.tsx` / `BoardBlockGrid.tsx` | |
+| 生成页（看板+对话停靠+手改锁定） | `web/app/games/new/page.tsx` | 锁定 locked_fields → 后端 interview |
+| 设定页（看板编辑+高级折叠+并入） | `web/app/games/[id]/settings/page.tsx` + `web/components/settings/*` | 保存走 `updateGameConfig`(PATCH config)+版本快照 |
+| 工坊页 | `web/app/workshop/page.tsx` | 模块库：分类分组/搜索/改名/删除/编辑内容/导入导出 |
+| 工坊组件（提取/并入） | `web/components/workshop/*` | `ModuleMergePanel`(并入预览/AI优化/冲突)、`SaveAsModuleDialog`(存为模块) |
+| 模块 payload 还原 | `web/lib/moduleFragment.ts` | `buildModulePayload`（按 BoardBlock.address 取数据） |
+| 前端 API | `web/lib/api.ts` | `listModules`/`createModule`/`mergePreviewModules`、`updateGameConfig` 等 |
+| **后端工坊** | `api/app/models/setting_module.py`、`services/module_library.py`（合并引擎）、`services/module_adapter.py`（AI 本地优化，独立 timeout+fallback）、`routers/modules.py`、`prompts/adapt_module.md` | merge-preview 统一服务"已有剧本/生成草稿"两个并入点 |
+| 前端测试 | `web/lib/generatorBoard.test.ts`、`web/lib/moduleFragment.test.ts` | `cd web && npm test`（vitest，纯函数）。**CI 跑 `eslint .` 全量含 tests，改前端推送前必跑 `npm run lint`** |
+
 ---
 
 ## 6. Telemetry 查询样例
