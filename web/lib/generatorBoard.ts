@@ -306,6 +306,23 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
       address: { kind: "settingsScalar", path: ["generation_parameters"] }, deletable: false
     });
 
+  // 保证每个分类内 block.id 唯一：同名机制/行动风格/素材等会撞 id → React key 重复
+  // → DOM 复用错位、内容串台（尤其「玩法机制」= core_mechanics ∪ action_style_rules，
+  // 名字无唯一性校验，最易撞）。撞了就追加 #2/#3，唯一 id 保持不变（不影响 diff）。
+  for (const blocks of Object.values(byId)) {
+    const seen = new Set<string>();
+    for (const block of blocks) {
+      let uniqueId = block.id;
+      let counter = 2;
+      while (seen.has(uniqueId)) {
+        uniqueId = `${block.id}#${counter}`;
+        counter += 1;
+      }
+      seen.add(uniqueId);
+      block.id = uniqueId;
+    }
+  }
+
   return BOARD_CATEGORIES.map((def) => ({ ...def, blocks: byId[def.id] }));
 }
 

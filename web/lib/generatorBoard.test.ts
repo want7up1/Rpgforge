@@ -214,3 +214,28 @@ describe("writeBlockFields 写回 source", () => {
     expect(out).toEqual({ game_profile: { title: "new", genre: "g" } });
   });
 });
+
+describe("block id 唯一性（防同名串台）", () => {
+  it("同名机制/行动风格不产生重复 block.id（追加 #n）", () => {
+    const settings = {
+      core_mechanics: [
+        { name: "战斗", rule: "a" },
+        { name: "战斗", rule: "b" }
+      ],
+      action_style_rules: [
+        { name: "战斗", rule: "c" },
+        { name: "战斗", rule: "d" }
+      ]
+    };
+    const model = buildBoardModel({ source: "settings", settings });
+    const mech = model.categories.find((c) => c.id === "mechanics")!;
+    const ids = mech.blocks.map((b) => b.id);
+    expect(new Set(ids).size).toBe(ids.length); // 全唯一
+    expect(ids).toEqual([
+      "core_mechanics:战斗",
+      "core_mechanics:战斗#2",
+      "action_style_rules:战斗",
+      "action_style_rules:战斗#2"
+    ]);
+  });
+});
