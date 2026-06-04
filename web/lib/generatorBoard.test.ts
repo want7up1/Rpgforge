@@ -239,3 +239,50 @@ describe("block id 唯一性（防同名串台）", () => {
     ]);
   });
 });
+
+describe("全字段覆盖（数据派生）", () => {
+  const settings = {
+    game_profile: { title: "雁回镇", genre: "武侠", description: "失踪案" },
+    worldview: { summary: "雨夜义庄", public_facts: ["镇有义庄"], hidden_facts: ["庄主是凶手"] },
+    home_base: { name: "镖局", services: ["休整"] },
+    core_characters: [{ name: "主角", role: "protagonist", dramatic_function: "调查者", portrait_prompt: "p" }],
+    act_plan: [{
+      id: "act_1", title: "序", objective: "查案",
+      allowed_reveals: ["红伞"], forbidden_reveals: ["真凶"],
+      completion_anchors: [{ id: "act_1_a1", title: "入庄", required: true }]
+    }],
+    generation_parameters: { target_min: 1200, paragraph_max: 8 }
+  };
+  function blockById(id: string) {
+    return buildBoardModel({ source: "settings", settings })
+      .categories.flatMap((c) => c.blocks).find((b) => b.id === id);
+  }
+
+  it("game_profile 含 description 字段", () => {
+    expect(blockById("game_profile")!.fields.map((x) => x.key)).toContain("description");
+  });
+  it("worldview 含 public_facts/hidden_facts（stringList）", () => {
+    const fs = blockById("worldview")!.fields;
+    expect(fs.find((x) => x.key === "public_facts")?.type).toBe("stringList");
+    expect(fs.find((x) => x.key === "hidden_facts")?.type).toBe("stringList");
+  });
+  it("home_base 块存在且字段派生", () => {
+    const b = blockById("home_base");
+    expect(b).toBeTruthy();
+    expect(b!.fields.find((x) => x.key === "services")?.type).toBe("stringList");
+  });
+  it("角色块含 dramatic_function/portrait_prompt", () => {
+    const keys = blockById("core_characters:主角")!.fields.map((x) => x.key);
+    expect(keys).toEqual(expect.arrayContaining(["dramatic_function", "portrait_prompt"]));
+  });
+  it("act 块含 completion_anchors(objectList) + reveals(stringList)", () => {
+    const fs = blockById("act_plan:act_1")!.fields;
+    const anchors = fs.find((x) => x.key === "completion_anchors")!;
+    expect(anchors.type).toBe("objectList");
+    expect(anchors.itemFields!.find((s) => s.key === "required")?.type).toBe("bool");
+    expect(fs.find((x) => x.key === "allowed_reveals")?.type).toBe("stringList");
+  });
+  it("generation_parameters 数值字段为 number", () => {
+    expect(blockById("generation_parameters")!.fields.find((x) => x.key === "target_min")?.type).toBe("number");
+  });
+});

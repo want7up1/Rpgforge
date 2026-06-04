@@ -108,27 +108,89 @@ const FIELD_LABELS: Record<string, string> = {
   description: "描述", appearance: "外貌", desire: "欲望", fear: "恐惧",
   leverage: "把柄", relationship_arc: "关系弧", aliases: "别名",
   objective: "目标", dramatic_question: "戏剧问题", rule: "规则",
-  content: "内容", usage: "用法", keywords: "关键词", triggers: "触发词"
+  content: "内容", usage: "用法", keywords: "关键词", triggers: "触发词",
+  dramatic_function: "戏剧功能", public_limit: "公开限度", portrait_prompt: "立绘提示",
+  visibility: "可见性", public_facts: "公开事实", hidden_facts: "隐藏真相",
+  must_hit_beats: "必经节点", allowed_reveals: "允许揭示", forbidden_reveals: "禁止揭示",
+  transition_to_next_act: "转场条件", act_id: "所属幕", player_visible: "玩家可见",
+  optional: "可选", always_on: "常驻", gm_secret: "GM秘密", public_info: "公开信息",
+  services: "服务", type: "类型", priority: "优先级", enabled: "启用",
+  completion_signal: "完成信号", completion_anchors: "完成锚点"
 };
 function label(key: string): string {
   return FIELD_LABELS[key] ?? key;
 }
 
-// 从一个对象按白名单字段顺序产出 BoardField[]（空值跳过，列表用 stringList）。
-function objectFields(
-  obj: Record<string, unknown>,
-  keys: { key: string; type: BoardFieldType }[]
-): BoardField[] {
-  const out: BoardField[] = [];
-  for (const { key, type } of keys) {
-    const raw = obj[key];
-    if (type === "stringList") {
-      const v = strList(raw);
-      if (v.length) out.push({ key, label: label(key), value: v, type });
-    } else {
-      const v = str(raw);
-      if (v) out.push({ key, label: label(key), value: v, type });
+// 长文本键（用 textarea）
+const TEXTAREA_KEYS = new Set([
+  "description", "objective", "rule", "content", "summary", "premise",
+  "core_fantasy", "central_mystery", "main_goal", "emotional_arc",
+  "narrative_style", "appearance", "relationship_arc", "dramatic_question",
+  "usage", "public_info", "gm_secret", "identity", "logline", "completion_signal"
+]);
+const BOOL_KEYS = new Set(["required", "enabled", "always_on", "optional"]);
+
+function inferType(key: string, value: unknown): BoardFieldType {
+  if (BOOL_KEYS.has(key)) return "bool";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "bool";
+  if (Array.isArray(value)) {
+    if (value.every((v) => typeof v === "string")) return "stringList";
+    if (value.length > 0 && value.every((v) => v && typeof v === "object" && !Array.isArray(v))) {
+      return "objectList";
     }
+    return value.length === 0 ? "stringList" : "json";
+  }
+  if (value && typeof value === "object") return "keyValue";
+  return TEXTAREA_KEYS.has(key) ? "textarea" : "text";
+}
+
+function defaultValueFor(type: BoardFieldType): BoardFieldValue {
+  switch (type) {
+    case "number": return 0;
+    case "bool": return false;
+    case "stringList": return [];
+    case "objectList": return [];
+    case "keyValue": return {};
+    case "json": return {};
+    default: return "";
+  }
+}
+
+// completion_anchors 子字段规格
+const ANCHOR_ITEM_FIELDS: SubFieldSpec[] = [
+  { key: "id", label: "id", type: "text" },
+  { key: "title", label: "标题", type: "text" },
+  { key: "required", label: "必需", type: "bool" },
+  { key: "description", label: "描述", type: "textarea" },
+  { key: "completion_signal", label: "完成信号", type: "text" }
+];
+
+type FieldSpec = { key: string; label?: string; type?: BoardFieldType; itemFields?: SubFieldSpec[] };
+
+// 按「已知字段规格 + 数据里出现的额外键」派生 BoardField[]：
+// spec 决定 label/type/顺序与空块占位；data 里多出的键按推断补上（防漏不漂移）。
+function deriveFields(data: Record<string, unknown>, spec: FieldSpec[]): BoardField[] {
+  const out: BoardField[] = [];
+  const used = new Set<string>();
+  for (const s of spec) {
+    used.add(s.key);
+    const type = s.type ?? inferType(s.key, data[s.key]);
+    const raw = data[s.key];
+    const value = raw === undefined || raw === null ? defaultValueFor(type) : (raw as BoardFieldValue);
+    const field: BoardField = { key: s.key, label: s.label ?? label(s.key), value, type };
+    if (type === "objectList") field.itemFields = s.itemFields ?? ANCHOR_ITEM_FIELDS;
+    out.push(field);
+  }
+  for (const [k, v] of Object.entries(data)) {
+    if (used.has(k) || k === "id") continue;
+    const type = inferType(k, v);
+    const field: BoardField = {
+      key: k, label: label(k),
+      value: (v as BoardFieldValue) ?? defaultValueFor(type), type
+    };
+    if (type === "objectList") field.itemFields = ANCHOR_ITEM_FIELDS;
+    out.push(field);
   }
   return out;
 }
@@ -144,35 +206,44 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     constraints: [], materials: [], advanced: []
   };
 
-  // ① 世界与基调
-  const profileFields = objectFields(profile, [
-    { key: "title", type: "text" }, { key: "genre", type: "text" },
-    { key: "tone", type: "text" }, { key: "logline", type: "textarea" }
-  ]);
-  if (profileFields.length)
-    byId.world.push({
-      id: "game_profile", category: "world", title: "作品信息", icon: "🪪",
-      summary: firstLine(str(profile.title)), fields: profileFields,
-      address: { kind: "settingsScalar", path: ["game_profile"] }, deletable: false
-    });
-  const worldviewFields = objectFields(worldview, [
-    { key: "summary", type: "textarea" }
-  ]);
-  if (worldviewFields.length)
-    byId.world.push({
-      id: "worldview", category: "world", title: "世界观", icon: "🌍",
-      summary: firstLine(str(worldview.summary)), fields: worldviewFields,
-      address: { kind: "settingsScalar", path: ["worldview"] }, deletable: false
-    });
+  const home = asRecord(settings.home_base);
+  const gen = asRecord(settings.generation_parameters);
+
+  // ① 世界与基调（固定块无条件建，空与否由渲染层折叠决定）
+  byId.world.push({
+    id: "game_profile", category: "world", title: "作品信息", icon: "🪪",
+    summary: firstLine(str(profile.title)),
+    fields: deriveFields(profile, [
+      { key: "title", type: "text" }, { key: "genre", type: "text" },
+      { key: "tone", type: "text" }, { key: "logline", type: "textarea" },
+      { key: "description", type: "textarea" }
+    ]),
+    address: { kind: "settingsScalar", path: ["game_profile"] }, deletable: false
+  });
+  byId.world.push({
+    id: "worldview", category: "world", title: "世界观", icon: "🌍",
+    summary: firstLine(str(worldview.summary)),
+    fields: deriveFields(worldview, [
+      { key: "summary", type: "textarea" },
+      { key: "public_facts", type: "stringList" },
+      { key: "hidden_facts", type: "stringList" }
+    ]),
+    address: { kind: "settingsScalar", path: ["worldview"] }, deletable: false
+  });
   for (const k of ["premise", "core_fantasy", "central_mystery", "main_goal", "emotional_arc", "narrative_style"]) {
-    const v = str(core[k]);
-    if (!v) continue;
     byId.world.push({
       id: `story_core.${k}`, category: "world", title: label(k), icon: "🎯",
-      summary: firstLine(v), fields: [{ key: k, label: label(k), value: v, type: "textarea" }],
+      summary: firstLine(str(core[k])),
+      fields: [{ key: k, label: label(k), value: str(core[k]), type: "textarea" }],
       address: { kind: "settingsScalar", path: ["story_core", k] }, deletable: false
     });
   }
+  byId.world.push({
+    id: "home_base", category: "world", title: "据点 home_base", icon: "🏠",
+    summary: firstLine(str(home.name)),
+    fields: deriveFields(home, []),
+    address: { kind: "settingsScalar", path: ["home_base"] }, deletable: false
+  });
 
   // ② 角色
   for (const ch of asList(settings.core_characters)) {
@@ -181,12 +252,14 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.characters.push({
       id: `core_characters:${name}`, category: "characters", title: name, icon: "👤",
       summary: [str(ch.role), firstLine(str(ch.description))].filter(Boolean).join(" · "),
-      fields: objectFields(ch, [
+      fields: deriveFields(ch, [
         { key: "name", type: "text" }, { key: "role", type: "text" },
         { key: "identity", type: "text" }, { key: "aliases", type: "stringList" },
         { key: "description", type: "textarea" }, { key: "appearance", type: "textarea" },
         { key: "desire", type: "text" }, { key: "fear", type: "text" },
-        { key: "leverage", type: "text" }, { key: "relationship_arc", type: "textarea" }
+        { key: "leverage", type: "text" }, { key: "relationship_arc", type: "textarea" },
+        { key: "dramatic_function", type: "textarea" }, { key: "public_limit", type: "text" },
+        { key: "portrait_prompt", type: "textarea" }, { key: "visibility", type: "text" }
       ]),
       address: { kind: "settingsItem", arrayKey: "core_characters", idKey: "name", idValue: name },
       deletable: true
@@ -200,9 +273,14 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.plot.push({
       id: `act_plan:${id}`, category: "plot", title: str(act.title) || id, icon: "🎬",
       summary: firstLine(str(act.objective)),
-      fields: objectFields(act, [
+      fields: deriveFields(act, [
         { key: "title", type: "text" }, { key: "objective", type: "textarea" },
-        { key: "dramatic_question", type: "textarea" }
+        { key: "dramatic_question", type: "textarea" },
+        { key: "must_hit_beats", type: "stringList" },
+        { key: "allowed_reveals", type: "stringList" },
+        { key: "forbidden_reveals", type: "stringList" },
+        { key: "completion_anchors", type: "objectList", itemFields: ANCHOR_ITEM_FIELDS },
+        { key: "transition_to_next_act", type: "keyValue" }
       ]),
       address: {
         kind: "settingsItem", arrayKey: "act_plan",
@@ -217,8 +295,10 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.plot.push({
       id: `main_quest_path:${id}`, category: "plot", title: str(q.title) || id, icon: "🧭",
       summary: firstLine(str(q.objective)),
-      fields: objectFields(q, [
-        { key: "title", type: "text" }, { key: "objective", type: "textarea" }
+      fields: deriveFields(q, [
+        { key: "title", type: "text" }, { key: "objective", type: "textarea" },
+        { key: "act_id", type: "text" }, { key: "player_visible", type: "text" },
+        { key: "completion_signal", type: "text" }, { key: "optional", type: "bool" }
       ]),
       address: {
         kind: "settingsItem", arrayKey: "main_quest_path",
@@ -235,7 +315,10 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.mechanics.push({
       id: `core_mechanics:${name}`, category: "mechanics", title: name, icon: "⚙",
       summary: firstLine(str(m.rule)),
-      fields: objectFields(m, [{ key: "name", type: "text" }, { key: "rule", type: "textarea" }]),
+      fields: deriveFields(m, [
+        { key: "name", type: "text" }, { key: "rule", type: "textarea" },
+        { key: "visibility", type: "text" }
+      ]),
       address: { kind: "settingsItem", arrayKey: "core_mechanics", idKey: "name", idValue: name },
       deletable: true
     });
@@ -246,16 +329,17 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.mechanics.push({
       id: `action_style_rules:${name}`, category: "mechanics", title: name, icon: "🖋",
       summary: firstLine(str(s.rule)),
-      fields: objectFields(s, [
+      fields: deriveFields(s, [
         { key: "name", type: "text" }, { key: "triggers", type: "stringList" },
-        { key: "rule", type: "textarea" }
+        { key: "rule", type: "textarea" }, { key: "priority", type: "text" },
+        { key: "enabled", type: "bool" }
       ]),
       address: { kind: "settingsItem", arrayKey: "action_style_rules", idKey: "name", idValue: name },
       deletable: true
     });
   }
 
-  // ⑤ 约束与红线（hard_rules 各桶 + story_core 红线）
+  // ⑤ 约束与红线（hard_rules 各桶 + story_core 红线，无条件建块）
   const constraintBuckets: { key: string; title: string }[] = [
     { key: "must_follow", title: "必须遵守" },
     { key: "must_not", title: "禁止行为" },
@@ -264,7 +348,6 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
   ];
   for (const { key, title } of constraintBuckets) {
     const v = strList(hard[key]);
-    if (!v.length) continue;
     byId.constraints.push({
       id: `hard_rules.${key}`, category: "constraints", title, icon: "📜",
       summary: `${v.length} 条`,
@@ -280,7 +363,6 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
   ];
   for (const { key, title } of coreBuckets) {
     const v = strList(core[key]);
-    if (!v.length) continue;
     byId.constraints.push({
       id: `story_core.${key}`, category: "constraints", title, icon: "🚫",
       summary: `${v.length} 条`,
@@ -296,9 +378,13 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.materials.push({
       id: `story_material_library:${title}`, category: "materials", title, icon: "📦",
       summary: firstLine(str(mat.content)),
-      fields: objectFields(mat, [
-        { key: "title", type: "text" }, { key: "keywords", type: "stringList" },
-        { key: "content", type: "textarea" }, { key: "usage", type: "textarea" }
+      fields: deriveFields(mat, [
+        { key: "title", type: "text" }, { key: "type", type: "text" },
+        { key: "keywords", type: "stringList" }, { key: "triggers", type: "stringList" },
+        { key: "priority", type: "text" }, { key: "always_on", type: "bool" },
+        { key: "visibility", type: "text" }, { key: "public_info", type: "textarea" },
+        { key: "gm_secret", type: "textarea" }, { key: "content", type: "textarea" },
+        { key: "usage", type: "textarea" }, { key: "enabled", type: "bool" }
       ]),
       address: {
         kind: "settingsItem", arrayKey: "story_material_library",
@@ -308,17 +394,13 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     });
   }
 
-  // ⑦ 高级：篇幅参数（只读展示，单块）
-  const gen = asRecord(settings.generation_parameters);
-  const genFields = Object.entries(gen)
-    .filter(([, v]) => typeof v === "number" || typeof v === "string")
-    .map(([k, v]) => ({ key: k, label: label(k), value: String(v), type: "text" as const }));
-  if (genFields.length)
-    byId.advanced.push({
-      id: "generation_parameters", category: "advanced", title: "篇幅参数", icon: "🔧",
-      summary: `${genFields.length} 项`, fields: genFields,
-      address: { kind: "settingsScalar", path: ["generation_parameters"] }, deletable: false
-    });
+  // ⑦ 高级：篇幅参数（无条件建块，数据派生）
+  byId.advanced.push({
+    id: "generation_parameters", category: "advanced", title: "篇幅参数", icon: "🔧",
+    summary: `${Object.keys(gen).length} 项`,
+    fields: deriveFields(gen, []),
+    address: { kind: "settingsScalar", path: ["generation_parameters"] }, deletable: false
+  });
 
   // 保证每个分类内 block.id 唯一：同名机制/行动风格/素材等会撞 id → React key 重复
   // → DOM 复用错位、内容串台（尤其「玩法机制」= core_mechanics ∪ action_style_rules，
