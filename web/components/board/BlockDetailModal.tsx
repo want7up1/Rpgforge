@@ -19,6 +19,7 @@ export function BlockDetailModal({
   onSave,
   onDelete,
   onUnlock,
+  onSaveAsModule,
   onClose
 }: {
   block: BoardBlock;
@@ -26,6 +27,7 @@ export function BlockDetailModal({
   onSave: (fields: BoardField[]) => void;
   onDelete: () => void;
   onUnlock?: () => void;
+  onSaveAsModule?: () => void;
   onClose: () => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>(() =>
@@ -89,6 +91,11 @@ export function BlockDetailModal({
           ) : null}
           {block.deletable ? (
             <button className="app-button" type="button" onClick={onDelete}>🗑 删除</button>
+          ) : null}
+          {onSaveAsModule ? (
+            <button className="app-button" type="button" onClick={onSaveAsModule} title="把这个设定存为可复用模块">
+              ⚗ 存为模块
+            </button>
           ) : null}
         </div>
       </div>
