@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 36 — 创建冒险页重设计（看板/Tab/锁定/diff）+ 前端 vitest 19 + 后端 locked_fields + generator_interview 规则 7 |
+| 最近一轮 | Round 38 — 剧本炼金工坊：setting_modules 表 + module_library 合并引擎 + module_adapter AI 优化（adapt_module.md）+ /api/modules 路由 + /workshop 页 + 看板存为模块 + 并入面板（设定/生成页接入） |
 | 完成日期 | 2026-06-04 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
@@ -24,6 +24,30 @@
 ---
 
 ## 1. 已完成
+
+### Round 38 (2026-06-04) — 剧本炼金工坊（setting_modules 表 + module_library 合并引擎 + module_adapter AI 优化 + /api/modules 路由 + /workshop 页 + 存为模块 + 并入面板）
+
+**背景**：剧本设定（story_settings）由 AI 生成但难以跨剧本复用，每次创建新剧本都要从头提炼素材。本轮引入「剧本炼金工坊」，将剧本设定片段提炼为可复用模块，支持库管理、合并预览、AI 本地优化后并入，覆盖后端存储 → 合并逻辑 → AI 适配 → API → 前端工坊页 → 看板存为模块 → 设定/生成页接入整条链路。
+
+**后端（Task 1–4）**：
+- **`setting_modules` 表**：新增 `api/migrations/versions/20260604_0029_add_setting_modules.py`——`setting_modules`（id/user_id/name/description/category/fragment JSON/tags/source_game_id/is_public/created_at/updated_at）；Alembic HEAD = `20260604_0029`。
+- **`module_library.py` 合并引擎**：`merge_module_into_settings(fragment, target, strategy)` 按分类合并 moduleFragment 片段至 story_settings——去重（同 id/name 比较）、冲突 rename（`_v2` 后缀）/ overwrite / skip 三策略；`preview_merge` 返回 `{added, renamed, skipped, conflicts}` 差异摘要，不改原始数据。
+- **`module_adapter.py` AI 本地优化**：`adapt_module_for_game(fragment, target_settings, game_context)` 调用 DeepSeek 按目标剧本风格小幅调整模块内容；新增 prompt `api/app/prompts/adapt_module.md`（输入输出 JSON schema + 约束：仅微调措辞/数值，禁止改结构/增删字段）；独立 timeout=30s + fallback（返回原始 fragment 不抛出）。
+- **`/api/modules` 路由**：新增 `api/app/routers/modules.py`——`GET /api/modules`（列表+搜索）、`POST /api/modules`（创建）、`GET /api/modules/{id}`（详情）、`PUT /api/modules/{id}`（更新）、`DELETE /api/modules/{id}`（删除）、`POST /api/modules/{id}/export`（导出 JSON）、`POST /api/modules/import`（导入 JSON）、`POST /api/modules/merge-preview`（预览合并）。
+
+**前端（Task 5–10）**：
+- **`moduleFragment.ts` 类型层**：`ModuleFragment` / `SettingModule` / `MergePreview` / `MergeStrategy` 类型定义；`fragmentToModule` / `moduleToFragment` 互转工具函数；`lib/moduleFragment.test.ts` 4 个 vitest 覆盖转换逻辑。
+- **`api/modules.ts`**：封装全部 `/api/modules` 端点（list/get/create/update/delete/export/import/mergePreview）+ SWR key 常量。
+- **`/workshop` 工坊页**：`app/workshop/page.tsx`——模块列表（分类筛选/搜索/排序）+ 模块详情侧边栏（查看 fragment/标签/来源）+ 导入/导出/删除操作；响应式布局。
+- **看板「存为模块」**：`components/board/SettingsBoard` 右上角「存为模块」按钮 → `SaveAsModuleDialog`（选分类/填名称描述/预览 fragment → POST /api/modules）。
+- **`ModuleMergePanel` 共享并入面板**：`components/workshop/ModuleMergePanel.tsx`——选模块 → AI 优化开关（调 module_adapter）→ 预览合并差异（added/renamed/skipped/conflicts）→ 确认并入；targetSettings 变更清预览防陈旧覆盖。
+- **设定页/生成页接入**：`/games/[id]/settings` 看板区新增「并入模块」入口（挂 ModuleMergePanel）；`/games/new` 生成页草稿看板新增「并入模块」入口（并入后刷新 confirmed_requirements）。
+
+**验证**：
+- 迁移 HEAD = `20260604_0029`；三镜像真实重建（api/worker: 2026-06-04T05:00:54Z，web: 2026-06-04T05:21:37Z）。
+- 后端 `pytest tests/` **229 passed**；`ruff check app/` 全过。
+- 前端 eslint 0 error/0 warning；vitest **23 passed**（lib/moduleFragment.test.ts 4 + lib/generatorBoard.test.ts 19）；tsc --noEmit 0 error；`next build` 含 `/workshop` 路由通过。
+- Step 4 手动浏览器端到端走查留给用户人工验证。
 
 ### Round 37 (2026-06-04) — 已有剧本「设定」页 + 信息架构去重
 
