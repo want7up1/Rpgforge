@@ -39,6 +39,7 @@ export function ChatDock({
         onPointerDown={onHandleDown}
         onPointerMove={onHandleMove}
         onPointerUp={onHandleUp}
+        onPointerCancel={onHandleUp}
         title="拖动调整高度"
       />
       <div className="px-1 py-2" style={{ height }}>
