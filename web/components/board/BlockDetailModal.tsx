@@ -2,16 +2,8 @@
 
 import { useState } from "react";
 
-import type { BoardBlock, BoardField } from "@/lib/generatorBoard";
-
-function fieldToText(field: BoardField): string {
-  return Array.isArray(field.value) ? field.value.join("\n") : String(field.value);
-}
-function textToFieldValue(field: BoardField, text: string): string | string[] {
-  return field.type === "stringList"
-    ? text.split("\n").map((s) => s.trim()).filter(Boolean)
-    : text;
-}
+import { BoardFieldEditor } from "@/components/board/BoardFieldEditor";
+import type { BoardBlock, BoardField, BoardFieldValue } from "@/lib/generatorBoard";
 
 export function BlockDetailModal({
   block,
@@ -30,16 +22,12 @@ export function BlockDetailModal({
   onSaveAsModule?: () => void;
   onClose: () => void;
 }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>(() =>
-    Object.fromEntries(block.fields.map((f) => [f.key, fieldToText(f)]))
+  const [drafts, setDrafts] = useState<Record<string, BoardFieldValue>>(() =>
+    Object.fromEntries(block.fields.map((f) => [f.key, f.value]))
   );
 
   function handleSave() {
-    const next = block.fields.map((f) => ({
-      ...f,
-      value: textToFieldValue(f, drafts[f.key] ?? fieldToText(f))
-    }));
-    onSave(next);
+    onSave(block.fields.map((f) => ({ ...f, value: drafts[f.key] ?? f.value })));
   }
 
   return (
@@ -59,25 +47,12 @@ export function BlockDetailModal({
         <div className="mt-4 grid gap-4">
           {block.fields.map((f) => (
             <label key={f.key} className="grid gap-1">
-              <span className="text-sm font-semibold">
-                {f.label}
-                {f.type === "stringList" ? (
-                  <span className="ml-2 text-xs text-[color:var(--muted)]">每行一条</span>
-                ) : null}
-              </span>
-              {f.type === "text" ? (
-                <input
-                  className="app-input"
-                  value={drafts[f.key] ?? ""}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                />
-              ) : (
-                <textarea
-                  className="app-input min-h-24 resize-y leading-6"
-                  value={drafts[f.key] ?? ""}
-                  onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
-                />
-              )}
+              <span className="text-sm font-semibold">{f.label}</span>
+              <BoardFieldEditor
+                field={f}
+                value={drafts[f.key] ?? f.value}
+                onChange={(v) => setDrafts((d) => ({ ...d, [f.key]: v }))}
+              />
             </label>
           ))}
         </div>
