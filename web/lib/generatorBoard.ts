@@ -388,3 +388,83 @@ export function diffBoard(prev: BoardModel | null, next: BoardModel): BoardDiff 
   }
   return { changedCategories, changedBlockIds };
 }
+
+export function isLocked(locked: string[], blockId: string): boolean {
+  return locked.includes(blockId);
+}
+export function lockBlock(locked: string[], blockId: string): string[] {
+  return locked.includes(blockId) ? locked : [...locked, blockId];
+}
+export function unlockBlock(locked: string[], blockId: string): string[] {
+  return locked.filter((id) => id !== blockId);
+}
+
+function cloneDeep<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+// 把 fields 的值塞进 record（confirmed 或 settings 块的字段集合）。
+function fieldsToRecord(target: Record<string, unknown>, fields: BoardField[]): void {
+  for (const f of fields) target[f.key] = f.value;
+}
+
+export function writeBlockFields(
+  source: Record<string, unknown>,
+  address: BoardAddress,
+  fields: BoardField[]
+): Record<string, unknown> {
+  const out = cloneDeep(source);
+  if (address.kind === "confirmedField") {
+    const f = fields.find((x) => x.key === address.field);
+    if (f) out[address.field] = f.value;
+    return out;
+  }
+  if (address.kind === "settingsScalar" || address.kind === "settingsStringList") {
+    // path 最后一段是叶子；逐级 setdefault 对象后写叶子值
+    const path = address.path;
+    let node = out as Record<string, unknown>;
+    for (let i = 0; i < path.length - 1; i += 1) {
+      const seg = path[i];
+      if (typeof node[seg] !== "object" || node[seg] === null) node[seg] = {};
+      node = node[seg] as Record<string, unknown>;
+    }
+    const leaf = path[path.length - 1];
+    if (address.path.length === 1 && address.kind === "settingsScalar") {
+      // 整对象块（game_profile/worldview/generation_parameters）：把 fields 合并进该对象
+      const obj = (typeof node[leaf] === "object" && node[leaf] !== null
+        ? (node[leaf] as Record<string, unknown>)
+        : {}) as Record<string, unknown>;
+      fieldsToRecord(obj, fields);
+      node[leaf] = obj;
+    } else {
+      const f = fields[0];
+      node[leaf] = f ? f.value : node[leaf];
+    }
+    return out;
+  }
+  // settingsItem：定位数组项，合并字段
+  const arr = Array.isArray(out[address.arrayKey])
+    ? (out[address.arrayKey] as Record<string, unknown>[])
+    : [];
+  const idx = arr.findIndex((item) => str(item[address.idKey]) === address.idValue);
+  if (idx >= 0) {
+    const merged = { ...arr[idx] };
+    fieldsToRecord(merged, fields);
+    arr[idx] = merged;
+    out[address.arrayKey] = arr;
+  }
+  return out;
+}
+
+export function deleteBlock(
+  source: Record<string, unknown>,
+  address: BoardAddress
+): Record<string, unknown> {
+  if (address.kind !== "settingsItem") return source; // 仅数组项可删
+  const out = cloneDeep(source);
+  const arr = Array.isArray(out[address.arrayKey])
+    ? (out[address.arrayKey] as Record<string, unknown>[])
+    : [];
+  out[address.arrayKey] = arr.filter((item) => str(item[address.idKey]) !== address.idValue);
+  return out;
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildBoardModel, BOARD_CATEGORIES, diffBoard } from "@/lib/generatorBoard";
+import { buildBoardModel, BOARD_CATEGORIES, diffBoard, isLocked, lockBlock, unlockBlock, writeBlockFields, deleteBlock } from "@/lib/generatorBoard";
 
 describe("buildBoardModel from story_settings", () => {
   const settings = {
@@ -134,5 +134,74 @@ describe("diffBoard", () => {
     const diff = diffBoard(null, next);
     expect(diff.changedBlockIds.has("story_background")).toBe(true);
     expect(diff.changedBlockIds.has("must_include")).toBe(true);
+  });
+});
+
+describe("锁定工具", () => {
+  it("lock/unlock/isLocked", () => {
+    let locked: string[] = [];
+    locked = lockBlock(locked, "core_characters:红伞女人");
+    expect(isLocked(locked, "core_characters:红伞女人")).toBe(true);
+    locked = lockBlock(locked, "core_characters:红伞女人"); // 幂等
+    expect(locked.length).toBe(1);
+    locked = unlockBlock(locked, "core_characters:红伞女人");
+    expect(isLocked(locked, "core_characters:红伞女人")).toBe(false);
+  });
+});
+
+describe("writeBlockFields 写回 source", () => {
+  it("confirmedField：写回字符串/列表字段", () => {
+    const src = { story_background: "old", must_include: ["x"] };
+    const out = writeBlockFields(src, { kind: "confirmedField", field: "story_background" }, [
+      { key: "story_background", label: "故事背景", value: "new", type: "textarea" }
+    ]);
+    expect((out as any).story_background).toBe("new");
+    expect(out).not.toBe(src); // 不可变
+  });
+
+  it("settingsScalar：写回 story_core.central_mystery", () => {
+    const src = { story_core: { central_mystery: "old", main_goal: "g" } };
+    const out = writeBlockFields(src, { kind: "settingsScalar", path: ["story_core", "central_mystery"] }, [
+      { key: "central_mystery", label: "核心悬念", value: "new", type: "textarea" }
+    ]);
+    expect((out as any).story_core.central_mystery).toBe("new");
+    expect((out as any).story_core.main_goal).toBe("g"); // 同级不丢
+  });
+
+  it("settingsStringList：写回 hard_rules.must_follow", () => {
+    const src = { hard_rules: { must_follow: ["a"], must_not: ["b"] } };
+    const out = writeBlockFields(src, { kind: "settingsStringList", path: ["hard_rules", "must_follow"] }, [
+      { key: "must_follow", label: "必须遵守", value: ["a", "c"], type: "stringList" }
+    ]);
+    expect((out as any).hard_rules.must_follow).toEqual(["a", "c"]);
+    expect((out as any).hard_rules.must_not).toEqual(["b"]);
+  });
+
+  it("settingsItem：按 idKey 定位数组项写回多字段", () => {
+    const src = {
+      core_characters: [
+        { name: "主角", description: "d1" },
+        { name: "红伞女人", description: "d2", role: "npc" }
+      ]
+    };
+    const out = writeBlockFields(
+      src,
+      { kind: "settingsItem", arrayKey: "core_characters", idKey: "name", idValue: "红伞女人" },
+      [
+        { key: "name", label: "名称", value: "黑伞女人", type: "text" },
+        { key: "description", label: "描述", value: "改了", type: "textarea" }
+      ]
+    );
+    const arr = (out as any).core_characters;
+    expect(arr[0]).toEqual({ name: "主角", description: "d1" }); // 其它项不动
+    expect(arr[1]).toEqual({ name: "黑伞女人", description: "改了", role: "npc" }); // 未列字段保留
+  });
+
+  it("deleteBlock：settingsItem 删除数组项", () => {
+    const src = { core_characters: [{ name: "a" }, { name: "b" }] };
+    const out = deleteBlock(src, {
+      kind: "settingsItem", arrayKey: "core_characters", idKey: "name", idValue: "a"
+    });
+    expect((out as any).core_characters).toEqual([{ name: "b" }]);
   });
 });
