@@ -17,9 +17,11 @@
 | 完成日期 | 2026-06-04 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
-| 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
-| ✅ 验证状态 | 容器内 159 pytest 全过；真实游玩验证两项硬成果：同场景重述修复（对照）、cache 命中率 ~5%→稳态 60%+（对照）。judge 量化基线 canon/safety/state 5/5（偏乐观，无严格改前对照） |
-| 下一步建议 | 游戏系统修复 + 实现计划**第一批**（8.1 GM hidden 投影 + 6.1 关系取最新）已落地（§1 Round 26-29，178 pytest + 真实存档实证）。**P0 + 全部 P1 + 主要 P2 + 玩法价值项已闭环**。剩余按 [`GAME_SYSTEM_AUDIT.md`](GAME_SYSTEM_AUDIT.md) §4：第二批（库存防负 / `_merge_mapping` 守卫 / 技能能力同名去重，可选）+ 第三批（NPC 定位 / 4.2 / 3.4 脆弱匹配加固，ROI 递减、建议结案）。均为可选 P3/低 ROI 项 |
+| 当前阶段 | **2026-06-04 一轮大型前端建设（Round 36–39）**：围绕「story_settings 可视化编辑」建了一套**设定看板**子系统，并落地三件事——① 生成页重设计（Round 36）② 设定页 + 信息架构去重（Round 37）③ **剧本炼金工坊**（Round 38，setting_modules 模块库 + 提取/并入 + AI 本地优化）④ 看板成为完整设定编辑面（Round 39，全字段数据驱动 + 字段类型系统 + 手动新增项）。详见各 Round 与下方「设计文档」。 |
+| 前端子系统（新） | **设定看板** = `web/lib/generatorBoard.ts`（buildBoardModel/字段派生/writeBlockFields）+ `web/components/board/*`（SettingsBoard/BoardFieldEditor/BlockDetailModal/Tabs/Grid）。三处复用：生成页 `app/games/new`、设定页 `app/games/[id]/settings`、工坊并入面板。**工坊** = `/workshop` + `web/components/workshop/*` + 后端 `setting_modules` 表/`/api/modules`/`module_library`/`module_adapter`。**导航**：顶栏「工坊」；游戏内「设定」页。 |
+| 设计文档（必读） | 今天 4 个特性的 spec/plan 全在 [`docs/superpowers/specs/`](superpowers/specs/) 与 [`docs/superpowers/plans/`](superpowers/plans/)（2026-06-04-*：generation-ui-redesign / game-settings-board / script-alchemy-workshop / board-complete-settings-editor）。接手前端工作前应读对应 spec。 |
+| ✅ 验证状态 | 后端容器内 **231 pytest** 全过 + `ruff check .` 干净；前端 `npm run lint` 0/0 + **vitest 36** + `tsc` + `next build` 全过；CI（push main 触发）全绿。三个特性合并自 PR #3/#4/#5（已 merge），看板编辑面经本地合并（Round 39），串台 bug 修复 PR #6。 |
+| 下一步建议（P2 待办） | 均为本轮明确留到 P2 的项：① 生成页接入「手动新增数组项」（设定页已做，共用组件 onAddItem 回调即可）② objectList 子卡拖拽排序 ③ 工坊「批量提取」「单块 AI 重生成」「模块版本史」④ 同名条目编辑按索引精确定位（现按 name 取首个，见 [`board-complete-settings-editor-design.md`] §8）⑤ AI 本地优化、并入闭环的真实游玩验证。**注意**：以下「游戏方向/文档卫生」两行为 2026-06-02/05-29 的历史背景，非当前焦点。 |
 
 ---
 
