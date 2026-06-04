@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
-import { JsonBlock } from "@/components/JsonBlock";
+import { SettingsOverviewCard } from "@/components/settings/SettingsOverviewCard";
 import {
   createGameProgressSave,
   deleteGame,
@@ -18,7 +18,6 @@ import {
   restartGameProgress
 } from "@/lib/api";
 import { downloadBlob } from "@/lib/downloads";
-import { buildGameBlueprint, type StoryBlueprintView } from "@/lib/gameExperience";
 import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
 import type { GameDetail, GameProgressSaveRead } from "@/lib/types";
 
@@ -90,11 +89,7 @@ function GameDetailView({
   const longTermSummary = latestSummary(game, "long_term");
   const chapterSummary = latestSummary(game, "chapter");
   const storySettings = asRecord(game.config?.story_settings);
-  const storyMaterials = asRecords(storySettings.story_material_library);
-  const actionStyles = asRecords(storySettings.action_style_rules);
-  const featuredMaterials = storyMaterials.slice(0, 6);
   const stateV2 = getStateV2FromGame(game);
-  const blueprint = buildGameBlueprint(game);
   const hasTurns = (game.state?.current_turn ?? 0) > 0;
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -180,11 +175,11 @@ function GameDetailView({
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-4">
         <MetricCard label="等级" value={stateV2.protagonist_sheet.level} />
         <MetricCard label="回合" value={game.state?.current_turn ?? 0} />
-        <MetricCard label="剧本素材" value={storyMaterials.length} />
+        <MetricCard label="剧本素材" value={asRecords(storySettings.story_material_library).length} />
         <MetricCard label="记忆摘要" value={game.summaries.length} />
       </section>
 
-      <ScriptLockSection blueprint={blueprint} />
+      <SettingsOverviewCard gameId={game.id} storySettings={storySettings} />
 
       <StatusSnapshot game={game} stateV2={stateV2} />
 
@@ -216,69 +211,6 @@ function GameDetailView({
           />
         </div>
       </section>
-
-      <section className="surface-panel">
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-          <div>
-            <h2 className="surface-title">剧本素材库</h2>
-            <p className="surface-subtle mt-1">
-              展示前 {featuredMaterials.length} 条，完整条目可在资料页查看。
-            </p>
-          </div>
-          <Link className="app-button" href={`/games/${game.id}/memory`}>
-            查看全部
-          </Link>
-        </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {featuredMaterials.length === 0 ? (
-            <p className="text-sm text-[color:var(--muted)]">暂无剧本素材。</p>
-          ) : (
-            featuredMaterials.map((entry, index) => (
-              <article
-                className="archive-card archive-card-accent app-long-card"
-                key={`${pickString(entry, "id") || pickString(entry, "title")}-${index}`}
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="font-semibold">{pickString(entry, "title") || "未命名素材"}</h3>
-                  <span className="app-pill">
-                    {pickString(entry, "type") || "story_material"} · {pickString(entry, "priority") || "medium"}
-                  </span>
-                </div>
-                <p className="app-wrap-text mt-3 max-h-40 overflow-auto whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
-                  {pickString(entry, "content") || pickString(entry, "public_info")}
-                </p>
-              </article>
-            ))
-          )}
-        </div>
-      </section>
-
-      <details className="surface-panel">
-        <summary className="cursor-pointer surface-title">高级诊断</summary>
-        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-          <DiagnosticsPanel title="story_settings v2" data={storySettings} />
-          <section className="archive-card">
-            <h3 className="font-semibold">行动风格规则</h3>
-            {actionStyles.length === 0 ? (
-              <p className="mt-3 text-sm text-[color:var(--muted)]">暂无行动风格规则。</p>
-            ) : (
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                {actionStyles.map((style, index) => (
-                  <article className="archive-card" key={`${pickString(style, "id") || pickString(style, "name")}-${index}`}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="font-semibold">{pickString(style, "name") || "未命名规则"}</h4>
-                      <span className="app-pill">{style.enabled === false ? "停用" : "启用"}</span>
-                    </div>
-                    <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">
-                      {asList(style.triggers).join("、") || "无触发词"}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-      </details>
 
       <details className="surface-panel border-[color:var(--danger-border)]">
         <summary className="cursor-pointer text-lg font-semibold text-[color:var(--danger-text)]">
@@ -522,47 +454,6 @@ function ProgressSaveSection({
   );
 }
 
-function ScriptLockSection({ blueprint }: { blueprint: StoryBlueprintView }) {
-  return (
-    <section className="surface-panel surface-panel-strong">
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
-        <div>
-          <h2 className="surface-title">剧本锁定</h2>
-          <p className="surface-subtle mt-1">
-            创建时固定的核心体验、悬念和禁止方向，会持续约束后续剧情。
-          </p>
-        </div>
-      </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        <BlueprintCard label="核心悬念" values={[blueprint.centralQuestion]} />
-        <BlueprintCard label="当前幕" values={[blueprint.currentAct, blueprint.currentActGoal]} />
-        <BlueprintCard label="开局舞台" values={[blueprint.openingStage]} />
-        <BlueprintCard label="必须保留" values={blueprint.mustPreserve} />
-        <BlueprintCard label="禁止变成" values={blueprint.mustNotBecome} />
-        <BlueprintCard label="压力时钟" values={blueprint.pressureClock} />
-      </div>
-    </section>
-  );
-}
-
-function BlueprintCard({ label, values }: { label: string; values: string[] }) {
-  const cleanValues = values.map((value) => value.trim()).filter(Boolean);
-  return (
-    <article className="archive-card">
-      <h3 className="text-sm font-semibold">{label}</h3>
-      {cleanValues.length === 0 ? (
-        <p className="mt-2 text-sm text-[color:var(--muted)]">未记录。</p>
-      ) : (
-        <ul className="mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
-          {cleanValues.slice(0, 4).map((value) => (
-            <li key={value}>{value}</li>
-          ))}
-        </ul>
-      )}
-    </article>
-  );
-}
-
 function StatusSnapshot({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
   const protagonist = stateV2.protagonist_sheet;
   const scene = stateV2.active_scene;
@@ -651,15 +542,6 @@ function SummaryPanel({
   );
 }
 
-function DiagnosticsPanel({ title, data }: { title: string; data: unknown }) {
-  return (
-    <section className="archive-card">
-      <h3 className="mb-3 font-semibold">{title}</h3>
-      <JsonBlock data={data} />
-    </section>
-  );
-}
-
 function latestSummary(game: GameDetail, type: string) {
   return [...game.summaries]
     .filter((summary) => summary.type === type)
@@ -705,11 +587,3 @@ function asRecords(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
-function asList(value: unknown): string[] {
-  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
-}
-
-function pickString(record: Record<string, unknown>, key: string): string {
-  const value = record[key];
-  return typeof value === "string" ? value.trim() : "";
-}
