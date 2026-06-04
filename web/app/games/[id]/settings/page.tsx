@@ -11,6 +11,7 @@ import { ModuleMergePanel } from "@/components/workshop/ModuleMergePanel";
 import { SaveAsModuleDialog } from "@/components/workshop/SaveAsModuleDialog";
 import { getGame, getSettingVersions, updateGameConfig } from "@/lib/api";
 import {
+  appendItem,
   buildBoardModel,
   deleteBlock,
   writeBlockFields,
@@ -131,6 +132,7 @@ function SettingsView({
         onEditBlock={handleEditBlock}
         onDeleteBlock={handleDeleteBlock}
         onSaveAsModule={(block) => { if (isExtractable(block)) setModuleBlock(block); }}
+        onAddItem={(arrayKey, item) => { void persist(appendItem(settings, arrayKey, item)); }}
       />
       <SettingsAdvanced
         key={game.config?.updated_at ?? ""}
