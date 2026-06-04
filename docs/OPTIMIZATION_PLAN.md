@@ -25,6 +25,10 @@
 
 ## 1. 已完成
 
+### 修复 (2026-06-04, PR #6) — 看板「玩法机制」分类内容串台
+
+真实精修剧本暴露的 React 渲染 bug：设定页反复切到「玩法机制」时卡片内容串台。根因——看板 block 的 React `key` 用 `${arrayKey}:${name|title}`，而 `core_mechanics`/`action_style_rules`/`story_material_library` 的 name/title **没有唯一性校验**（不像 core_characters.name / act_plan.id 有 validate 唯一）；「玩法机制」合并 `core_mechanics ∪ action_style_rules` 两数组，精修剧本里常有同名条目 → block.id 重复 → React key 撞 → DOM 复用错位、内容串台。修复：`buildBoardModel` 末尾对每分类内 block.id 去重（撞了追加 `#2/#3`，唯一 id 不变、不影响生成页 diff），加 vitest 覆盖。教训：多 Agent 并行开发时，纯函数测试只用了唯一名占位数据，没覆盖"同名条目"边界，真实剧本才触发。
+
 ### Round 39 (2026-06-04) — 看板成为完整设定编辑面（数据驱动全覆盖 + 字段类型系统 + 空块折叠 + 手动新增数组项）
 
 纯前端，后端零改动。
