@@ -73,31 +73,30 @@ def _reid_act(act: dict[str, Any], new_id: str) -> None:
             anchor["id"] = f"{new_id}_anchor_{index + 1}"
 
 
-def _merge_string_buckets(
-    merged: dict[str, Any], parent: str, incoming: dict[str, Any], report: MergeReport
-) -> bool:
-    parent_obj = merged.setdefault(parent, {})
-    if not isinstance(parent_obj, dict):
-        return False
-    touched = False
-    for bucket, values in incoming.items():
-        if not isinstance(values, list):
-            continue
-        target = parent_obj.setdefault(bucket, [])
-        if not isinstance(target, list):
-            continue
-        existing = {_text(v) for v in target if _text(v)}
-        for value in values:
-            t = _text(value)
-            if not t:
+def _merge_object(
+    merged: dict[str, Any], key: str, incoming: dict[str, Any], report: MergeReport
+) -> None:
+    """将 incoming dict 深合并进 merged[key]：列表子键去重追加，标量/对象子键覆盖。"""
+    target = merged.setdefault(key, {})
+    if not isinstance(target, dict) or not isinstance(incoming, dict):
+        return
+    for subkey, subval in incoming.items():
+        if isinstance(subval, list):
+            existing = {_text(v) for v in target.get(subkey, []) if _text(v)}
+            bucket = target.setdefault(subkey, [])
+            if not isinstance(bucket, list):
                 continue
-            if t in existing:
-                report.deduped += 1
-            else:
-                target.append(t)
-                existing.add(t)
-                touched = True
-    return touched
+            for v in subval:
+                t = _text(v)
+                if not t:
+                    continue
+                if t in existing:
+                    report.deduped += 1
+                else:
+                    bucket.append(t)
+                    existing.add(t)
+        else:
+            target[subkey] = subval  # 标量/对象覆盖
 
 
 def _merge_list_item(
@@ -164,8 +163,8 @@ def merge_modules_into_settings(
                             _merge_list_item(
                                 merged, key, sub, resolutions.get(module_id, "rename"), entry
                             )
-                elif key in _STRING_BUCKETS and isinstance(value, dict):
-                    _merge_string_buckets(merged, key, value, report)
+                elif isinstance(value, dict):
+                    _merge_object(merged, key, value, report)
         report.entries.append(entry)
     settings = validate_story_settings(merged)
     return settings, report

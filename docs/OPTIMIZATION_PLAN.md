@@ -30,9 +30,9 @@
 **背景**：剧本设定（story_settings）由 AI 生成但难以跨剧本复用，每次创建新剧本都要从头提炼素材。本轮引入「剧本炼金工坊」，将剧本设定片段提炼为可复用模块，支持库管理、合并预览、AI 本地优化后并入，覆盖后端存储 → 合并逻辑 → AI 适配 → API → 前端工坊页 → 看板存为模块 → 设定/生成页接入整条链路。
 
 **后端（Task 1–4）**：
-- **`setting_modules` 表**：新增 `api/migrations/versions/20260604_0029_add_setting_modules.py`——`setting_modules`（id/user_id/name/description/category/fragment JSON/tags/source_game_id/is_public/created_at/updated_at）；Alembic HEAD = `20260604_0029`。
-- **`module_library.py` 合并引擎**：`merge_module_into_settings(fragment, target, strategy)` 按分类合并 moduleFragment 片段至 story_settings——去重（同 id/name 比较）、冲突 rename（`_v2` 后缀）/ overwrite / skip 三策略；`preview_merge` 返回 `{added, renamed, skipped, conflicts}` 差异摘要，不改原始数据。
-- **`module_adapter.py` AI 本地优化**：`adapt_module_for_game(fragment, target_settings, game_context)` 调用 DeepSeek 按目标剧本风格小幅调整模块内容；新增 prompt `api/app/prompts/adapt_module.md`（输入输出 JSON schema + 约束：仅微调措辞/数值，禁止改结构/增删字段）；独立 timeout=30s + fallback（返回原始 fragment 不抛出）。
+- **`setting_modules` 表**：新增 `api/migrations/versions/20260604_0029_add_setting_modules.py`——`setting_modules`（id/name/description/module_type/payload JSON/tags/source_game_id/created_at/updated_at）；Alembic HEAD = `20260604_0029`。
+- **`module_library.py` 合并引擎**：`merge_modules_into_settings(items, target, resolutions)` 将模块 payload 深合并进 story_settings——列表字段去重追加（同 id/name 身份键比较）、冲突 rename（`名 (2)` 后缀）/ overwrite / skip 三策略；字典字段（settingsScalar）列表子键去重追加、标量/对象子键覆盖；返回 `(settings, MergeReport)`。
+- **`module_adapter.py` AI 本地优化**：`adapt_module_for_game(fragment, target_settings, game_context)` 调用 DeepSeek 按目标剧本风格小幅调整模块内容；新增 prompt `api/app/prompts/adapt_module.md`（输入输出 JSON schema + 约束：仅微调措辞/数值，禁止改结构/增删字段）；独立 `MODULE_ADAPT_TIMEOUT_SECONDS = 120` + fallback（返回原始 fragment 不抛出）。
 - **`/api/modules` 路由**：新增 `api/app/routers/modules.py`——`GET /api/modules`（列表+搜索）、`POST /api/modules`（创建）、`GET /api/modules/{id}`（详情）、`PUT /api/modules/{id}`（更新）、`DELETE /api/modules/{id}`（删除）、`POST /api/modules/{id}/export`（导出 JSON）、`POST /api/modules/import`（导入 JSON）、`POST /api/modules/merge-preview`（预览合并）。
 
 **前端（Task 5–10）**：

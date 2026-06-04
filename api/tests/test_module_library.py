@@ -52,6 +52,22 @@ def test_identity_conflict_skip():
     assert report.entries[0]["action"] == "skipped"
 
 
+def test_scalar_game_profile_merges_fields():
+    items = [{"id": "m1", "payload": {"game_profile": {"title": "新名", "tone": "阴郁"}}}]
+    settings, report = merge_modules_into_settings(_base(), items, {})
+    assert settings["game_profile"]["title"] == "新名"
+    assert settings["game_profile"]["tone"] == "阴郁"
+
+
+def test_scalar_story_core_central_mystery_merges():
+    base = _base()
+    base["story_core"]["central_mystery"] = "旧谜"
+    items = [{"id": "m1", "payload": {"story_core": {"central_mystery": "新谜"}}}]
+    settings, _ = merge_modules_into_settings(base, items, {})
+    assert settings["story_core"]["central_mystery"] == "新谜"
+    assert settings["story_core"]["canon_terms"] == ["旧城"]  # 同级桶不丢
+
+
 def test_act_rename_reids_anchors_and_passes_validate():
     base = _base()
     base["act_plan"] = [{
