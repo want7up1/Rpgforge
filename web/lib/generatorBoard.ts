@@ -597,3 +597,70 @@ export function deleteBlock(
   out[address.arrayKey] = arr.filter((item) => str(item[address.idKey]) !== address.idValue);
   return out;
 }
+
+// ====== 手动新增数组项 ======
+
+// 可手动新增的数组及其身份键/空项字段
+export const ARRAY_SPECS: Record<string, { idKey: string; label: string; keys: string[] }> = {
+  core_characters: { idKey: "name", label: "角色", keys: ["name", "role", "description"] },
+  act_plan: { idKey: "id", label: "幕", keys: ["id", "title", "objective"] },
+  main_quest_path: { idKey: "id", label: "主线节点", keys: ["id", "title", "objective"] },
+  core_mechanics: { idKey: "name", label: "机制", keys: ["name", "rule"] },
+  action_style_rules: { idKey: "name", label: "行动风格", keys: ["name", "rule"] },
+  story_material_library: { idKey: "title", label: "素材", keys: ["title", "content"] }
+};
+
+export function createEmptyItem(arrayKey: string): Record<string, unknown> {
+  const spec = ARRAY_SPECS[arrayKey];
+  if (!spec) return {};
+  return Object.fromEntries(spec.keys.map((k) => [k, ""]));
+}
+
+export function appendItem(
+  source: Record<string, unknown>,
+  arrayKey: string,
+  item: Record<string, unknown>
+): Record<string, unknown> {
+  const out = cloneDeep(source);
+  const arr = Array.isArray(out[arrayKey]) ? (out[arrayKey] as unknown[]) : [];
+  out[arrayKey] = [...arr, item];
+  return out;
+}
+
+const CATEGORY_OF_ARRAY: Record<string, BoardCategoryId> = {
+  core_characters: "characters", act_plan: "plot", main_quest_path: "plot",
+  core_mechanics: "mechanics", action_style_rules: "mechanics", story_material_library: "materials"
+};
+
+// 「新增数组项」时的空白合成块（Modal 据此渲染表单；保存后由调用方 appendItem）
+export function newItemBlock(arrayKey: string): BoardBlock {
+  const spec = ARRAY_SPECS[arrayKey];
+  const item = createEmptyItem(arrayKey);
+  return {
+    id: `__new__:${arrayKey}`,
+    category: CATEGORY_OF_ARRAY[arrayKey] ?? "world",
+    title: `新增${spec?.label ?? "项"}`,
+    icon: "＋",
+    summary: "",
+    fields: (spec?.keys ?? []).map((k) => ({
+      key: k,
+      label: label(k),
+      value: (item[k] as BoardFieldValue) ?? "",
+      type: TEXTAREA_KEYS.has(k) ? "textarea" : "text"
+    })),
+    address: { kind: "settingsItem", arrayKey, idKey: spec?.idKey ?? "id", idValue: "" },
+    deletable: false
+  };
+}
+
+// 固定块"空"判定：全字段为空字符串/空数组/空对象（数值/布尔不算空）
+export function isEmptyBlock(block: BoardBlock): boolean {
+  if (block.deletable) return false;
+  return block.fields.every((f) => {
+    const v = f.value;
+    if (typeof v === "string") return v.trim() === "";
+    if (Array.isArray(v)) return v.length === 0;
+    if (v && typeof v === "object") return Object.keys(v).length === 0;
+    return v == null;
+  });
+}

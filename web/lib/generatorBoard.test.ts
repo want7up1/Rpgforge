@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildBoardModel, BOARD_CATEGORIES, diffBoard, isLocked, lockBlock, unlockBlock, writeBlockFields, deleteBlock } from "@/lib/generatorBoard";
+import { buildBoardModel, BOARD_CATEGORIES, diffBoard, isLocked, lockBlock, unlockBlock, writeBlockFields, deleteBlock, createEmptyItem, appendItem, ARRAY_SPECS } from "@/lib/generatorBoard";
 
 describe("buildBoardModel from story_settings", () => {
   const settings = {
@@ -313,5 +313,23 @@ describe("writeBlockFields 各类型无损往返", () => {
       { key: "services", label: "服务", value: ["休整"], type: "stringList" }
     ]);
     expect(out).toEqual({ home_base: { name: "镖局", services: ["休整"] } });
+  });
+});
+
+describe("新增数组项", () => {
+  it("ARRAY_SPECS 覆盖可新增的数组", () => {
+    expect(Object.keys(ARRAY_SPECS)).toEqual(expect.arrayContaining([
+      "core_characters", "act_plan", "main_quest_path",
+      "core_mechanics", "action_style_rules", "story_material_library"
+    ]));
+  });
+  it("createEmptyItem 产出带身份键的空项", () => {
+    expect(createEmptyItem("core_characters")).toHaveProperty("name", "");
+  });
+  it("appendItem 追加到数组（不可变）", () => {
+    const src = { core_characters: [{ name: "主角" }] };
+    const out = appendItem(src, "core_characters", { name: "红伞客", role: "npc" }) as { core_characters: unknown[] };
+    expect(out.core_characters).toHaveLength(2);
+    expect(out).not.toBe(src);
   });
 });
