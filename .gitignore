@@ -27,3 +27,4 @@ portrait_data/
 *.dump
 *.sql
 exports/
+.superpowers/
