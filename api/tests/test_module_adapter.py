@@ -19,7 +19,9 @@ class _OkRouter:
 
 def test_adapt_fallback_returns_original_on_failure():
     payload = {"core_characters": [{"name": "破晓", "role": "npc"}]}
-    out = asyncio.run(ModuleAdapter(router=_FailRouter()).adapt(payload, {"canon_terms": ["雁回镇"]}))
+    out = asyncio.run(
+        ModuleAdapter(router=_FailRouter()).adapt(payload, {"canon_terms": ["雁回镇"]})
+    )
     assert out == payload  # 失败回退原样
 
 

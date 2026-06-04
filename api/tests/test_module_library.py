@@ -1,6 +1,10 @@
 import asyncio
 
-from app.services.module_library import merge_modules_into_settings, preview_module_merge, project_target_context
+from app.services.module_library import (
+    merge_modules_into_settings,
+    preview_module_merge,
+    project_target_context,
+)
 
 
 def _base():
@@ -38,7 +42,12 @@ def test_identity_conflict_default_rename():
 
 
 def test_identity_conflict_overwrite():
-    items = [{"id": "m1", "payload": {"core_characters": [{"name": "主角", "role": "npc", "desire": "x"}]}}]
+    items = [
+        {
+            "id": "m1",
+            "payload": {"core_characters": [{"name": "主角", "role": "npc", "desire": "x"}]},
+        }
+    ]
     settings, report = merge_modules_into_settings(_base(), items, {"m1": "overwrite"})
     chars = settings["core_characters"]
     assert len(chars) == 1 and chars[0]["role"] == "npc" and chars[0]["desire"] == "x"
