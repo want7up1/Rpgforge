@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildBoardModel, BOARD_CATEGORIES } from "@/lib/generatorBoard";
+import { buildBoardModel, BOARD_CATEGORIES, diffBoard } from "@/lib/generatorBoard";
 
 describe("buildBoardModel from story_settings", () => {
   const settings = {
@@ -96,5 +96,43 @@ describe("buildBoardModel from confirmed_requirements", () => {
     const model = buildBoardModel({ source: "confirmed", confirmed: { story_background: "x" } });
     const world = model.categories.find((c) => c.id === "world")!;
     expect(world.blocks.map((b) => b.id)).toEqual(["story_background"]);
+  });
+});
+
+describe("diffBoard", () => {
+  const base = { story_background: "a", must_include: ["x"] };
+  const prev = buildBoardModel({ source: "confirmed", confirmed: base });
+
+  it("新增 block 计入对应分类，记录 changedBlockIds", () => {
+    const next = buildBoardModel({
+      source: "confirmed",
+      confirmed: { ...base, core_premise: "b" }
+    });
+    const diff = diffBoard(prev, next);
+    expect(diff.changedCategories.world).toBe(1);
+    expect(diff.changedBlockIds.has("core_premise")).toBe(true);
+  });
+
+  it("内容变化算改动", () => {
+    const next = buildBoardModel({
+      source: "confirmed",
+      confirmed: { ...base, story_background: "a2" }
+    });
+    const diff = diffBoard(prev, next);
+    expect(diff.changedBlockIds.has("story_background")).toBe(true);
+  });
+
+  it("无变化时计数为 0", () => {
+    const next = buildBoardModel({ source: "confirmed", confirmed: base });
+    const diff = diffBoard(prev, next);
+    expect(diff.changedBlockIds.size).toBe(0);
+    expect(Object.values(diff.changedCategories).every((n) => n === 0)).toBe(true);
+  });
+
+  it("prev 为 null（首次生成）时所有 block 算新", () => {
+    const next = buildBoardModel({ source: "confirmed", confirmed: base });
+    const diff = diffBoard(null, next);
+    expect(diff.changedBlockIds.has("story_background")).toBe(true);
+    expect(diff.changedBlockIds.has("must_include")).toBe(true);
   });
 });

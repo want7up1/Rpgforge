@@ -354,3 +354,37 @@ function buildFromConfirmed(confirmed: Record<string, unknown>): BoardCategory[]
   }
   return BOARD_CATEGORIES.map((def) => ({ ...def, blocks: byId[def.id] }));
 }
+
+export type BoardDiff = {
+  changedCategories: Record<BoardCategoryId, number>;
+  changedBlockIds: Set<string>;
+};
+
+// block 内容指纹：用 fields 的值拼成字符串，变化即视为改动。
+function blockFingerprint(block: BoardBlock): string {
+  return block.fields
+    .map((f) => `${f.key}=${Array.isArray(f.value) ? f.value.join("¦") : f.value}`)
+    .join("|");
+}
+
+export function diffBoard(prev: BoardModel | null, next: BoardModel): BoardDiff {
+  const prevPrints = new Map<string, string>();
+  if (prev) {
+    for (const cat of prev.categories)
+      for (const b of cat.blocks) prevPrints.set(b.id, blockFingerprint(b));
+  }
+  const changedCategories = Object.fromEntries(
+    BOARD_CATEGORIES.map((c) => [c.id, 0])
+  ) as Record<BoardCategoryId, number>;
+  const changedBlockIds = new Set<string>();
+  for (const cat of next.categories) {
+    for (const b of cat.blocks) {
+      const before = prevPrints.get(b.id);
+      if (before === undefined || before !== blockFingerprint(b)) {
+        changedBlockIds.add(b.id);
+        changedCategories[cat.id] += 1;
+      }
+    }
+  }
+  return { changedCategories, changedBlockIds };
+}
