@@ -45,28 +45,30 @@ function Fold({ title, children }: { title: string; children: ReactNode }) {
 export function SettingsAdvanced({
   game,
   versions,
-  onRefresh
+  onRefresh,
+  disabled = false
 }: {
   game: GameDetail;
   versions: GameSettingVersionRead[];
   onRefresh: () => Promise<void>;
+  disabled?: boolean;
 }) {
   return (
     <div className="grid gap-3">
       <Fold title="高级 · 原始 story_settings JSON">
-        <RawJsonEditor game={game} onRefresh={onRefresh} />
+        <RawJsonEditor game={game} onRefresh={onRefresh} disabled={disabled} />
       </Fold>
       <Fold title="高级 · 导入 / 导出 / 填写说明">
-        <ImportExport game={game} onRefresh={onRefresh} />
+        <ImportExport game={game} onRefresh={onRefresh} disabled={disabled} />
       </Fold>
       <Fold title="高级 · 版本历史">
-        <VersionHistory gameId={game.id} versions={versions} onRefresh={onRefresh} />
+        <VersionHistory gameId={game.id} versions={versions} onRefresh={onRefresh} disabled={disabled} />
       </Fold>
     </div>
   );
 }
 
-function RawJsonEditor({ game, onRefresh }: { game: GameDetail; onRefresh: () => Promise<void> }) {
+function RawJsonEditor({ game, onRefresh, disabled = false }: { game: GameDetail; onRefresh: () => Promise<void>; disabled?: boolean }) {
   const current = asRecord(game.config?.story_settings);
   const [draft, setDraft] = useState(() => formatJson(current));
   const [status, setStatus] = useState<string | null>(null);
@@ -95,14 +97,15 @@ function RawJsonEditor({ game, onRefresh }: { game: GameDetail; onRefresh: () =>
       <p className="surface-subtle">直接编辑整份设定。只作用于 story_settings，不改回合历史/状态/摘要/存档。</p>
       <textarea
         className="app-input min-h-[320px] font-mono text-xs"
+        disabled={disabled || saving}
         onChange={(e) => setDraft(e.target.value)}
         value={draft}
       />
       <div className="flex flex-wrap gap-2">
-        <button className="app-button app-button-primary" disabled={saving} type="submit">
+        <button className="app-button app-button-primary" disabled={disabled || saving} type="submit">
           {saving ? "保存中..." : "保存 story_settings"}
         </button>
-        <button className="app-button" disabled={saving} type="button" onClick={() => { setDraft(formatJson(current)); setError(null); setStatus("已恢复为当前已保存内容。"); }}>
+        <button className="app-button" disabled={disabled || saving} type="button" onClick={() => { setDraft(formatJson(current)); setError(null); setStatus("已恢复为当前已保存内容。"); }}>
           恢复当前内容
         </button>
       </div>
@@ -112,7 +115,7 @@ function RawJsonEditor({ game, onRefresh }: { game: GameDetail; onRefresh: () =>
   );
 }
 
-function ImportExport({ game, onRefresh }: { game: GameDetail; onRefresh: () => Promise<void> }) {
+function ImportExport({ game, onRefresh, disabled = false }: { game: GameDetail; onRefresh: () => Promise<void>; disabled?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -157,12 +160,12 @@ function ImportExport({ game, onRefresh }: { game: GameDetail; onRefresh: () => 
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap gap-2">
-        <button className="app-button app-button-primary w-fit" disabled={busy} type="button" onClick={() => download("json")}>导出 JSON</button>
-        <button className="app-button w-fit" disabled={busy} type="button" onClick={() => download("guide")}>下载填写说明</button>
+        <button className="app-button app-button-primary w-fit" disabled={disabled || busy} type="button" onClick={() => download("json")}>导出 JSON</button>
+        <button className="app-button w-fit" disabled={disabled || busy} type="button" onClick={() => download("guide")}>下载填写说明</button>
       </div>
       <label className="grid gap-1 text-sm font-medium">
         <span>导入 story_settings JSON（覆盖设定，不动存档/回合/状态）</span>
-        <input accept="application/json,.json" className="app-input" disabled={busy} onChange={handleImport} type="file" />
+        <input accept="application/json,.json" className="app-input" disabled={disabled || busy} onChange={handleImport} type="file" />
       </label>
       {status ? <p className="app-status">{status}</p> : null}
       {error ? <p className="app-alert">{error}</p> : null}
@@ -173,11 +176,13 @@ function ImportExport({ game, onRefresh }: { game: GameDetail; onRefresh: () => 
 function VersionHistory({
   gameId,
   versions,
-  onRefresh
+  onRefresh,
+  disabled = false
 }: {
   gameId: string;
   versions: GameSettingVersionRead[];
   onRefresh: () => Promise<void>;
+  disabled?: boolean;
 }) {
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -214,7 +219,7 @@ function VersionHistory({
                 <p className="text-sm font-semibold">{version.scope} · {version.action}</p>
                 <p className="text-xs text-[color:var(--muted)]">{new Date(version.created_at).toLocaleString()}</p>
               </div>
-              <button className="app-button" disabled={restoringId === version.id} type="button" onClick={() => handleRestore(version.id)}>
+              <button className="app-button" disabled={disabled || restoringId === version.id} type="button" onClick={() => handleRestore(version.id)}>
                 {restoringId === version.id ? "恢复中..." : "恢复"}
               </button>
             </div>

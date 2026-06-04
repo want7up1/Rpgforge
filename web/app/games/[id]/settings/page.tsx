@@ -127,7 +127,13 @@ function SettingsView({
         onEditBlock={handleEditBlock}
         onDeleteBlock={handleDeleteBlock}
       />
-      <SettingsAdvanced game={game} versions={versions} onRefresh={handleRefresh} />
+      <SettingsAdvanced
+        key={game.config?.updated_at ?? ""}
+        game={game}
+        versions={versions}
+        onRefresh={handleRefresh}
+        disabled={saving}
+      />
     </div>
   );
 }

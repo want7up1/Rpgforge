@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo } from "react";
 
 import { buildBoardModel } from "@/lib/generatorBoard";
 
@@ -11,7 +12,7 @@ export function SettingsOverviewCard({
   gameId: string;
   storySettings: Record<string, unknown>;
 }) {
-  const model = buildBoardModel({ source: "settings", settings: storySettings });
+  const model = useMemo(() => buildBoardModel({ source: "settings", settings: storySettings }), [storySettings]);
   const cats = model.categories.filter((c) => c.blocks.length > 0);
   return (
     <section className="surface-panel surface-panel-strong">
