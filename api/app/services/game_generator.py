@@ -316,6 +316,18 @@ class GameGeneratorService:
                     ),
                 }
             )
+        if request.locked_fields:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "用户已锁定以下字段（手动修改过），必须原样保留其值、"
+                        "不得改写或还原成旧值；但仍要读取这些值作为上下文，"
+                        "让新生成的内容与之保持联动一致："
+                        f"{json.dumps(request.locked_fields, ensure_ascii=False)}"
+                    ),
+                }
+            )
         messages.extend(
             {"role": message.role, "content": message.content} for message in request.history[-12:]
         )

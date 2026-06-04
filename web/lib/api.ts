@@ -437,6 +437,7 @@ export async function createGeneratorChatJob(payload: {
   user_input: string;
   history: GeneratorMessage[];
   confirmed_requirements: Record<string, unknown>;
+  locked_fields?: string[];
 }): Promise<GeneratorChatJobCreateResponse> {
   return requestJson<GeneratorChatJobCreateResponse>("/api/generator/chat-jobs", {
     method: "POST",

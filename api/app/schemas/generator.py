@@ -18,6 +18,7 @@ class GeneratorChatRequest(BaseModel):
     user_input: str = Field(min_length=1)
     history: list[GeneratorMessage] = Field(default_factory=list)
     confirmed_requirements: dict[str, Any] = Field(default_factory=dict)
+    locked_fields: list[str] = Field(default_factory=list)
 
 
 class GeneratorChatResponse(BaseModel):

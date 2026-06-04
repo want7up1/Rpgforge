@@ -198,6 +198,8 @@ def _append_field_reference(lines: list[str]) -> None:
         ("story_core.core_fantasy", "核心幻想", "玩家想体验的爽点或主题体验。", "导入生效", "以调查和江湖人情撬开旧案。"),
         ("story_core.central_mystery", "核心悬念", "贯穿全剧的问题；不要在前几回合直接解答。", "导入生效", "沈砚失忆前到底护送了什么？"),
         ("story_core.main_goal", "长期目标", "GM 拉回主线时使用的方向。", "导入生效", "查清义庄旧案。"),
+        ("story_core.emotional_arc", "情感弧", "玩家情绪的长期走向，给 GM 把控基调推进。", "导入生效", "从孤身戒备到重拾信任。"),
+        ("story_core.narrative_style", "叙事风格", "GM 行文的语感取向，可比 tone 更具体。", "导入生效", "短句、冷硬、重感官细节。"),
         ("story_core.current_act", "默认当前幕", "新游戏初始幕；已有游戏实际进度优先看当前状态。", "导入生效", "act_1"),
         ("story_core.must_preserve[]", "必须保留", "用户强要求、正典设定、必须出现内容。", "导入生效", "雨夜义庄"),
         ("story_core.must_not_become[]", "禁止变成", "类型红线，防止题材变味。", "导入生效", "不要修仙"),
@@ -207,13 +209,16 @@ def _append_field_reference(lines: list[str]) -> None:
     _append_table_section(lines, "core_characters[]", [
         ("core_characters[].id", "稳定角色 id", "用英文或拼音 snake_case；不要随意改。", "导入生效", "shen_yan"),
         ("core_characters[].name", "角色名", "会同步到角色档案；不能为空。", "导入生效", "沈砚"),
+        ("core_characters[].aliases[]", "别名", "供 GM 识别同一角色的其他称呼，避免改名后认不出。", "导入生效", "沈三、镖头"),
         ("core_characters[].role", "角色类型", "建议 protagonist、companion、npc、antagonist、other。", "导入生效", "protagonist"),
         ("core_characters[].identity", "公开身份", "玩家可见身份，不写隐藏身份。", "导入生效", "失忆镖师"),
         ("core_characters[].description", "公开介绍", "玩家可见人物描述。", "导入生效", "追查义庄旧案的主角。"),
         ("core_characters[].appearance", "外貌", "用于角色展示和视觉一致性。", "导入生效", "旧青色短打，右手缠着褪色布带。"),
         ("core_characters[].dramatic_function", "戏剧功能", "告诉 GM 该角色在主线中的作用。", "导入生效", "线索守门人"),
         ("core_characters[].desire/fear/leverage", "动机组", "决定 NPC 行动、谈判筹码和关系变化。", "导入生效", "想拿回账册"),
+        ("core_characters[].relationship_arc", "关系弧", "该角色与主角关系的长期变化方向。", "导入生效", "由敌对逐步转为暗中相助。"),
         ("core_characters[].public_limit", "公开边界", "角色开局不会主动说出的秘密。", "导入生效", "不会承认知道账册"),
+        ("core_characters[].portrait_prompt", "立绘提示词", "用于生成角色立绘的描述；不写隐藏身份。", "导入生效", "青年镖师，旧青短打，右手缠布带。"),
         ("core_characters[].visibility", "可见性", "visible 会展示给玩家；hidden 保留给 GM。", "导入生效", "visible"),
     ])
     _append_table_section(lines, "act_plan[]", [
@@ -221,10 +226,14 @@ def _append_field_reference(lines: list[str]) -> None:
         ("act_plan[].title", "幕标题", "给 GM 识别阶段，不一定直接展示。", "导入生效", "义庄夜雨"),
         ("act_plan[].objective", "本幕目标", "当前幕 GM 的主要推进方向。", "导入生效", "找到旧案第一条线索。"),
         ("act_plan[].dramatic_question", "戏剧问题", "决定本幕张力，不等于任务清单。", "导入生效", "沈砚能否证明自己不是帮凶？"),
+        ("act_plan[].must_hit_beats[]", "必经节拍", "本幕希望出现的关键剧情节拍，给 GM 软引导。", "导入生效", "雨夜重返义庄"),
         ("act_plan[].allowed_reveals[]", "允许揭露", "本幕可以透露的信息边界。", "导入生效", "旧案仍有人遮掩"),
         ("act_plan[].forbidden_reveals[]", "禁止揭露", "本幕不能提前说出的真相。", "导入生效", "账册真凶"),
         ("act_plan[].completion_anchors[]", "完成锚点", "推进到下一幕前需要自然满足的条件。", "导入生效", "找到门槛泥痕"),
         ("completion_anchors[].id", "锚点 id", "必须全局唯一；状态提取器用它标记完成。", "导入生效", "act_1_find_mud"),
+        ("completion_anchors[].title", "锚点标题", "供 GM 识别该锚点，不一定直接展示。", "导入生效", "门槛泥痕"),
+        ("completion_anchors[].required", "是否必达", "true 表示推进到下一幕前必须满足；默认 true。", "导入生效", "true"),
+        ("completion_anchors[].description", "锚点说明", "解释这个锚点要达成什么，给 GM 参考。", "导入生效", "玩家在义庄门槛内侧发现新鲜泥痕。"),
         ("completion_anchors[].completion_signal", "完成信号", "写成可从剧情文本识别的明确事件。", "导入生效", "发现门槛内侧的新鲜泥痕。"),
         ("transition_to_next_act.target_act", "下一幕目标", "只能指向存在的 act id；最后一幕可留空对象。", "导入生效", "act_2"),
     ])
@@ -235,6 +244,7 @@ def _append_field_reference(lines: list[str]) -> None:
         ("main_quest_path[].objective", "软目标", "给 GM 的推进方向，不强制玩家立刻执行。", "导入生效", "找到旧案第一条线索。"),
         ("main_quest_path[].player_visible", "玩家提示", "可公开显示，不写 GM 秘密。", "导入生效", "调查义庄异常痕迹。"),
         ("main_quest_path[].completion_signal", "完成信号", "和锚点一样，写可识别事件。", "导入生效", "发现门槛泥痕。"),
+        ("main_quest_path[].optional", "是否支线", "true 表示可选支线，不阻塞主线推进；默认 false。", "导入生效", "false"),
     ])
     _append_table_section(lines, "core_mechanics[]", [
         ("core_mechanics[].id", "机制 id", "稳定唯一。", "导入生效", "investigation"),
@@ -245,6 +255,7 @@ def _append_field_reference(lines: list[str]) -> None:
     ])
     _append_table_section(lines, "action_style_rules[]", [
         ("action_style_rules[].id", "行动风格 id", "稳定唯一。", "导入生效", "investigation"),
+        ("action_style_rules[].name", "风格名", "简短标识该行动风格，便于诊断。", "导入生效", "调查取证"),
         ("action_style_rules[].triggers[]", "触发词", "玩家输入命中后更容易选中该风格。", "导入生效", "调查、检查、线索"),
         ("action_style_rules[].rule", "行动写法规则", "告诉 GM 该类行动怎么写结果、代价、线索。", "导入生效", "提供可验证线索，不直接泄露隐藏真相。"),
         ("action_style_rules[].priority", "优先级", "critical、high、medium、low；冲突时高优先。", "导入生效", "high"),
@@ -256,11 +267,14 @@ def _append_field_reference(lines: list[str]) -> None:
         ("story_material_library[].type", "素材类型", "location、npc、item、secret、clue、pressure、twist 等。", "导入生效", "location"),
         ("story_material_library[].keywords[]", "关键词", "用于语义召回；写清专名和别名。", "导入生效", "义庄、泥痕、棺木"),
         ("story_material_library[].triggers[]", "触发词", "玩家输入直接命中时强召回。", "导入生效", "黑伞、陆沉舟"),
+        ("story_material_library[].priority", "召回优先级", "critical/high/medium/low；越高越容易被召回打分选中。", "导入生效", "high"),
         ("story_material_library[].always_on", "常驻注入", "critical 核心设定可 true；太多会耗 token。", "导入生效", "false"),
+        ("story_material_library[].visibility", "可见性", "public、mixed、gm_only，控制素材信息暴露范围。", "导入生效", "mixed"),
         ("story_material_library[].public_info", "公开信息", "玩家可见，不写秘密。", "导入生效", "镇外旧义庄无人敢近。"),
         ("story_material_library[].gm_secret", "GM 秘密", "只供 GM 保持一致，不能直接剧透。", "导入生效", "义庄暗藏旧案账册。"),
         ("story_material_library[].content", "完整素材", "告诉 GM 这条素材如何影响剧情。", "导入生效", "门槛泥痕和伞骨划痕指向陆沉舟。"),
         ("story_material_library[].usage", "使用规则", "何时召回、如何给线索、不能揭露什么。", "导入生效", "玩家调查义庄时注入，不直接说真凶。"),
+        ("story_material_library[].enabled", "是否启用", "false 后不参与召回匹配。", "导入生效", "true"),
     ])
     _append_table_section(lines, "home_base", [
         ("home_base.id", "据点 id", "稳定唯一。", "导入生效", "home_base"),

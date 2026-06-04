@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 34 — 游戏方向第二梯队落地：A1 判定层 + A2 数值反哺 + B3/A3 压力与失败 + B5 松绑校验 + C5/C6 重roll与回退 |
-| 完成日期 | 2026-06-03 |
+| 最近一轮 | Round 36 — 创建冒险页重设计（看板/Tab/锁定/diff）+ 前端 vitest 19 + 后端 locked_fields + generator_interview 规则 7 |
+| 完成日期 | 2026-06-04 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **Round 16–24 大优化已收口**：省 token（cache 固化 + 场景投影）+ 遵循类（防剧透/强约束/重述/字数）+ 可观测（observer/游戏面板/judge）全部落地并真实游玩验证。容器内 **159 tests pass** |
@@ -24,6 +24,39 @@
 ---
 
 ## 1. 已完成
+
+### Round 36 (2026-06-04) — 创建冒险页重设计 + 后端锁定字段支持
+
+**背景**：创建冒险页（`/games/new`）原实现采用单栏问答式 UI，字段抽取结果不可视、不可编辑，用户无法手动调整已确认设定，也无法告诉 AI「我改过这个，别动它」。本轮完成前端完整重设计 + 后端配套最小改动。
+
+**前端重设计（Phase A–C，Task 1–14）**：
+- **看板主体 + 底部 ChatDock 布局**：左侧六分类 Tab 看板展示 `confirmed_requirements` 各字段（世界与基调/核心前提/必须出现/禁止内容/玩法偏好/风格偏好）+ `initial_state`/`story_settings` 各分区（角色/剧情/机制/素材）；底部 ChatDock 可拖拽调高，历史上滑可见完整对话。
+- **改动指示（diff/+N/闪烁/摘要条）**：每轮对话后对比前后 Board 状态，变更 block 闪烁、对应 Tab 角标 +N、底部摘要条常驻本轮、下次重算。
+- **Block 详情弹窗**：查看 / 编辑 / 删除 / 解锁四个操作；编辑保存后 block 标「✏ 已改」（锁定）。
+- **锁定语义**：锁定 block 的字段名通过 `createGeneratorChatJob` 的 `locked_fields` 发给后端；客户端发新轮时把锁定值覆盖回 `confirmed_requirements`（兜底防止后端改回）；「🔓 解锁/恢复 AI 原值」可撤销锁定并恢复 baseline 值。
+- **进度点亮 + 思考收起**：`GenerationProgress` 组件六类进度点亮（P1 粗粒度，与后端 `progress_message` 前缀匹配）；reasoning 可折叠。
+- **新增前端 vitest**：`lib/generatorBoard.test.ts` 覆盖 `buildBoardModel` / `diffBoard` / 锁定工具函数共 19 个纯逻辑测试用例。
+
+**后端锁定支持（Phase D，Task 15）**：
+- `api/app/schemas/generator.py`：`GeneratorChatRequest` 新增 `locked_fields: list[str] = Field(default_factory=list)`。
+- `api/app/services/game_generator.py`：`_build_interview_messages` 在「当前已确认需求」之后、历史消息之前，注入 system 消息「用户已锁定以下字段…必须原样保留其值、不得改写或还原成旧值；但仍要读取这些值作为上下文，让新生成的内容与之保持联动一致：[字段列表]」。
+- `api/app/prompts/generator_interview.md`：新增规则 7「若系统消息标注了『用户已锁定』的字段，对这些字段必须原样输出用户给定的值，禁止改写、补充或还原为更早的版本；其它字段照常抽取，并保证与锁定字段在设定上一致、不矛盾。」
+- 新增 `api/tests/test_generator_locked_fields.py`：4 个 pytest 覆盖 schema 字段存在/默认值、注入逻辑有无锁定指令。
+
+**验证**：容器内重建镜像后 `pytest tests/` **214 passed**（+4 新增）；前端 vitest 19/19 + `next build` 通过；Task 16 Step 3 手动浏览器端到端走查留给用户人工验证。
+
+### Round 35 (2026-06-03) — 修「下载填写说明」文档与 schema 漂移
+
+- **背景**：`settings_guide_exporter.py` 的字段说明表是手工硬编码的，schema（`story_settings.py` 的 `normalize_story_settings`）后续加字段后没人同步，导致导出的填写说明文档漏掉了 14 个规范化字段。
+- **补全字段**（导出文档 `_append_field_reference` 已对齐 schema）：
+  - `story_core`：`emotional_arc`、`narrative_style`
+  - `core_characters[]`：`aliases`、`relationship_arc`、`portrait_prompt`
+  - `act_plan[]`：`must_hit_beats`；`completion_anchors[]` 的 `title`/`required`/`description`
+  - `main_quest_path[]`：`optional`
+  - `action_style_rules[]`：`name`
+  - `story_material_library[]`：`priority`（影响 `_material_score` 召回打分）、`visibility`、`enabled`
+- **加护栏测试**：`test_games.py::test_settings_guide_documents_every_normalized_field` —— 用满数组样例过 `normalize_story_settings`，递归收集所有产出字段名，断言每个都在导出 Markdown 里以独立词出现；以后 schema 加字段忘了同步文档会直接报红。
+- 容器内 `pytest -k "guide or normalized_field"` 2 passed。未改 LLM 链路 / prompt 规则编号。
 
 ### Round 34 (2026-06-03) — 游戏方向第二梯队落地（A1 判定层 + A2 数值反哺 + B3/A3 压力与失败 + B5 松绑校验 + C5/C6 重roll与回退）
 

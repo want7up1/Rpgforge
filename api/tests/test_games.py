@@ -302,6 +302,55 @@ def test_settings_guide_export_is_markdown_and_does_not_change_json_export(db_se
     assert "guide" not in exported_json
 
 
+def test_settings_guide_documents_every_normalized_field(db_session) -> None:
+    """护栏：story_settings 规范化产出的每个字段都必须在填写说明文档里有记录。
+
+    防止 schema 加字段后 settings_guide_exporter 的硬编码字段表漏同步。
+    """
+    import re
+
+    from app.services.settings_guide_exporter import export_settings_guide_markdown
+    from app.services.story_settings import normalize_story_settings
+
+    # 让所有数组都非空，使数组元素字段也参与规范化；
+    # worldview / home_base 是自由透传容器，schema 不强制固定子键，置空避免污染。
+    sample = normalize_story_settings(
+        {
+            "core_characters": [{}],
+            "act_plan": [{"completion_anchors": [{}]}],
+            "main_quest_path": [{}],
+            "core_mechanics": [{}],
+            "action_style_rules": [{}],
+            "story_material_library": [{}],
+            "worldview": {},
+            "home_base": {},
+        }
+    )
+
+    field_names: set[str] = set()
+
+    def collect_keys(obj: object) -> None:
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                field_names.add(key)
+                collect_keys(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                collect_keys(item)
+
+    collect_keys(sample)
+
+    game = create_game_from_config(db_session, build_generated_config())
+    markdown = export_settings_guide_markdown(game)
+
+    missing = sorted(
+        name
+        for name in field_names
+        if not re.search(rf"\b{re.escape(name)}\b", markdown)
+    )
+    assert not missing, f"填写说明缺少字段记录：{missing}"
+
+
 def test_settings_import_validation_rejects_bad_payloads(db_session) -> None:
     game = create_game_from_config(db_session, build_generated_config())
     client = TestClient(app)
