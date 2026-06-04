@@ -13,7 +13,7 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 38 — 剧本炼金工坊：setting_modules 表 + module_library 合并引擎 + module_adapter AI 优化（adapt_module.md）+ /api/modules 路由 + /workshop 页 + 看板存为模块 + 并入面板（设定/生成页接入） |
+| 最近一轮 | Round 39 — 看板成为完整设定编辑面：字段数据派生全覆盖（home_base/worldview facts/完成锚点等）+ 字段类型系统(number/bool/objectList/keyValue/json) + 空块折叠开关 + 手动新增数组项（纯前端） |
 | 完成日期 | 2026-06-04 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
@@ -24,6 +24,16 @@
 ---
 
 ## 1. 已完成
+
+### Round 39 (2026-06-04) — 看板成为完整设定编辑面（数据驱动全覆盖 + 字段类型系统 + 空块折叠 + 手动新增数组项）
+
+纯前端，后端零改动。
+
+- **字段数据派生全覆盖**：`generatorBoard.buildFromSettings` 由「手写白名单」改为「FIELD_SPEC 精修 + 实际数据派生兜底」（`deriveFields`/`inferType`），补齐此前看不到/改不了的字段——`home_base`（新块）、`worldview.public_facts/hidden_facts`、`act_plan.completion_anchors`(objectList)/`allowed_reveals`/`forbidden_reveals`/`transition_to_next_act`、各 item 全字段（角色 dramatic_function/portrait_prompt 等、素材 type/triggers/gm_secret 等）。固定块无条件建块。block.id/address 规则不变（护住生成页 diff 与模块提取）。
+- **字段类型系统**：`BoardFieldType` 扩为 text/textarea/number/bool/stringList/objectList/keyValue/json；新增 `BoardFieldEditor` 按类型渲染（objectList 子卡增删、keyValue 键行、bool 勾选、json 兜底校验）；`BlockDetailModal` 改类型化 drafts；`writeBlockFields` 无损回写各类型（`fieldsToRecord` 直接赋值，天然支持）。
+- **空块折叠**：`isEmptyBlock` + `SettingsBoard` 顶部「显示空设定项」开关（默认折叠空的固定块，灰显可填）。
+- **手动新增数组项**：`ARRAY_SPECS`/`createEmptyItem`/`appendItem`/`newItemBlock`；`BoardBlockGrid` 分类底部「＋新增角色/机制/幕/素材/主线/行动风格」；复用 BlockDetailModal 空白表单（身份必填，重名由后端 validate 兜底）；设定页 `onAddItem`→`appendItem`→`PATCH config`(+版本快照)。生成页手动新增留 P2（展示/编辑增强两边共享）。
+- **验证**：web `npm run lint` 0/0、vitest **36 passed**（+12：全字段覆盖/无损往返/新增项）、tsc 干净、`next build` 通过；web 镜像已重建。
 
 ### Round 38 (2026-06-04) — 剧本炼金工坊（setting_modules 表 + module_library 合并引擎 + module_adapter AI 优化 + /api/modules 路由 + /workshop 页 + 存为模块 + 并入面板）
 
