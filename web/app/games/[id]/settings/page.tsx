@@ -7,6 +7,8 @@ import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
 import { SettingsBoard } from "@/components/board/SettingsBoard";
 import { SettingsAdvanced } from "@/components/settings/SettingsAdvanced";
+import { ModuleMergePanel } from "@/components/workshop/ModuleMergePanel";
+import { SaveAsModuleDialog } from "@/components/workshop/SaveAsModuleDialog";
 import { getGame, getSettingVersions, updateGameConfig } from "@/lib/api";
 import {
   buildBoardModel,
@@ -16,6 +18,7 @@ import {
   type BoardField,
   type BoardModel
 } from "@/lib/generatorBoard";
+import { buildModulePayload, isExtractable, moduleTypeFromBlock } from "@/lib/moduleFragment";
 import type { GameDetail, GameSettingVersionRead } from "@/lib/types";
 
 type LoadState =
@@ -83,6 +86,7 @@ function SettingsView({
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [moduleBlock, setModuleBlock] = useState<BoardBlock | null>(null);
   const settings = useMemo(() => asRecord(game.config?.story_settings), [game.config?.story_settings]);
   const model: BoardModel = useMemo(() => buildBoardModel({ source: "settings", settings }), [settings]);
 
@@ -126,6 +130,7 @@ function SettingsView({
         loading={saving}
         onEditBlock={handleEditBlock}
         onDeleteBlock={handleDeleteBlock}
+        onSaveAsModule={(block) => { if (isExtractable(block)) setModuleBlock(block); }}
       />
       <SettingsAdvanced
         key={game.config?.updated_at ?? ""}
@@ -134,6 +139,20 @@ function SettingsView({
         onRefresh={handleRefresh}
         disabled={saving}
       />
+      <ModuleMergePanel
+        targetSettings={settings}
+        onApply={async (merged) => { await persist(merged); }}
+      />
+      {moduleBlock ? (
+        <SaveAsModuleDialog
+          defaultName={moduleBlock.title}
+          moduleType={moduleTypeFromBlock(moduleBlock)}
+          payload={buildModulePayload(settings, moduleBlock)}
+          sourceGameId={game.id}
+          onClose={() => setModuleBlock(null)}
+          onSaved={() => setModuleBlock(null)}
+        />
+      ) : null}
     </div>
   );
 }
