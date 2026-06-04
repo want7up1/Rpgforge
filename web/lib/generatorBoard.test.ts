@@ -155,7 +155,7 @@ describe("writeBlockFields 写回 source", () => {
     const out = writeBlockFields(src, { kind: "confirmedField", field: "story_background" }, [
       { key: "story_background", label: "故事背景", value: "new", type: "textarea" }
     ]);
-    expect((out as any).story_background).toBe("new");
+    expect(out).toMatchObject({ story_background: "new" });
     expect(out).not.toBe(src); // 不可变
   });
 
@@ -164,8 +164,7 @@ describe("writeBlockFields 写回 source", () => {
     const out = writeBlockFields(src, { kind: "settingsScalar", path: ["story_core", "central_mystery"] }, [
       { key: "central_mystery", label: "核心悬念", value: "new", type: "textarea" }
     ]);
-    expect((out as any).story_core.central_mystery).toBe("new");
-    expect((out as any).story_core.main_goal).toBe("g"); // 同级不丢
+    expect(out).toMatchObject({ story_core: { central_mystery: "new", main_goal: "g" } }); // 同级不丢
   });
 
   it("settingsStringList：写回 hard_rules.must_follow", () => {
@@ -173,8 +172,7 @@ describe("writeBlockFields 写回 source", () => {
     const out = writeBlockFields(src, { kind: "settingsStringList", path: ["hard_rules", "must_follow"] }, [
       { key: "must_follow", label: "必须遵守", value: ["a", "c"], type: "stringList" }
     ]);
-    expect((out as any).hard_rules.must_follow).toEqual(["a", "c"]);
-    expect((out as any).hard_rules.must_not).toEqual(["b"]);
+    expect(out).toMatchObject({ hard_rules: { must_follow: ["a", "c"], must_not: ["b"] } });
   });
 
   it("settingsItem：按 idKey 定位数组项写回多字段", () => {
@@ -192,9 +190,12 @@ describe("writeBlockFields 写回 source", () => {
         { key: "description", label: "描述", value: "改了", type: "textarea" }
       ]
     );
-    const arr = (out as any).core_characters;
-    expect(arr[0]).toEqual({ name: "主角", description: "d1" }); // 其它项不动
-    expect(arr[1]).toEqual({ name: "黑伞女人", description: "改了", role: "npc" }); // 未列字段保留
+    expect(out).toEqual({
+      core_characters: [
+        { name: "主角", description: "d1" }, // 其它项不动
+        { name: "黑伞女人", description: "改了", role: "npc" } // 未列字段保留
+      ]
+    });
   });
 
   it("deleteBlock：settingsItem 删除数组项", () => {
@@ -202,7 +203,7 @@ describe("writeBlockFields 写回 source", () => {
     const out = deleteBlock(src, {
       kind: "settingsItem", arrayKey: "core_characters", idKey: "name", idValue: "a"
     });
-    expect((out as any).core_characters).toEqual([{ name: "b" }]);
+    expect(out).toEqual({ core_characters: [{ name: "b" }] });
   });
 
   it("settingsScalar 整对象：path 长度1 时合并字段进对象", () => {
@@ -210,6 +211,6 @@ describe("writeBlockFields 写回 source", () => {
     const out = writeBlockFields(src, { kind: "settingsScalar", path: ["game_profile"] }, [
       { key: "title", label: "标题", value: "new", type: "text" }
     ]);
-    expect((out as any).game_profile).toEqual({ title: "new", genre: "g" });
+    expect(out).toEqual({ game_profile: { title: "new", genre: "g" } });
   });
 });
