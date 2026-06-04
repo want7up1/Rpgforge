@@ -9,6 +9,7 @@ import { ChatDock } from "@/components/generator/ChatDock";
 import { ChatHistorySheet } from "@/components/generator/ChatHistorySheet";
 import { GenerationProgress, type ProgressItem } from "@/components/generator/GenerationProgress";
 import { SettingsBoard } from "@/components/board/SettingsBoard";
+import { ModuleMergePanel } from "@/components/workshop/ModuleMergePanel";
 import {
   createGeneratedGame,
   createGeneratorChatJob,
@@ -318,6 +319,13 @@ export default function NewGamePage() {
         onDeleteBlock={handleDeleteBlock}
         onUnlockBlock={handleUnlockBlock}
       />
+
+      {generatedConfig ? (
+        <ModuleMergePanel
+          targetSettings={generatedConfig.story_settings}
+          onApply={(merged) => { setGeneratedConfig({ ...generatedConfig, story_settings: merged }); }}
+        />
+      ) : null}
 
       <ChatDock
         latestReply={history.length ? history[history.length - 1].content : ""}

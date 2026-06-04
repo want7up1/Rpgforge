@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import admin, characters, gameplay, games, generator, progress, states
+from app.routers import admin, characters, gameplay, games, generator, modules, progress, states
 from app.routers import settings as settings_router
 
 app = FastAPI(
@@ -49,3 +49,4 @@ app.include_router(progress.router)
 app.include_router(states.router)
 app.include_router(settings_router.router)
 app.include_router(admin.router)
+app.include_router(modules.router)

@@ -22,7 +22,8 @@ export function SettingsBoard({
   loading,
   onEditBlock,
   onDeleteBlock,
-  onUnlockBlock
+  onUnlockBlock,
+  onSaveAsModule
 }: {
   model: BoardModel;
   diff?: BoardDiff;
@@ -31,6 +32,7 @@ export function SettingsBoard({
   onEditBlock: (block: BoardBlock, fields: BoardField[]) => void;
   onDeleteBlock: (block: BoardBlock) => void;
   onUnlockBlock?: (block: BoardBlock) => void;
+  onSaveAsModule?: (block: BoardBlock) => void;
 }) {
   const [activeTab, setActiveTab] = useState<BoardCategoryId>("world");
   const [openBlock, setOpenBlock] = useState<BoardBlock | null>(null);
@@ -63,6 +65,9 @@ export function SettingsBoard({
             onUnlockBlock
               ? () => { onUnlockBlock(openBlock); setOpenBlock(null); }
               : undefined
+          }
+          onSaveAsModule={
+            onSaveAsModule ? () => { onSaveAsModule(openBlock); setOpenBlock(null); } : undefined
           }
           onClose={() => setOpenBlock(null)}
         />

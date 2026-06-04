@@ -56,6 +56,9 @@ export function AppShell({ children, variant = "default" }: AppShellProps) {
             <Link className="app-button app-button-primary" href="/games/new">
               新建冒险
             </Link>
+            <Link className="app-button" href="/workshop">
+              工坊
+            </Link>
             <Link className="app-button" href="/settings">
               设置
             </Link>

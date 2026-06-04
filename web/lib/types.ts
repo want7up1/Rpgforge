@@ -361,3 +361,28 @@ export type GeneratedGameConfig = {
   initial_state: Record<string, unknown>;
   voice_profiles?: Record<string, unknown>[];
 };
+
+export type SettingModule = {
+  id: string;
+  name: string;
+  description: string | null;
+  module_type: string;
+  payload: Record<string, unknown>;
+  tags: string[];
+  source_game_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ModuleMergeReportEntry = {
+  module_id: string;
+  action: "added" | "renamed" | "overwritten" | "skipped";
+  conflict: boolean;
+  renamed_to?: string;
+};
+
+export type ModuleMergePreview = {
+  merged_settings: Record<string, unknown>;
+  report: { entries: ModuleMergeReportEntry[]; deduped: number };
+  adapted: { module_id: string; before: Record<string, unknown>; after: Record<string, unknown> }[];
+};
