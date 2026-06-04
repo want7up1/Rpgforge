@@ -314,7 +314,43 @@ export function buildBoardModel(
   return { source: "confirmed", categories: buildFromConfirmed(input.confirmed) };
 }
 
-// 占位：下个任务实现。先抛错以便 settings 测试先过。
-function buildFromConfirmed(_confirmed: Record<string, unknown>): BoardCategory[] {
-  return BOARD_CATEGORIES.map((def) => ({ ...def, blocks: [] }));
+// confirmed_requirements → BoardModel。block id 刻意等于字段名，使锁定 id 可直接当 locked_fields 发后端。
+type ConfirmedSpec = {
+  field: string;
+  category: BoardCategoryId;
+  title: string;
+  type: BoardFieldType;
+};
+const CONFIRMED_SPECS: ConfirmedSpec[] = [
+  { field: "story_background", category: "world", title: "故事背景", type: "textarea" },
+  { field: "core_premise", category: "world", title: "核心设定", type: "textarea" },
+  { field: "tone_preferences", category: "world", title: "风格偏好", type: "stringList" },
+  { field: "playstyle_preferences", category: "mechanics", title: "玩法偏好", type: "stringList" },
+  { field: "must_include", category: "constraints", title: "必须出现", type: "stringList" },
+  { field: "forbidden_content", category: "constraints", title: "禁止点", type: "stringList" }
+];
+
+function buildFromConfirmed(confirmed: Record<string, unknown>): BoardCategory[] {
+  const byId: Record<BoardCategoryId, BoardBlock[]> = {
+    world: [], characters: [], plot: [], mechanics: [],
+    constraints: [], materials: [], advanced: []
+  };
+  for (const spec of CONFIRMED_SPECS) {
+    const raw = confirmed[spec.field];
+    const isList = spec.type === "stringList";
+    const value = isList ? strList(raw) : str(raw);
+    const empty = isList ? (value as string[]).length === 0 : value === "";
+    if (empty) continue;
+    byId[spec.category].push({
+      id: spec.field,
+      category: spec.category,
+      title: spec.title,
+      icon: iconFor(spec.category),
+      summary: isList ? `${(value as string[]).length} 条` : firstLine(value as string),
+      fields: [{ key: spec.field, label: spec.title, value, type: spec.type }],
+      address: { kind: "confirmedField", field: spec.field },
+      deletable: false
+    });
+  }
+  return BOARD_CATEGORIES.map((def) => ({ ...def, blocks: byId[def.id] }));
 }

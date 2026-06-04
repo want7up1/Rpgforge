@@ -59,3 +59,42 @@ describe("buildBoardModel from story_settings", () => {
     });
   });
 });
+
+describe("buildBoardModel from confirmed_requirements", () => {
+  const confirmed = {
+    story_background: "黑暗武侠·雁回镇义庄",
+    core_premise: "失忆镖师查失踪镖队",
+    must_include: ["雨夜义庄", "红伞女人"],
+    forbidden_content: ["修仙飞升"],
+    playstyle_preferences: ["调查为主"],
+    tone_preferences: ["阴郁"],
+    raw_user_input: "..."
+  };
+
+  it("block id 等于 confirmed 字段名（便于锁定透传后端）", () => {
+    const model = buildBoardModel({ source: "confirmed", confirmed });
+    const world = model.categories.find((c) => c.id === "world")!;
+    expect(world.blocks.map((b) => b.id)).toContain("story_background");
+    expect(world.blocks.map((b) => b.id)).toContain("core_premise");
+    expect(world.blocks.map((b) => b.id)).toContain("tone_preferences");
+  });
+
+  it("must_include/forbidden_content 落约束类", () => {
+    const model = buildBoardModel({ source: "confirmed", confirmed });
+    const con = model.categories.find((c) => c.id === "constraints")!;
+    expect(con.blocks.map((b) => b.id)).toEqual(["must_include", "forbidden_content"]);
+  });
+
+  it("playstyle_preferences 落机制类，address 为 confirmedField", () => {
+    const model = buildBoardModel({ source: "confirmed", confirmed });
+    const mech = model.categories.find((c) => c.id === "mechanics")!;
+    const block = mech.blocks.find((b) => b.id === "playstyle_preferences")!;
+    expect(block.address).toEqual({ kind: "confirmedField", field: "playstyle_preferences" });
+  });
+
+  it("空字段不产 block", () => {
+    const model = buildBoardModel({ source: "confirmed", confirmed: { story_background: "x" } });
+    const world = model.categories.find((c) => c.id === "world")!;
+    expect(world.blocks.map((b) => b.id)).toEqual(["story_background"]);
+  });
+});
