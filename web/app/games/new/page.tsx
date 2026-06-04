@@ -86,13 +86,6 @@ export default function NewGamePage() {
     return buildBoardModel({ source: "confirmed", confirmed });
   }, [generatedConfig, confirmed]);
 
-  function currentModel(): BoardModel {
-    if (generatedConfig) {
-      return buildBoardModel({ source: "settings", settings: generatedConfig.story_settings });
-    }
-    return buildBoardModel({ source: "confirmed", confirmed });
-  }
-
   // 恢复进行中任务（沿用原逻辑，简化为只接管结果）。
   useEffect(() => {
     let cancelled = false;
@@ -138,14 +131,16 @@ export default function NewGamePage() {
   async function handleChat() {
     if (!chatInput.trim()) return;
     setError(null);
-    baselineRef.current = currentModel();
+    baselineRef.current = model;
     setPendingAction("chat");
     const lockedConfirmed = lockedIds.filter((id) => CONFIRMED_FIELD_IDS.includes(id));
+    // 快照当前帧的 confirmed，避免 await 后读到过时闭包值。
+    const confirmedSnapshot = confirmed;
     try {
       const job = await createGeneratorChatJob({
         user_input: chatInput,
         history,
-        confirmed_requirements: confirmed,
+        confirmed_requirements: confirmedSnapshot,
         locked_fields: lockedConfirmed
       });
       setChatProcess(createInitialChatProcess(job.id, job.status));
@@ -156,7 +151,7 @@ export default function NewGamePage() {
       aiConfirmedRef.current = aiConfirmed;
       // 客户端兜底强制锁定：把用户锁定字段的旧值覆盖回 AI 结果，防被改回。
       const merged = { ...aiConfirmed };
-      for (const id of lockedConfirmed) merged[id] = confirmed[id];
+      for (const id of lockedConfirmed) merged[id] = confirmedSnapshot[id];
       setConfirmed(merged);
       setStage(done.response.stage);
       setHistory((cur) => [
@@ -176,7 +171,7 @@ export default function NewGamePage() {
 
   async function handleFinalize() {
     setError(null);
-    baselineRef.current = currentModel();
+    baselineRef.current = model;
     setPendingAction("finalize");
     try {
       const job = await createGeneratorFinalizeJob({
