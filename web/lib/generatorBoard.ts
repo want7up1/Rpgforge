@@ -394,6 +394,14 @@ export function diffBoard(prev: BoardModel | null, next: BoardModel): BoardDiff 
   return { changedCategories, changedBlockIds };
 }
 
+// 「无改动」基线：设定页等不需要改动闪烁的消费方可直接传入。
+export const EMPTY_DIFF: BoardDiff = {
+  changedCategories: Object.fromEntries(
+    BOARD_CATEGORIES.map((c) => [c.id, 0])
+  ) as Record<BoardCategoryId, number>,
+  changedBlockIds: new Set<string>()
+};
+
 export function isLocked(locked: string[], blockId: string): boolean {
   return locked.includes(blockId);
 }

@@ -25,7 +25,7 @@ export function BlockDetailModal({
   locked: boolean;
   onSave: (fields: BoardField[]) => void;
   onDelete: () => void;
-  onUnlock: () => void;
+  onUnlock?: () => void;
   onClose: () => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>(() =>
@@ -82,7 +82,7 @@ export function BlockDetailModal({
 
         <div className="mt-5 flex flex-wrap gap-2">
           <button className="app-button app-button-primary" type="button" onClick={handleSave}>保存</button>
-          {locked ? (
+          {locked && onUnlock ? (
             <button className="app-button" type="button" onClick={onUnlock} title="恢复 AI 最近一次生成的值并解除锁定">
               🔓 解锁 / 恢复 AI 原值
             </button>

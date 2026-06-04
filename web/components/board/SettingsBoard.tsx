@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 
-import { BoardTabs } from "@/components/generator/BoardTabs";
-import { BoardBlockGrid } from "@/components/generator/BoardBlockGrid";
-import { BlockDetailModal } from "@/components/generator/BlockDetailModal";
-import { ChangeSummaryBar } from "@/components/generator/ChangeSummaryBar";
+import { BoardTabs } from "@/components/board/BoardTabs";
+import { BoardBlockGrid } from "@/components/board/BoardBlockGrid";
+import { BlockDetailModal } from "@/components/board/BlockDetailModal";
+import { ChangeSummaryBar } from "@/components/board/ChangeSummaryBar";
+import { EMPTY_DIFF } from "@/lib/generatorBoard";
 import type {
   BoardBlock,
   BoardCategoryId,
@@ -16,20 +17,20 @@ import type {
 
 export function SettingsBoard({
   model,
-  diff,
-  lockedIds,
+  diff = EMPTY_DIFF,
+  lockedIds = [],
   loading,
   onEditBlock,
   onDeleteBlock,
   onUnlockBlock
 }: {
   model: BoardModel;
-  diff: BoardDiff;
-  lockedIds: string[];
+  diff?: BoardDiff;
+  lockedIds?: string[];
   loading: boolean;
   onEditBlock: (block: BoardBlock, fields: BoardField[]) => void;
   onDeleteBlock: (block: BoardBlock) => void;
-  onUnlockBlock: (block: BoardBlock) => void;
+  onUnlockBlock?: (block: BoardBlock) => void;
 }) {
   const [activeTab, setActiveTab] = useState<BoardCategoryId>("world");
   const [openBlock, setOpenBlock] = useState<BoardBlock | null>(null);
@@ -58,7 +59,11 @@ export function SettingsBoard({
           locked={lockedIds.includes(openBlock.id)}
           onSave={(fields) => { onEditBlock(openBlock, fields); setOpenBlock(null); }}
           onDelete={() => { onDeleteBlock(openBlock); setOpenBlock(null); }}
-          onUnlock={() => { onUnlockBlock(openBlock); setOpenBlock(null); }}
+          onUnlock={
+            onUnlockBlock
+              ? () => { onUnlockBlock(openBlock); setOpenBlock(null); }
+              : undefined
+          }
           onClose={() => setOpenBlock(null)}
         />
       ) : null}
