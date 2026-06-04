@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
@@ -11,27 +11,18 @@ import {
   getContextDiagnostic,
   getGame,
   getGameMemory,
-  getGameSettingsExport,
-  getGameSettingsGuideExport,
   getGameScriptExport,
-  getSettingVersions,
   getTurns,
-  importGameSettings,
-  rebuildGameSummaries,
-  restoreSettingVersion,
-  updateGameConfig
+  rebuildGameSummaries
 } from "@/lib/api";
 import { downloadBlob } from "@/lib/downloads";
 import type {
   ContextDiagnosticRead,
   GameDetail,
   GameMemoryRead,
-  GameSettingVersionRead,
   SummaryRead,
   TurnRead
 } from "@/lib/types";
-
-type MemoryTab = "core" | "settings" | "versions";
 
 type LoadState =
   | { status: "loading" }
@@ -39,74 +30,10 @@ type LoadState =
       status: "ready";
       game: GameDetail;
       memory: GameMemoryRead;
-      versions: GameSettingVersionRead[];
       turns: TurnRead[];
       diagnostic: ContextDiagnosticRead | null;
     }
   | { status: "error"; message: string };
-
-const STORY_SECTION_GUIDE: { key: string; label: string; help: string }[] = [
-  {
-    key: "game_profile",
-    label: "游戏档案",
-    help: "标题、题材、简介和整体基调。会影响列表展示、导出名称，以及 GM 对故事类型和表达气质的第一判断。"
-  },
-  {
-    key: "worldview",
-    label: "世界观",
-    help: "世界事实、时代舞台、公开信息、隐藏真相、势力和地点。GM 用它保持世界一致，不把隐藏真相提前暴露给玩家。"
-  },
-  {
-    key: "story_core",
-    label: "故事核心",
-    help: "核心幻想、主线悬念、长期目标、当前幕、必须保留和禁止偏离。它是防止剧情跑偏的最高层剧本承诺。"
-  },
-  {
-    key: "core_characters",
-    label: "核心人物",
-    help: "主角、关键 NPC、同伴、反派和关系弧。GM 会用它维持人物动机、可见身份、秘密边界和关系推进。"
-  },
-  {
-    key: "act_plan",
-    label: "五幕主线",
-    help: "每幕目标、必须节点、允许揭示、禁止揭示、完成锚点和转场条件。它决定剧情何时可从当前幕进入下一幕。"
-  },
-  {
-    key: "main_quest_path",
-    label: "主线轨迹",
-    help: "软主线任务线。它告诉 GM 怎样推进主线，但不强迫玩家立刻离开当前场景或放弃自由探索。"
-  },
-  {
-    key: "core_mechanics",
-    label: "核心机制",
-    help: "成长、资源、基地、调查、战斗、压力、判定等长期玩法规则。GM 会用它处理行动结果和代价。"
-  },
-  {
-    key: "action_style_rules",
-    label: "行动风格规则",
-    help: "玩家调查、社交、探索、战斗、潜行等不同做法时的叙事和判定规则。当前回合会按玩家输入匹配其中一条。"
-  },
-  {
-    key: "story_material_library",
-    label: "剧本素材库",
-    help: "可被当前回合召回的地点、势力、秘密、线索、物品、压力和反转素材。触发词和关键词越清晰，召回越稳定。"
-  },
-  {
-    key: "home_base",
-    label: "[地点]",
-    help: "长期据点、组织后台、安全屋或移动基地。它影响休整、升级、情报、NPC 服务和长期剧情钩子。"
-  },
-  {
-    key: "hard_rules",
-    label: "强制规则",
-    help: "最高优先级规则，包括必须遵守、禁止事项、秘密揭露和连续性。GM 运行时不能被临场发挥覆盖。"
-  },
-  {
-    key: "generation_parameters",
-    label: "生成参数",
-    help: "每回合剧情字数、段落、标题、重点标记和近期回合摘录长度。它影响输出长度、节奏和 token 消耗。"
-  }
-];
 
 export default function GameMemoryPage() {
   const params = useParams<{ id: string }>();
@@ -121,11 +48,10 @@ export default function GameMemoryPage() {
 
     async function load() {
       try {
-        const [memory, turns, game, versions] = await Promise.all([
+        const [memory, turns, game] = await Promise.all([
           getGameMemory(params.id),
           getTurns(params.id),
-          getGame(params.id),
-          getSettingVersions(params.id)
+          getGame(params.id)
         ]);
         const latestTurn = turns[turns.length - 1];
         const diagnostic = latestTurn
@@ -133,7 +59,7 @@ export default function GameMemoryPage() {
           : null;
         if (!controller.signal.aborted) {
           setSelectedTurnId(latestTurn?.id ?? "");
-          setState({ status: "ready", game, memory, versions, turns, diagnostic });
+          setState({ status: "ready", game, memory, turns, diagnostic });
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
@@ -149,19 +75,6 @@ export default function GameMemoryPage() {
 
     return () => controller.abort();
   }, [params.id]);
-
-  async function refreshMemory() {
-    const [memory, turns, game, versions] = await Promise.all([
-      getGameMemory(params.id),
-      getTurns(params.id),
-      getGame(params.id),
-      getSettingVersions(params.id)
-    ]);
-    const turnId = selectedTurnId || turns[turns.length - 1]?.id || "";
-    const diagnostic = turnId ? await getContextDiagnostic(params.id, turnId) : null;
-    setState({ status: "ready", game, memory, versions, turns, diagnostic });
-    setSelectedTurnId(turnId);
-  }
 
   async function handleRebuildSummaries() {
     setBusyAction("summaries");
@@ -209,7 +122,7 @@ export default function GameMemoryPage() {
     <AppShell>
       {state.status === "loading" ? (
         <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-          正在读取剧本设定与记忆...
+          正在读取剧本资料...
         </section>
       ) : state.status === "error" ? (
         <section className="app-alert">{state.message}</section>
@@ -222,11 +135,9 @@ export default function GameMemoryPage() {
           game={state.game}
           memory={state.memory}
           onRebuildSummaries={handleRebuildSummaries}
-          onRefresh={refreshMemory}
           onTurnChange={handleTurnChange}
           selectedTurnId={selectedTurnId}
           turns={state.turns}
-          versions={state.versions}
         />
       )}
     </AppShell>
@@ -241,11 +152,9 @@ function MemoryView({
   game,
   memory,
   onRebuildSummaries,
-  onRefresh,
   onTurnChange,
   selectedTurnId,
-  turns,
-  versions
+  turns
 }: {
   actionError: string | null;
   actionStatus: string | null;
@@ -254,24 +163,16 @@ function MemoryView({
   game: GameDetail;
   memory: GameMemoryRead;
   onRebuildSummaries: () => void;
-  onRefresh: () => Promise<void>;
   onTurnChange: (event: ChangeEvent<HTMLSelectElement>) => void;
   selectedTurnId: string;
   turns: TurnRead[];
-  versions: GameSettingVersionRead[];
 }) {
-  const [activeTab, setActiveTab] = useState<MemoryTab>("core");
   const [exportingScript, setExportingScript] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const storySettings = storySettingsFromGame(game);
   const summaryBuckets = useMemo(() => bucketSummaries(memory.summaries), [memory.summaries]);
   const materialCount = recordArray(storySettings.story_material_library).length;
-  const tabs: { key: MemoryTab; label: string }[] = [
-    { key: "core", label: "核心设定" },
-    { key: "settings", label: "设置" },
-    { key: "versions", label: "版本历史" }
-  ];
 
   async function handleScriptExport() {
     setExportingScript(true);
@@ -330,29 +231,6 @@ function MemoryView({
         <Metric label="摘要" value={memory.summaries.length} />
       </section>
 
-      <nav className="history-toolbar-group history-toolbar-tabs" aria-label="设定管理">
-        {tabs.map((tab) => (
-          <button
-            className={tabButtonClass(activeTab === tab.key)}
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
-
-      {activeTab === "core" ? (
-        <CoreSettingsSection diagnostic={diagnostic} game={game} />
-      ) : null}
-      {activeTab === "settings" ? (
-        <UnifiedSettingsSection game={game} key={`settings-${game.config?.updated_at}`} onRefresh={onRefresh} />
-      ) : null}
-      {activeTab === "versions" ? (
-        <VersionHistorySection gameId={memory.game.id} onRefresh={onRefresh} versions={versions} />
-      ) : null}
-
       <details className="surface-panel">
         <summary className="cursor-pointer surface-title">维护与运行诊断</summary>
         <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
@@ -373,371 +251,6 @@ function MemoryView({
 
       <SummarySection buckets={summaryBuckets} />
     </div>
-  );
-}
-
-function CoreSettingsSection({
-  diagnostic,
-  game
-}: {
-  diagnostic: ContextDiagnosticRead | null;
-  game: GameDetail;
-}) {
-  const storySettings = storySettingsFromGame(game);
-  const currentAct = currentActFromSettings(storySettings);
-
-  return (
-    <section className="surface-panel surface-panel-strong">
-      <SectionHeader
-        title="核心设定"
-        subtitle="这里只读展示当前 story_settings v2 的核心内容；完整修改入口在设置页。"
-      />
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <InfoBlock
-          help="游戏标题、题材和简介。它决定 GM 对游戏类型与整体基调的初始判断。"
-          title="游戏档案"
-          value={asRecord(storySettings.game_profile)}
-        />
-        <InfoBlock
-          help="核心幻想、主线悬念、长期目标和防跑偏边界。GM 每回合都会围绕这些承诺行动。"
-          title="故事核心"
-          value={asRecord(storySettings.story_core)}
-        />
-        <InfoBlock
-          help="当前幕的目标、锚点、揭露限制和转场条件。未完成的必要锚点会延后进入下一幕。"
-          title="当前幕"
-          value={currentAct}
-        />
-        <InfoBlock
-          help="本回合真正注入 GM 的派生运行视图，用来确认设定是否进入上下文。"
-          title="运行视图"
-          value={diagnostic?.runtime_story ?? {}}
-        />
-      </div>
-    </section>
-  );
-}
-
-function UnifiedSettingsSection({
-  game,
-  onRefresh
-}: {
-  game: GameDetail;
-  onRefresh: () => Promise<void>;
-}) {
-  const storySettings = storySettingsFromGame(game);
-
-  return (
-    <div className="grid gap-4">
-      <SettingsImportExportSection game={game} onRefresh={onRefresh} />
-      <StorySettingsOverview storySettings={storySettings} />
-      <StorySettingsEditor game={game} onRefresh={onRefresh} />
-    </div>
-  );
-}
-
-function StorySettingsOverview({ storySettings }: { storySettings: Record<string, unknown> }) {
-  return (
-    <section className="surface-panel">
-      <SectionHeader
-        title="剧本与运行设定"
-        subtitle="这些分区共同构成唯一主设定源。GM 运行时只从它派生当前幕、行动风格、素材召回和输出参数。"
-      />
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {STORY_SECTION_GUIDE.map((section) => (
-          <article
-            className="rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] p-3"
-            key={section.key}
-          >
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold">{section.label}</h3>
-              <HelpMark text={section.help} />
-              <span className="font-mono text-xs text-[color:var(--muted)]">{section.key}</span>
-            </div>
-            <div className="mt-3 max-h-72 overflow-auto rounded border border-[color:var(--border)]">
-              <JsonBlock data={storySettings[section.key] ?? emptyValueForSection(section.key)} />
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function StorySettingsEditor({
-  game,
-  onRefresh
-}: {
-  game: GameDetail;
-  onRefresh: () => Promise<void>;
-}) {
-  const currentSettings = storySettingsFromGame(game);
-  const [draft, setDraft] = useState(() => formatJson(currentSettings));
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setStatus("正在保存 story_settings v2...");
-    setError(null);
-    try {
-      await updateGameConfig(game.id, {
-        story_settings_json: parseRecordJson(draft, "story_settings")
-      });
-      await onRefresh();
-      setStatus("story_settings v2 已保存。");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "保存 story_settings 失败。");
-      setStatus(null);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleReset() {
-    setDraft(formatJson(currentSettings));
-    setError(null);
-    setStatus("已恢复为当前已保存的 story_settings。");
-  }
-
-  return (
-    <section className="surface-panel surface-panel-strong">
-      <SectionHeader
-        title="完整 JSON 编辑"
-        subtitle="这里可以修改全部设定。导入、导出和保存都只作用于 story_settings，不会改回合历史、当前状态、摘要或存档。"
-      />
-      <StorySettingsStructureGuide />
-      <form className="mt-4 grid gap-4" onSubmit={handleSubmit}>
-        <TextareaField
-          help="唯一主设定源。修改后保存，GM 下一回合会按新的世界观、人物、五幕、机制、素材、强制规则和生成参数运行。"
-          label="story_settings v2 JSON"
-          onChange={setDraft}
-          rows={30}
-          value={draft}
-        />
-        <div className="flex flex-wrap items-start gap-2">
-          <button className="app-button app-button-primary" disabled={saving} type="submit">
-            {saving ? "保存中..." : "保存 story_settings"}
-          </button>
-          <button className="app-button" disabled={saving} onClick={handleReset} type="button">
-            恢复当前内容
-          </button>
-        </div>
-        {status ? <p className="app-status">{status}</p> : null}
-        {error ? <p className="app-alert">{error}</p> : null}
-      </form>
-    </section>
-  );
-}
-
-function StorySettingsStructureGuide() {
-  return (
-    <div className="mt-4 grid gap-2 text-sm text-[color:var(--muted)] md:grid-cols-2">
-      {STORY_SECTION_GUIDE.map((item) => (
-        <div
-          className="flex items-start gap-2 rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] px-3 py-2"
-          key={item.key}
-        >
-          <span className="font-mono text-[color:var(--foreground)]">{item.key}</span>
-          <HelpMark text={item.help} />
-          <span>{item.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SettingsImportExportSection({
-  game,
-  onRefresh
-}: {
-  game: GameDetail;
-  onRefresh: () => Promise<void>;
-}) {
-  const [exporting, setExporting] = useState(false);
-  const [exportingGuide, setExportingGuide] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleExport() {
-    setExporting(true);
-    setStatus("正在导出 story_settings JSON...");
-    setError(null);
-    try {
-      const { blob, filename } = await getGameSettingsExport(game.id);
-      downloadBlob(blob, filename);
-      setStatus("story_settings JSON 已开始下载。");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "导出设置失败。");
-      setStatus(null);
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  async function handleGuideExport() {
-    setExportingGuide(true);
-    setStatus("正在生成 story_settings 填写说明...");
-    setError(null);
-    try {
-      const { blob, filename } = await getGameSettingsGuideExport(game.id);
-      downloadBlob(blob, filename);
-      setStatus("填写说明 Markdown 已开始下载。");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "下载填写说明失败。");
-      setStatus(null);
-    } finally {
-      setExportingGuide(false);
-    }
-  }
-
-  async function handleImport(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-    setImporting(true);
-    setStatus("正在导入 story_settings JSON...");
-    setError(null);
-    try {
-      const payload = JSON.parse(await file.text()) as unknown;
-      await importGameSettings(game.id, payload);
-      await onRefresh();
-      setStatus("story_settings 已导入并保存。");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "导入设置失败。");
-      setStatus(null);
-    } finally {
-      setImporting(false);
-      event.target.value = "";
-    }
-  }
-
-  return (
-    <section className="surface-panel">
-      <SectionHeader
-        title="导入导出"
-        subtitle="导出的 JSON 是当前游戏剧本设定源；填写说明是单独 Markdown 文档。两者都不包含回合历史、当前状态、摘要或存档进度。"
-      />
-      <div className="mt-4 grid gap-3 lg:grid-cols-[auto_1fr] lg:items-center">
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="app-button app-button-primary w-fit"
-            disabled={exporting || exportingGuide || importing}
-            onClick={handleExport}
-            type="button"
-          >
-            {exporting ? "导出中..." : "导出 story_settings JSON"}
-          </button>
-          <button
-            className="app-button w-fit"
-            disabled={exporting || exportingGuide || importing}
-            onClick={handleGuideExport}
-            type="button"
-          >
-            {exportingGuide ? "下载中..." : "下载填写说明"}
-          </button>
-        </div>
-        <label className="grid gap-1 text-sm font-medium">
-          <SettingLabel
-            help="选择符合 rpgforge.story.v2 格式的 JSON 文件。导入会覆盖剧本设定源，但不会触碰存档、回合、摘要或当前状态。"
-            label="导入 story_settings JSON"
-          />
-          <input
-            accept="application/json,.json"
-            className="app-input"
-            disabled={exporting || exportingGuide || importing}
-            onChange={handleImport}
-            type="file"
-          />
-        </label>
-      </div>
-      {status ? <p className="app-status mt-3">{status}</p> : null}
-      {error ? <p className="app-alert mt-3">{error}</p> : null}
-    </section>
-  );
-}
-
-function VersionHistorySection({
-  gameId,
-  onRefresh,
-  versions
-}: {
-  gameId: string;
-  onRefresh: () => Promise<void>;
-  versions: GameSettingVersionRead[];
-}) {
-  const [restoringId, setRestoringId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleRestore(versionId: string) {
-    setRestoringId(versionId);
-    setStatus("正在恢复该版本的 story_settings...");
-    setError(null);
-    try {
-      await restoreSettingVersion(gameId, versionId);
-      await onRefresh();
-      setStatus("版本已恢复。");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "恢复版本失败。");
-      setStatus(null);
-    } finally {
-      setRestoringId(null);
-    }
-  }
-
-  return (
-    <section className="surface-panel">
-      <SectionHeader
-        title="版本历史"
-        subtitle="保存、导入和恢复设置时会记录快照；恢复只影响设定，不影响存档进度。"
-      />
-      {status ? <p className="app-status mt-3">{status}</p> : null}
-      {error ? <p className="app-alert mt-3">{error}</p> : null}
-      <div className="mt-4 grid gap-3">
-        {versions.length === 0 ? (
-          <p className="text-sm text-[color:var(--muted)]">暂无设置版本。</p>
-        ) : (
-          versions.map((version) => (
-            <article
-              className="rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] p-3"
-              key={version.id}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold">
-                    {version.scope} · {version.action}
-                  </p>
-                  <p className="text-xs text-[color:var(--muted)]">
-                    {new Date(version.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <button
-                  className="app-button"
-                  disabled={restoringId === version.id}
-                  onClick={() => handleRestore(version.id)}
-                  type="button"
-                >
-                  {restoringId === version.id ? "恢复中..." : "恢复"}
-                </button>
-              </div>
-              <details className="mt-3">
-                <summary className="cursor-pointer text-sm text-[color:var(--muted)]">
-                  查看快照
-                </summary>
-                <div className="mt-2 max-h-96 overflow-auto rounded border border-[color:var(--border)]">
-                  <JsonBlock data={version.snapshot_json} />
-                </div>
-              </details>
-            </article>
-          ))
-        )}
-      </div>
-    </section>
   );
 }
 
@@ -920,32 +433,6 @@ function Metric({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function TextareaField({
-  help,
-  label,
-  onChange,
-  rows,
-  value
-}: {
-  help: string;
-  label: string;
-  onChange: (value: string) => void;
-  rows?: number;
-  value: string;
-}) {
-  return (
-    <label className="grid gap-1 text-sm font-medium">
-      <SettingLabel help={help} label={label} />
-      <textarea
-        className="app-input min-h-[220px] font-mono text-xs"
-        onChange={(event) => onChange(event.target.value)}
-        rows={rows}
-        value={value}
-      />
-    </label>
-  );
-}
-
 function SettingLabel({ help, label }: { help: string; label: string }) {
   return (
     <span className="flex items-center gap-2">
@@ -972,10 +459,6 @@ function HelpMark({ text }: { text: string }) {
   );
 }
 
-function tabButtonClass(active: boolean) {
-  return active ? "history-toolbar-button active" : "history-toolbar-button";
-}
-
 function bucketSummaries(summaries: SummaryRead[]): Record<string, SummaryRead[]> {
   return summaries.reduce<Record<string, SummaryRead[]>>((accumulator, summary) => {
     const key = summary.type || "summary";
@@ -986,30 +469,6 @@ function bucketSummaries(summaries: SummaryRead[]): Record<string, SummaryRead[]
 
 function storySettingsFromGame(game: GameDetail): Record<string, unknown> {
   return asRecord(game.config?.story_settings);
-}
-
-function currentActFromSettings(storySettings: Record<string, unknown>): Record<string, unknown> {
-  const core = asRecord(storySettings.story_core);
-  const currentActId = stringValue(core.current_act) || "act_1";
-  const acts = recordArray(storySettings.act_plan);
-  const matched =
-    acts.find((act) =>
-      [act.id, act.key, act.title, act.name].some((value) => stringValue(value) === currentActId)
-    ) ?? acts[0];
-  return matched ?? {};
-}
-
-function emptyValueForSection(sectionKey: string): unknown {
-  return [
-    "game_profile",
-    "worldview",
-    "story_core",
-    "home_base",
-    "hard_rules",
-    "generation_parameters"
-  ].includes(sectionKey)
-    ? {}
-    : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1024,27 +483,4 @@ function recordArray(value: unknown): Record<string, unknown>[] {
         return !!item && typeof item === "object" && !Array.isArray(item);
       })
     : [];
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function formatJson(value: unknown): string {
-  return JSON.stringify(value ?? {}, null, 2);
-}
-
-function parseRecordJson(value: string, label: string): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(value);
-  } catch (caught) {
-    throw new Error(
-      `${label} 不是合法 JSON：${caught instanceof Error ? caught.message : "解析失败"}`
-    );
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`${label} 必须是 JSON object。`);
-  }
-  return parsed as Record<string, unknown>;
 }

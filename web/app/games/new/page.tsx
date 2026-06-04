@@ -8,7 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { ChatDock } from "@/components/generator/ChatDock";
 import { ChatHistorySheet } from "@/components/generator/ChatHistorySheet";
 import { GenerationProgress, type ProgressItem } from "@/components/generator/GenerationProgress";
-import { SettingsBoard } from "@/components/generator/SettingsBoard";
+import { SettingsBoard } from "@/components/board/SettingsBoard";
 import {
   createGeneratedGame,
   createGeneratorChatJob,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import {
   BOARD_CATEGORIES,
+  EMPTY_DIFF,
   buildBoardModel,
   deleteBlock,
   diffBoard,
@@ -47,13 +48,6 @@ const CONFIRMED_FIELD_IDS = [
   "story_background", "core_premise", "tone_preferences",
   "playstyle_preferences", "must_include", "forbidden_content"
 ];
-
-const EMPTY_DIFF: BoardDiff = {
-  changedCategories: Object.fromEntries(
-    BOARD_CATEGORIES.map((c) => [c.id, 0])
-  ) as BoardDiff["changedCategories"],
-  changedBlockIds: new Set<string>()
-};
 
 const sampleIdea =
   "黑暗武侠，故事发生在雁回镇义庄。主角是失忆镖师，必须出现雨夜义庄、红伞女人和失踪镖队。不要变成修仙飞升，也不要太快揭露主角身世。";

@@ -25,6 +25,20 @@
 
 ## 1. 已完成
 
+### Round 37 (2026-06-04) — 已有剧本「设定」页 + 信息架构去重
+
+**背景**：已有剧本的 story_settings 展示/编辑/导入导出/版本历史散落在「概览」和「资料」两页，信息重复、职责不清。本轮将上述功能统一到新设定页，同时对概览/资料两页做减法。
+
+**主要改动（前端，纯前端，无后端改动）**：
+- **看板组件归位**：`components/generator/SettingsBoard` 等 5 个看板组件 `git mv` 到 `components/board/`，生成页路径同步更新；`diff`/`lockedIds`/`onUnlockBlock` 改可选（默认值 `EMPTY_DIFF`/`[]`），`EMPTY_DIFF` 从 `generatorBoard.ts` 导出。
+- **`GamePageHeader` 加「设定」导航**：`GameSection` 新增 `"settings"`，`gameNavItems` 插入「设定 → /games/[id]/settings」。
+- **`SettingsAdvanced` 组件**：新增 `components/settings/SettingsAdvanced.tsx`，封装原始 JSON 编辑 + 导入/导出/填写说明 + 版本历史三个高级折叠区。
+- **新「设定」页**：新增 `app/games/[id]/settings/page.tsx`，看板（六分类可查看/编辑/删除）+ 高级折叠，409 回合生成中友好提示。
+- **概览页瘦身**：新增 `components/settings/SettingsOverviewCard.tsx`（各分类条数 + 设定入口）；删除 `ScriptLockSection`/`BlueprintCard`/`DiagnosticsPanel`、「剧本素材库」section、「高级诊断」details，及 `buildGameBlueprint`/`JsonBlock`/`asList`/`pickString` 等已无引用的 import/函数。
+- **资料页瘦身**：删除 tab 机制、`CoreSettingsSection`/`UnifiedSettingsSection`/`StorySettingsOverview`/`StorySettingsEditor`/`StorySettingsStructureGuide`/`SettingsImportExportSection`/`VersionHistorySection` 七个组件、`STORY_SECTION_GUIDE`/`emptyValueForSection`/`currentActFromSettings` 等常量和辅助函数、`versions` 数据流；资料页只剩记忆/摘要 + 重建摘要 + 运行诊断。
+
+**验证**：vitest 19 passing；eslint 干净；tsc/build 通过；web 容器已重建（2026-06-04T03:57:53Z）。
+
 ### Round 36 (2026-06-04) — 创建冒险页重设计 + 后端锁定字段支持
 
 **背景**：创建冒险页（`/games/new`）原实现采用单栏问答式 UI，字段抽取结果不可视、不可编辑，用户无法手动调整已确认设定，也无法告诉 AI「我改过这个，别动它」。本轮完成前端完整重设计 + 后端配套最小改动。
