@@ -7,6 +7,12 @@ import type { ModuleMergePreview, SettingModule } from "@/lib/types";
 
 type Resolution = "rename" | "overwrite" | "skip";
 
+/** 将 preview 与生成时的 targetSettings 引用绑定，用于渲染阶段检测陈旧预览 */
+type BoundPreview = {
+  snapshot: Record<string, unknown>;
+  data: ModuleMergePreview;
+};
+
 export function ModuleMergePanel({
   targetSettings,
   onApply
@@ -18,11 +24,17 @@ export function ModuleMergePanel({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adapt, setAdapt] = useState(false);
   const [resolutions, setResolutions] = useState<Record<string, Resolution>>({});
-  const [preview, setPreview] = useState<ModuleMergePreview | null>(null);
+  const [bound, setBound] = useState<BoundPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { void listModules().then(setModules).catch(() => {}); }, []);
+  useEffect(() => {
+    void listModules().then(setModules).catch((e) => setError(e instanceof Error ? e.message : "读取模块失败"));
+  }, []);
+
+  // 若 targetSettings 引用变更（父组件编辑了 settings），陈旧预览在渲染时自动作废，
+  // 避免将基于旧 settings 生成的合并结果写入新 settings（数据完整性保障）
+  const preview = bound !== null && bound.snapshot === targetSettings ? bound.data : null;
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -30,16 +42,18 @@ export function ModuleMergePanel({
       if (n.has(id)) { n.delete(id); } else { n.add(id); }
       return n;
     });
-    setPreview(null);
+    setBound(null);
   }
 
   async function runPreview() {
     setBusy(true); setError(null);
     try {
-      setPreview(await mergePreviewModules({
+      const data = await mergePreviewModules({
         target_settings: targetSettings, module_ids: [...selected],
         adapt, conflict_resolutions: resolutions,
-      }));
+      });
+      // 将结果与此刻的 targetSettings 引用绑定，便于后续陈旧检测
+      setBound({ snapshot: targetSettings, data });
     } catch (e) {
       setError(e instanceof Error ? e.message : "预览失败");
     } finally { setBusy(false); }
@@ -50,7 +64,7 @@ export function ModuleMergePanel({
     setBusy(true); setError(null);
     try {
       await onApply(preview.merged_settings);
-      setPreview(null); setSelected(new Set()); setResolutions({});
+      setBound(null); setSelected(new Set()); setResolutions({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "并入失败");
     } finally { setBusy(false); }
@@ -71,7 +85,7 @@ export function ModuleMergePanel({
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={adapt} onChange={(e) => { setAdapt(e.target.checked); setPreview(null); }} />
+          <input type="checkbox" checked={adapt} onChange={(e) => { setAdapt(e.target.checked); setBound(null); }} />
           ⭐ AI 本地优化（改写贴合当前剧本）
         </label>
         <button className="app-button app-button-primary" type="button" disabled={busy || selected.size === 0} onClick={() => void runPreview()}>
@@ -97,7 +111,7 @@ export function ModuleMergePanel({
                         <button key={r}
                           className={`app-button ml-1 ${(resolutions[e.module_id] ?? "rename") === r ? "app-button-primary" : ""}`}
                           type="button"
-                          onClick={() => { setResolutions((s) => ({ ...s, [e.module_id]: r })); setPreview(null); }}>
+                          onClick={() => { setResolutions((s) => ({ ...s, [e.module_id]: r })); setBound(null); }}>
                           {resLabel(r)}
                         </button>
                       ))}
@@ -122,7 +136,7 @@ export function ModuleMergePanel({
           ) : null}
           <div className="mt-3 flex gap-2">
             <button className="app-button app-button-primary" type="button" disabled={busy} onClick={() => void confirm()}>确认并入</button>
-            <button className="app-button" type="button" onClick={() => setPreview(null)}>取消</button>
+            <button className="app-button" type="button" onClick={() => setBound(null)}>取消</button>
           </div>
         </div>
       ) : null}
