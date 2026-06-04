@@ -204,4 +204,12 @@ describe("writeBlockFields 写回 source", () => {
     });
     expect((out as any).core_characters).toEqual([{ name: "b" }]);
   });
+
+  it("settingsScalar 整对象：path 长度1 时合并字段进对象", () => {
+    const src = { game_profile: { title: "old", genre: "g" } };
+    const out = writeBlockFields(src, { kind: "settingsScalar", path: ["game_profile"] }, [
+      { key: "title", label: "标题", value: "new", type: "text" }
+    ]);
+    expect((out as any).game_profile).toEqual({ title: "new", genre: "g" });
+  });
 });

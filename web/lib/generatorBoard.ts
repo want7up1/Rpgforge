@@ -190,7 +190,10 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
         { key: "title", type: "text" }, { key: "objective", type: "textarea" },
         { key: "dramatic_question", type: "textarea" }
       ]),
-      address: { kind: "settingsItem", arrayKey: "act_plan", idKey: "id", idValue: str(act.id) },
+      address: {
+        kind: "settingsItem", arrayKey: "act_plan",
+        idKey: str(act.id) ? "id" : "title", idValue: str(act.id) || str(act.title)
+      },
       deletable: true
     });
   }
@@ -203,7 +206,10 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
       fields: objectFields(q, [
         { key: "title", type: "text" }, { key: "objective", type: "textarea" }
       ]),
-      address: { kind: "settingsItem", arrayKey: "main_quest_path", idKey: "id", idValue: str(q.id) },
+      address: {
+        kind: "settingsItem", arrayKey: "main_quest_path",
+        idKey: str(q.id) ? "id" : "title", idValue: str(q.id) || str(q.title)
+      },
       deletable: true
     });
   }
@@ -360,11 +366,10 @@ export type BoardDiff = {
   changedBlockIds: Set<string>;
 };
 
-// block 内容指纹：用 fields 的值拼成字符串，变化即视为改动。
+// block 内容指纹：用 fields 的 [key, value] 对序列化，变化即视为改动。
+// 使用 JSON.stringify 消除 ¦/| 分隔符碰撞风险。
 function blockFingerprint(block: BoardBlock): string {
-  return block.fields
-    .map((f) => `${f.key}=${Array.isArray(f.value) ? f.value.join("¦") : f.value}`)
-    .join("|");
+  return JSON.stringify(block.fields.map((f) => [f.key, f.value]));
 }
 
 export function diffBoard(prev: BoardModel | null, next: BoardModel): BoardDiff {
@@ -408,6 +413,8 @@ function fieldsToRecord(target: Record<string, unknown>, fields: BoardField[]): 
   for (const f of fields) target[f.key] = f.value;
 }
 
+// 注意：重命名 idKey 字段后，原 BoardBlock.address.idValue 会过期；
+// 调用方需在编辑后用新 source 重建 BoardModel 再操作，否则定位会失效。
 export function writeBlockFields(
   source: Record<string, unknown>,
   address: BoardAddress,
@@ -431,7 +438,8 @@ export function writeBlockFields(
     const leaf = path[path.length - 1];
     if (address.path.length === 1 && address.kind === "settingsScalar") {
       // 整对象块（game_profile/worldview/generation_parameters）：把 fields 合并进该对象
-      const obj = (typeof node[leaf] === "object" && node[leaf] !== null
+      // 注意：排除数组，避免数组被错误当对象合并而损坏数据
+      const obj = (typeof node[leaf] === "object" && node[leaf] !== null && !Array.isArray(node[leaf])
         ? (node[leaf] as Record<string, unknown>)
         : {}) as Record<string, unknown>;
       fieldsToRecord(obj, fields);
