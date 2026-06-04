@@ -22,6 +22,7 @@ class SettingModulePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     tags: list[str] | None = None
+    payload: dict[str, Any] | None = None
 
 
 class SettingModuleRead(BaseModel):

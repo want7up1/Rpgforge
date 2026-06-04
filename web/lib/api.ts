@@ -808,7 +808,7 @@ export async function createModule(body: {
   return requestJson<SettingModule>("/api/modules", { method: "POST", body: JSON.stringify(body) });
 }
 
-export async function patchModule(id: string, body: { name?: string; description?: string | null; tags?: string[] }): Promise<SettingModule> {
+export async function patchModule(id: string, body: { name?: string; description?: string | null; tags?: string[]; payload?: Record<string, unknown> }): Promise<SettingModule> {
   return requestJson<SettingModule>(`/api/modules/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
