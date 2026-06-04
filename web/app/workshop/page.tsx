@@ -48,15 +48,22 @@ export default function WorkshopPage() {
 
   async function handleDelete(id: string) {
     if (!window.confirm("删除该模块？")) return;
-    await deleteModule(id);
-    setTick((n) => n + 1);
+    try {
+      await deleteModule(id);
+      setTick((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败");
+    }
   }
 
   async function handleRename(m: SettingModule) {
     const name = window.prompt("模块名", m.name);
-    if (name && name.trim()) {
+    if (!name || !name.trim()) return;
+    try {
       await patchModule(m.id, { name: name.trim() });
       setTick((n) => n + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "改名失败");
     }
   }
 
