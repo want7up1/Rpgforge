@@ -813,7 +813,7 @@ export async function patchModule(id: string, body: { name?: string; description
 }
 
 export async function deleteModule(id: string): Promise<void> {
-  await fetch(`${getApiBaseUrl()}/api/modules/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return requestVoid(`/api/modules/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function importModules(file: unknown): Promise<SettingModule[]> {

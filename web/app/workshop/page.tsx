@@ -30,7 +30,9 @@ export default function WorkshopPage() {
       }
     }
     void load();
-  }, [type, tick]); // q 通过按钮/回车触发（bump tick）
+    // q 故意不放入依赖：搜索由按钮/回车通过 tick 触发，type 变化立即重刷。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, tick]);
 
   function handleSearch() {
     setTick((n) => n + 1);
@@ -93,7 +95,7 @@ export default function WorkshopPage() {
           <button className="app-button" type="button" onClick={() => fileRef.current?.click()}>⬆ 导入工坊文件</button>
           <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImport} />
           <a className={`app-button ${selected.size ? "" : "pointer-events-none opacity-50"}`}
-            href={moduleExportUrl([...selected])}>⬇ 导出所选（{selected.size}）</a>
+            href={moduleExportUrl([...selected])} download="rpgforge-modules.json">⬇ 导出所选（{selected.size}）</a>
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
