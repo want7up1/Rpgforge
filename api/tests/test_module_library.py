@@ -1,4 +1,6 @@
-from app.services.module_library import merge_modules_into_settings
+import asyncio
+
+from app.services.module_library import merge_modules_into_settings, preview_module_merge, project_target_context
 
 
 def _base():
@@ -65,3 +67,41 @@ def test_act_rename_reids_anchors_and_passes_validate():
     assert len(acts) == 2
     anchor_ids = [a["id"] for act in acts for a in act["completion_anchors"]]
     assert len(anchor_ids) == len(set(anchor_ids))  # 全局唯一，validate 不报错
+
+
+class _IdentityAdapter:
+    async def adapt(self, payload, context):
+        return payload  # 不改
+
+
+class _RenameAdapter:
+    async def adapt(self, payload, context):
+        # 模拟本地优化：把角色名改成贴合目标
+        p = {k: v for k, v in payload.items()}
+        p["core_characters"] = [{**c, "name": "红伞客"} for c in payload["core_characters"]]
+        return p
+
+
+def test_project_target_context_extracts_canon_and_characters():
+    ctx = project_target_context(_base())
+    assert ctx["canon_terms"] == ["旧城"]
+    assert ctx["characters"] == [{"name": "主角", "role": "protagonist"}]
+
+
+def test_preview_no_adapt_merges_directly():
+    modules = [{"id": "m1", "name": "客", "module_type": "characters",
+                "payload": {"core_characters": [{"name": "红伞客", "role": "npc"}]}}]
+    out = asyncio.run(preview_module_merge(_base(), modules, adapt=False,
+                                           resolutions={}, adapter=_IdentityAdapter()))
+    assert [c["name"] for c in out["merged_settings"]["core_characters"]] == ["主角", "红伞客"]
+    assert out["adapted"] == []
+
+
+def test_preview_adapt_records_before_after():
+    modules = [{"id": "m1", "name": "破晓", "module_type": "characters",
+                "payload": {"core_characters": [{"name": "破晓", "role": "npc"}]}}]
+    out = asyncio.run(preview_module_merge(_base(), modules, adapt=True,
+                                           resolutions={}, adapter=_RenameAdapter()))
+    assert out["adapted"][0]["before"]["core_characters"][0]["name"] == "破晓"
+    assert out["adapted"][0]["after"]["core_characters"][0]["name"] == "红伞客"
+    assert [c["name"] for c in out["merged_settings"]["core_characters"]] == ["主角", "红伞客"]
