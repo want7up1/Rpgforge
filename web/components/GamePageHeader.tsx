@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 
 import { BackButton } from "@/components/BackButton";
 
-export type GameSection = "overview" | "play" | "memory" | "status" | "characters" | "history";
+export type GameSection = "overview" | "play" | "settings" | "memory" | "status" | "characters" | "history";
 
 type GamePageHeaderProps = {
   active: GameSection;
@@ -21,6 +21,7 @@ type GamePageHeaderProps = {
 const gameNavItems: { key: GameSection; label: string; href: (gameId: string) => string }[] = [
   { key: "overview", label: "概览", href: (gameId) => `/games/${gameId}` },
   { key: "play", label: "剧情", href: (gameId) => `/games/${gameId}/play` },
+  { key: "settings", label: "设定", href: (gameId) => `/games/${gameId}/settings` },
   { key: "memory", label: "资料", href: (gameId) => `/games/${gameId}/memory` },
   { key: "status", label: "状态", href: (gameId) => `/games/${gameId}/status` },
   { key: "characters", label: "角色", href: (gameId) => `/games/${gameId}/characters` },
