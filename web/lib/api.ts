@@ -29,7 +29,9 @@ import type {
   TurnJobCreateResponse,
   TurnJobStreamEvent,
   TurnJobRead,
-  TurnRead
+  TurnRead,
+  SettingModule,
+  ModuleMergePreview
 } from "@/lib/types";
 
 export function getApiBaseUrl(): string {
@@ -786,4 +788,45 @@ export async function triggerTurnEvaluation(
     `/api/admin/turns/${turnId}/evaluate`,
     { method: "POST", headers: adminHeaders(token) }
   );
+}
+
+// ---------- 炼金工坊：模块 API ----------
+
+export async function listModules(params: { type?: string; tag?: string; q?: string } = {}): Promise<SettingModule[]> {
+  const qs = new URLSearchParams();
+  if (params.type) qs.set("type", params.type);
+  if (params.tag) qs.set("tag", params.tag);
+  if (params.q) qs.set("q", params.q);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return requestJson<SettingModule[]>(`/api/modules${suffix}`);
+}
+
+export async function createModule(body: {
+  name: string; description?: string | null; module_type: string;
+  payload: Record<string, unknown>; tags?: string[]; source_game_id?: string | null;
+}): Promise<SettingModule> {
+  return requestJson<SettingModule>("/api/modules", { method: "POST", body: JSON.stringify(body) });
+}
+
+export async function patchModule(id: string, body: { name?: string; description?: string | null; tags?: string[] }): Promise<SettingModule> {
+  return requestJson<SettingModule>(`/api/modules/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export async function deleteModule(id: string): Promise<void> {
+  await fetch(`${getApiBaseUrl()}/api/modules/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function importModules(file: unknown): Promise<SettingModule[]> {
+  return requestJson<SettingModule[]>("/api/modules/import", { method: "POST", body: JSON.stringify(file) });
+}
+
+export async function mergePreviewModules(body: {
+  target_settings: Record<string, unknown>; module_ids: string[];
+  adapt: boolean; conflict_resolutions?: Record<string, string>;
+}): Promise<ModuleMergePreview> {
+  return requestJson<ModuleMergePreview>("/api/modules/merge-preview", { method: "POST", body: JSON.stringify(body) });
+}
+
+export function moduleExportUrl(ids: string[]): string {
+  return `${getApiBaseUrl()}/api/modules/export?ids=${encodeURIComponent(ids.join(","))}`;
 }
