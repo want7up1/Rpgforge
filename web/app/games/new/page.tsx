@@ -2,218 +2,250 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { JsonBlock } from "@/components/JsonBlock";
+import { ChatDock } from "@/components/generator/ChatDock";
+import { ChatHistorySheet } from "@/components/generator/ChatHistorySheet";
+import { GenerationProgress, type ProgressItem } from "@/components/generator/GenerationProgress";
+import { SettingsBoard } from "@/components/generator/SettingsBoard";
 import {
+  createGeneratedGame,
   createGeneratorChatJob,
   createGeneratorFinalizeJob,
-  createGeneratedGame,
-  createManualGame,
   getActiveGeneratorChatJob,
-  getActiveGeneratorFinalizeJob,
+  getActiveGeneratorFinalizeJob
 } from "@/lib/api";
 import {
-  buildGeneratedConfigBlueprint,
-  normalizeConfirmedRequirements,
-  type StoryBlueprintView
-} from "@/lib/gameExperience";
+  BOARD_CATEGORIES,
+  buildBoardModel,
+  deleteBlock,
+  diffBoard,
+  lockBlock,
+  unlockBlock,
+  writeBlockFields,
+  type BoardBlock,
+  type BoardDiff,
+  type BoardField,
+  type BoardModel
+} from "@/lib/generatorBoard";
 import {
   createInitialChatProcess,
   createInitialFinalizeProcess,
-  formatLastEvent,
   waitForChatJobWithStream,
-  waitForFinalizeJobWithStream,
-  type StreamProcessJob
+  waitForFinalizeJobWithStream
 } from "@/lib/generatorJobStream";
 import type {
-  ConfirmedRequirements,
   GeneratedGameConfig,
   GeneratorChatJobRead,
-  GeneratorChatResponse,
   GeneratorFinalizeJobRead,
-  GeneratorMessage,
+  GeneratorMessage
 } from "@/lib/types";
+
+// confirmed 阶段的 block id 恰为 confirmed_requirements 字段名，用于过滤出可发后端的 locked_fields。
+const CONFIRMED_FIELD_IDS = [
+  "story_background", "core_premise", "tone_preferences",
+  "playstyle_preferences", "must_include", "forbidden_content"
+];
+
+const EMPTY_DIFF: BoardDiff = {
+  changedCategories: Object.fromEntries(
+    BOARD_CATEGORIES.map((c) => [c.id, 0])
+  ) as BoardDiff["changedCategories"],
+  changedBlockIds: new Set<string>()
+};
 
 const sampleIdea =
   "黑暗武侠，故事发生在雁回镇义庄。主角是失忆镖师，必须出现雨夜义庄、红伞女人和失踪镖队。不要变成修仙飞升，也不要太快揭露主角身世。";
+
 export default function NewGamePage() {
   const router = useRouter();
-  const [idea, setIdea] = useState(sampleIdea);
-  const [manualTitle, setManualTitle] = useState("雁回镇旧案");
+  const [chatInput, setChatInput] = useState(sampleIdea);
   const [history, setHistory] = useState<GeneratorMessage[]>([]);
   const [confirmed, setConfirmed] = useState<Record<string, unknown>>({});
-  const [lastReply, setLastReply] = useState<GeneratorChatResponse | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
   const [generatedConfig, setGeneratedConfig] = useState<GeneratedGameConfig | null>(null);
+  const [lockedIds, setLockedIds] = useState<string[]>([]);
+  const [lastDiff, setLastDiff] = useState<BoardDiff>(EMPTY_DIFF);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [chatProgress, setChatProgress] = useState<string | null>(null);
-  const [finalizeProgress, setFinalizeProgress] = useState<string | null>(null);
   const [chatProcess, setChatProcess] = useState<GeneratorChatJobRead | null>(null);
   const [finalizeProcess, setFinalizeProcess] = useState<GeneratorFinalizeJobRead | null>(null);
 
+  // 解锁时恢复 AI 原值用：最近一次 AI 产出的快照。
+  const aiConfirmedRef = useRef<Record<string, unknown>>({});
+  const aiSettingsRef = useRef<Record<string, unknown>>({});
+  // 每轮开始前的看板基线，用于 diff。
+  const baselineRef = useRef<BoardModel | null>(null);
+
+  const model: BoardModel = useMemo(() => {
+    if (generatedConfig) {
+      return buildBoardModel({ source: "settings", settings: generatedConfig.story_settings });
+    }
+    return buildBoardModel({ source: "confirmed", confirmed });
+  }, [generatedConfig, confirmed]);
+
+  function currentModel(): BoardModel {
+    if (generatedConfig) {
+      return buildBoardModel({ source: "settings", settings: generatedConfig.story_settings });
+    }
+    return buildBoardModel({ source: "confirmed", confirmed });
+  }
+
+  // 恢复进行中任务（沿用原逻辑，简化为只接管结果）。
   useEffect(() => {
     let cancelled = false;
-
-    async function restoreActiveJobs() {
+    async function restore() {
       try {
-        const [activeFinalizeJob, activeChatJob] = await Promise.all([
+        const [fin, chat] = await Promise.all([
           getActiveGeneratorFinalizeJob(),
           getActiveGeneratorChatJob()
         ]);
-        if (cancelled) {
-          return;
-        }
-
-        if (activeFinalizeJob) {
-          setError(null);
+        if (cancelled) return;
+        if (fin) {
           setPendingAction("finalize");
-          setFinalizeProcess(activeFinalizeJob);
-          setFinalizeProgress(
-            activeFinalizeJob.progress_message || "检测到未完成冒险世界生成，正在恢复实时连接..."
-          );
-          const completedJob = await waitForFinalizeJobWithStream(
-            activeFinalizeJob.id,
-            setFinalizeProgress,
-            setFinalizeProcess,
-            activeFinalizeJob
-          );
-          if (cancelled) {
-            return;
-          }
-          if (!completedJob.config) {
-            throw new Error("恢复的生成任务已完成，但没有返回冒险世界。");
-          }
-          setGeneratedConfig(completedJob.config);
-          setFinalizeProgress(completedJob.progress_message || "冒险世界生成完成。");
+          setFinalizeProcess(fin);
+          const done = await waitForFinalizeJobWithStream(fin.id, () => {}, setFinalizeProcess, fin);
+          if (cancelled || !done.config) return;
+          aiSettingsRef.current = done.config.story_settings;
+          setGeneratedConfig(done.config);
           setPendingAction(null);
           return;
         }
-
-        if (activeChatJob) {
-          setError(null);
+        if (chat) {
           setPendingAction("chat");
-          setChatProcess(activeChatJob);
-          setChatProgress(
-            activeChatJob.progress_message || "检测到未完成设定确认，正在恢复实时连接..."
-          );
-          const completedJob = await waitForChatJobWithStream(
-            activeChatJob.id,
-            setChatProgress,
-            setChatProcess,
-            activeChatJob
-          );
-          if (cancelled) {
-            return;
-          }
-          if (!completedJob.response) {
-            throw new Error("恢复的设定确认任务已完成，但没有返回内容。");
-          }
-          setLastReply(completedJob.response);
-          setConfirmed(completedJob.response.confirmed_requirements);
-          setChatProgress(`设定已确认，模型：${completedJob.response.model_used}`);
+          setChatProcess(chat);
+          const done = await waitForChatJobWithStream(chat.id, () => {}, setChatProcess, chat);
+          if (cancelled || !done.response) return;
+          aiConfirmedRef.current = done.response.confirmed_requirements;
+          setConfirmed(done.response.confirmed_requirements);
+          setStage(done.response.stage);
           setPendingAction(null);
         }
       } catch (caught) {
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         setError(caught instanceof Error ? caught.message : "恢复生成任务失败。");
         setPendingAction(null);
       }
     }
-
-    void restoreActiveJobs();
-
+    void restore();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  async function handleChat(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!idea.trim()) {
-      return;
-    }
-
+  async function handleChat() {
+    if (!chatInput.trim()) return;
     setError(null);
-    setChatProgress("已开始确认设定，等待 DeepSeek Pro 返回...");
-    setFinalizeProgress(null);
-    setChatProcess(null);
-    setGeneratedConfig(null);
+    baselineRef.current = currentModel();
     setPendingAction("chat");
+    const lockedConfirmed = lockedIds.filter((id) => CONFIRMED_FIELD_IDS.includes(id));
     try {
       const job = await createGeneratorChatJob({
-        user_input: idea,
+        user_input: chatInput,
         history,
-        confirmed_requirements: confirmed
+        confirmed_requirements: confirmed,
+        locked_fields: lockedConfirmed
       });
       setChatProcess(createInitialChatProcess(job.id, job.status));
-      const completedJob = await waitForChatJobWithStream(
-        job.id,
-        setChatProgress,
-        setChatProcess
-      );
-      if (!completedJob.response) {
-        throw new Error("设定确认任务已完成，但没有返回内容。");
-      }
-      const response = completedJob.response;
-      setLastReply(response);
-      setConfirmed(response.confirmed_requirements);
-      setHistory((current) => [
-        ...current,
-        { role: "user", content: idea },
-        { role: "assistant", content: response.assistant_reply }
+      const done = await waitForChatJobWithStream(job.id, () => {}, setChatProcess);
+      if (!done.response) throw new Error("设定确认任务已完成，但没有返回内容。");
+      const aiConfirmed = done.response.confirmed_requirements;
+      const assistantReply = done.response.assistant_reply;
+      aiConfirmedRef.current = aiConfirmed;
+      // 客户端兜底强制锁定：把用户锁定字段的旧值覆盖回 AI 结果，防被改回。
+      const merged = { ...aiConfirmed };
+      for (const id of lockedConfirmed) merged[id] = confirmed[id];
+      setConfirmed(merged);
+      setStage(done.response.stage);
+      setHistory((cur) => [
+        ...cur,
+        { role: "user", content: chatInput },
+        { role: "assistant", content: assistantReply }
       ]);
-      setChatProgress(`设定已确认，模型：${response.model_used}`);
+      setChatInput("");
+      const next = buildBoardModel({ source: "confirmed", confirmed: merged });
+      setLastDiff(diffBoard(baselineRef.current, next));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "冒险设定确认失败。");
-      setChatProgress("设定确认失败，已保留收到的过程信息。");
     } finally {
       setPendingAction(null);
     }
   }
 
   async function handleFinalize() {
-    if (!idea.trim()) {
-      return;
-    }
-
     setError(null);
-    setFinalizeProgress("已开始生成冒险世界，等待 DeepSeek Pro 返回...");
-    setFinalizeProcess(null);
+    baselineRef.current = currentModel();
     setPendingAction("finalize");
     try {
       const job = await createGeneratorFinalizeJob({
-        concept: idea,
+        concept: confirmed.story_background ? String(confirmed.story_background) : sampleIdea,
         history,
         confirmed_requirements: confirmed
       });
       setFinalizeProcess(createInitialFinalizeProcess(job.id, job.status));
-      const completedJob = await waitForFinalizeJobWithStream(
-        job.id,
-        setFinalizeProgress,
-        setFinalizeProcess
-      );
-      if (!completedJob.config) {
-        throw new Error("生成任务已完成，但没有返回冒险世界。");
-      }
-      setGeneratedConfig(completedJob.config);
-      setFinalizeProgress(`生成完成，模型：${completedJob.model_used ?? "unknown"}`);
+      const done = await waitForFinalizeJobWithStream(job.id, () => {}, setFinalizeProcess);
+      if (!done.config) throw new Error("生成任务已完成，但没有返回冒险世界。");
+      aiSettingsRef.current = done.config.story_settings;
+      setLockedIds([]); // 进入 settings 阶段，confirmed 阶段的锁定 id 不再适用
+      setGeneratedConfig(done.config);
+      const next = buildBoardModel({ source: "settings", settings: done.config.story_settings });
+      setLastDiff(diffBoard(baselineRef.current, next));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "冒险世界生成失败。");
-      setFinalizeProgress("冒险世界生成失败，已保留收到的过程信息。");
     } finally {
       setPendingAction(null);
     }
   }
 
-  async function handleCreateGenerated() {
-    if (!generatedConfig) {
-      return;
+  function handleEditBlock(block: BoardBlock, fields: BoardField[]) {
+    if (generatedConfig) {
+      const settings = writeBlockFields(generatedConfig.story_settings, block.address, fields);
+      setGeneratedConfig({ ...generatedConfig, story_settings: settings });
+    } else {
+      setConfirmed((cur) => writeBlockFields(cur, block.address, fields));
     }
+    setLockedIds((ids) => lockBlock(ids, block.id));
+  }
 
+  function handleDeleteBlock(block: BoardBlock) {
+    if (generatedConfig) {
+      const settings = deleteBlock(generatedConfig.story_settings, block.address);
+      setGeneratedConfig({ ...generatedConfig, story_settings: settings });
+    } else {
+      setConfirmed((cur) => deleteBlock(cur, block.address));
+    }
+    setLockedIds((ids) => unlockBlock(ids, block.id));
+  }
+
+  function handleUnlockBlock(block: BoardBlock) {
+    // 恢复 AI 原值：从最近 AI 快照里按 address 取该 block 的字段值写回。
+    const aiSource = generatedConfig ? aiSettingsRef.current : aiConfirmedRef.current;
+    const aiModel = buildBoardModel(
+      generatedConfig
+        ? { source: "settings", settings: aiSource }
+        : { source: "confirmed", confirmed: aiSource }
+    );
+    const aiBlock = aiModel.categories.flatMap((c) => c.blocks).find((b) => b.id === block.id);
+    if (aiBlock) {
+      handleEditBlockRaw(block, aiBlock.fields);
+    }
+    setLockedIds((ids) => unlockBlock(ids, block.id));
+  }
+
+  // 与 handleEditBlock 相同的写回，但不加锁（供解锁恢复用）。
+  function handleEditBlockRaw(block: BoardBlock, fields: BoardField[]) {
+    if (generatedConfig) {
+      const settings = writeBlockFields(generatedConfig.story_settings, block.address, fields);
+      setGeneratedConfig({ ...generatedConfig, story_settings: settings });
+    } else {
+      setConfirmed((cur) => writeBlockFields(cur, block.address, fields));
+    }
+  }
+
+  async function handleCreateGenerated() {
+    if (!generatedConfig) return;
     setError(null);
     setPendingAction("create-generated");
     try {
@@ -226,412 +258,87 @@ export default function NewGamePage() {
     }
   }
 
-  async function handleManualCreate() {
-    if (!manualTitle.trim()) {
-      return;
-    }
-
-    setError(null);
-    setPendingAction("create-manual");
-    try {
-      const game = await createManualGame({
-        title: manualTitle,
-        genre: "草稿",
-        description: idea
-      });
-      router.push(`/games/${game.id}`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "创建草稿失败。");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  const canFinalize = lastReply?.stage === "ready_to_generate";
-  const confirmedBrief = normalizeConfirmedRequirements(confirmed, idea);
-  const generatedBlueprint = generatedConfig ? buildGeneratedConfigBlueprint(generatedConfig) : null;
+  const canFinalize = stage === "ready_to_generate" && !generatedConfig;
+  const progressItems: ProgressItem[] = BOARD_CATEGORIES.filter((c) => c.id !== "advanced").map(
+    (c) => ({
+      id: c.id,
+      label: c.label,
+      status: generatedConfig ? "done" : pendingAction === "finalize" ? "running" : "pending"
+    })
+  );
+  const reasoning = (generatedConfig ? finalizeProcess : chatProcess)?.reasoning_content ?? "";
+  const content = (generatedConfig ? finalizeProcess : chatProcess)?.content_buffer ?? "";
 
   return (
     <AppShell>
       <section className="game-page-hero">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <Link className="app-button mb-4 w-fit" href="/games">
-              返回存档
-            </Link>
+            <Link className="app-button mb-4 w-fit" href="/games">返回存档</Link>
             <p className="game-page-eyebrow">Adventure Forge</p>
             <h1 className="game-page-title">创建冒险</h1>
-            <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--muted)]">
-              写一段故事背景、核心设定、禁止点和必须出现的内容；AI 会抽取创作简报，再补全剧本设定、角色、状态和剧情导演。
-            </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3 lg:min-w-96">
-            <StatusStep active={pendingAction === "chat"} complete={history.length > 0} label="确认设定" />
-            <StatusStep active={pendingAction === "finalize"} complete={Boolean(generatedConfig)} label="生成世界" />
-            <StatusStep active={pendingAction === "create-generated"} complete={false} label="开始冒险" />
-          </div>
-        </div>
-      </section>
-
-      {error ? (
-        <section className="app-alert">{error}</section>
-      ) : null}
-
-      <div className="generator-shell">
-        <section className="generator-console">
-          <form className="flex flex-col gap-4" onSubmit={handleChat}>
-            <label className="grid gap-2">
-              <span className="surface-title">冒险想法</span>
-              <textarea
-                className="app-input min-h-40 resize-y leading-6"
-                onChange={(event) => setIdea(event.target.value)}
-                value={idea}
-              />
-              <span className="surface-subtle">
-                可以自由描述：故事背景、核心设定、必须看到的桥段或人物、绝对不要出现的方向，以及偏调查/战斗/社交等玩法偏好。
-              </span>
-            </label>
-            <div className="grid gap-2 sm:flex sm:flex-wrap">
+          <div className="flex gap-2">
+            {canFinalize ? (
               <button
                 className="app-button app-button-primary"
                 disabled={pendingAction !== null}
-                type="submit"
-              >
-                {pendingAction === "chat" ? "确认中..." : "确认冒险设定"}
-              </button>
-              <button
-                className="app-button"
-                disabled={pendingAction !== null || !canFinalize}
                 onClick={handleFinalize}
                 type="button"
               >
                 {pendingAction === "finalize" ? "生成世界中..." : "生成冒险世界"}
               </button>
-            </div>
-            {!canFinalize ? (
-              <p className="surface-subtle">
-                冒险设定确认后，才能生成完整冒险世界。
-              </p>
             ) : null}
-          </form>
-
-          <div className="mt-5 border-t border-[color:var(--border)] pt-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="surface-title">设定确认记录</h2>
-              <span className="app-pill">{history.length} 条消息</span>
-            </div>
-            {chatProgress ? (
-              <div className="app-status mt-3">
-                {chatProgress}
-              </div>
-            ) : null}
-            <StreamProcessPanel
-              contentLabel="回复内容"
-              job={chatProcess}
-              title="设定确认过程"
-            />
-            <div className="mt-3 grid gap-3">
-              {history.length === 0 ? (
-                <p className="surface-panel surface-subtle">
-                  暂无记录。输入冒险想法后，系统会先抽取故事背景、核心设定、必须出现内容和禁止点。
-                </p>
-              ) : (
-                history.map((message, index) => (
-                  <div
-                    className={
-                      message.role === "user"
-                        ? "archive-card archive-card-green text-sm leading-6"
-                        : "archive-card archive-card-accent text-sm leading-6"
-                    }
-                    key={`${message.role}-${index}`}
-                  >
-                    <span className="font-semibold">
-                      {message.role === "user" ? "你" : "冒险引导"}
-                    </span>
-                    <p className="mt-1 text-[color:var(--muted)]">{message.content}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </section>
-
-        <aside className="surface-grid">
-          <section className="surface-panel surface-panel-strong">
-            <h2 className="surface-title">生成流程</h2>
-            <div className="generator-timeline mt-4">
-              <div className="generator-step">
-                <div>
-                  <strong className="block text-[color:var(--foreground)]">确认冒险方向</strong>
-                  <span>确认关键设定，避免后续剧本设定偏离最初想法。</span>
-                </div>
-              </div>
-              <div className="generator-step">
-                <div>
-                  <strong className="block text-[color:var(--foreground)]">生成冒险世界</strong>
-                  <span>导演层会拆分任务，生成剧本设定、角色、状态和剧情初始条件。</span>
-                </div>
-              </div>
-              <div className="generator-step">
-                <div>
-                  <strong className="block text-[color:var(--foreground)]">开始冒险</strong>
-                  <span>确认结果后写入存档，进入概览或直接开始第一回合。</span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <details className="surface-panel" open={Boolean(lastReply)}>
-            <summary className="cursor-pointer surface-title">已确认设定</summary>
-            <BriefSummary className="mt-3" brief={confirmedBrief} />
-            {lastReply ? (
-              <div className="archive-card mt-4 text-sm leading-6">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-semibold">阶段</span>
-                  <span className="app-pill">
-                    {lastReply.stage}
-                  </span>
-                  <span className="text-xs text-[color:var(--muted)]">{lastReply.model_used}</span>
-                </div>
-                <p className="mt-3 text-[color:var(--muted)]">{lastReply.assistant_reply}</p>
-              </div>
-            ) : null}
-          </details>
-
-          <details
-            className="surface-panel"
-            open={Boolean(finalizeProcess || finalizeProgress || generatedConfig)}
-          >
-            <summary className="cursor-pointer surface-title">生成结果</summary>
-            {finalizeProgress ? (
-              <div className="app-status mt-3">
-                {finalizeProgress}
-              </div>
-            ) : null}
-            <StreamProcessPanel
-              contentLabel="生成内容"
-              job={finalizeProcess}
-              title="冒险世界生成过程"
-            />
             {generatedConfig ? (
-              <div className="mt-3 grid gap-4">
-                <div className="archive-card grid gap-2 text-sm">
-                  <div>
-                    <span className="font-semibold">{generatedConfig.title}</span>
-                    <span className="ml-2 text-[color:var(--muted)]">
-                      {generatedConfig.genre || "未分类"}
-                    </span>
-                  </div>
-                  <p className="text-[color:var(--muted)]">
-                    story_settings v2 已生成
-                  </p>
-                </div>
-                {generatedBlueprint ? (
-                  <BlueprintPreview blueprint={generatedBlueprint} />
-                ) : null}
-                <details className="archive-card">
-                  <summary className="cursor-pointer font-semibold">高级：完整 JSON</summary>
-                  <div className="mt-3">
-                    <JsonBlock data={generatedConfig} />
-                  </div>
-                </details>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="app-button app-button-primary"
-                    disabled={pendingAction !== null}
-                    onClick={handleCreateGenerated}
-                    type="button"
-                  >
-                    {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
-                  </button>
-                  {/* C5 重 roll：不满意当前世界，复用同一份采访结果重新生成一份。 */}
-                  <button
-                    className="app-button"
-                    disabled={pendingAction !== null}
-                    onClick={handleFinalize}
-                    title="复用已确认的设定，重新生成一个冒险世界"
-                    type="button"
-                  >
-                    {pendingAction === "finalize" ? "重新生成中..." : "重新生成"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="surface-subtle mt-3">
-                确认设定后生成冒险世界，确认后写入存档。
-              </p>
-            )}
-          </details>
+              <>
+                <button
+                  className="app-button app-button-primary"
+                  disabled={pendingAction !== null}
+                  onClick={handleCreateGenerated}
+                  type="button"
+                >
+                  {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
+                </button>
+                <button
+                  className="app-button"
+                  disabled={pendingAction !== null}
+                  onClick={handleFinalize}
+                  title="复用已确认设定重新生成一个世界"
+                  type="button"
+                >
+                  重新生成
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
-          <details className="surface-panel">
-            <summary className="cursor-pointer surface-title">高级：创建草稿冒险</summary>
-            <p className="surface-subtle mt-2">
-              这个入口只创建结构化草稿，不伪造 AI 输出。用于验证存档和页面流程。
-            </p>
-            <div className="mt-4 flex flex-col gap-3">
-              <input
-                className="app-input"
-                onChange={(event) => setManualTitle(event.target.value)}
-                value={manualTitle}
-              />
-              <button
-                className="app-button"
-                disabled={pendingAction !== null}
-                onClick={handleManualCreate}
-                type="button"
-              >
-                {pendingAction === "create-manual" ? "创建中..." : "创建草稿冒险"}
-              </button>
-            </div>
-          </details>
-        </aside>
-      </div>
+      {error ? <section className="app-alert">{error}</section> : null}
+
+      {pendingAction === "finalize" || (generatedConfig && content) ? (
+        <GenerationProgress items={progressItems} reasoning={reasoning} content={content} />
+      ) : null}
+
+      <SettingsBoard
+        model={model}
+        diff={lastDiff}
+        lockedIds={lockedIds}
+        loading={pendingAction === "chat" || pendingAction === "finalize"}
+        onEditBlock={handleEditBlock}
+        onDeleteBlock={handleDeleteBlock}
+        onUnlockBlock={handleUnlockBlock}
+      />
+
+      <ChatDock
+        latestReply={history.length ? history[history.length - 1].content : ""}
+        input={chatInput}
+        disabled={pendingAction !== null}
+        onInput={setChatInput}
+        onSend={handleChat}
+        onToggleHistory={() => setHistoryOpen((v) => !v)}
+      />
+      <ChatHistorySheet open={historyOpen} history={history} onClose={() => setHistoryOpen(false)} />
     </AppShell>
-  );
-}
-
-function BriefSummary({
-  brief,
-  className = ""
-}: {
-  brief: ConfirmedRequirements;
-  className?: string;
-}) {
-  return (
-    <div className={`grid gap-3 ${className}`}>
-      <SummaryCard label="故事背景" values={[brief.story_background]} />
-      <SummaryCard label="核心设定" values={[brief.core_premise]} />
-      <div className="grid gap-3 lg:grid-cols-2">
-        <SummaryCard label="必须出现" values={brief.must_include} />
-        <SummaryCard label="禁止点" values={brief.forbidden_content} />
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <SummaryCard label="玩法偏好" values={brief.playstyle_preferences} />
-        <SummaryCard label="风格偏好" values={brief.tone_preferences} />
-      </div>
-    </div>
-  );
-}
-
-function BlueprintPreview({ blueprint }: { blueprint: StoryBlueprintView }) {
-  return (
-    <section className="archive-card grid gap-3 text-sm">
-      <div>
-        <h3 className="font-semibold">生成摘要</h3>
-        <p className="mt-2 leading-6 text-[color:var(--muted)]">
-          {blueprint.description || "暂无简介。"}
-        </p>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <SummaryCard label="核心悬念" values={[blueprint.centralQuestion]} />
-        <SummaryCard label="开局舞台" values={[blueprint.openingStage]} />
-        <SummaryCard label="当前幕" values={[blueprint.currentAct]} />
-        <SummaryCard label="当前幕目标" values={[blueprint.currentActGoal]} />
-        <SummaryCard label="必须保留" values={blueprint.mustPreserve} />
-        <SummaryCard label="禁止变成" values={blueprint.mustNotBecome} />
-      </div>
-    </section>
-  );
-}
-
-function SummaryCard({ label, values }: { label: string; values: string[] }) {
-  const cleanValues = values.map((value) => value.trim()).filter(Boolean);
-  return (
-    <article className="rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3">
-      <h3 className="text-sm font-semibold">{label}</h3>
-      {cleanValues.length === 0 ? (
-        <p className="mt-2 text-sm text-[color:var(--muted)]">未明确，生成时由 AI 补全。</p>
-      ) : (
-        <ul className="mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
-          {cleanValues.map((value) => (
-            <li key={value}>{value}</li>
-          ))}
-        </ul>
-      )}
-    </article>
-  );
-}
-
-function StatusStep({
-  active,
-  complete,
-  label
-}: {
-  active: boolean;
-  complete: boolean;
-  label: string;
-}) {
-  return (
-    <div
-      className={
-        active || complete
-          ? "metric-tile border-[color:var(--accent-strong)]"
-          : "metric-tile"
-      }
-    >
-      <p className="metric-tile-label">{label}</p>
-      <p className="mt-1 text-sm font-semibold">
-        {complete ? "完成" : active ? "运行中" : "待开始"}
-      </p>
-    </div>
-  );
-}
-
-function StreamProcessPanel({
-  title,
-  job,
-  contentLabel
-}: {
-  title: string;
-  job: StreamProcessJob | null;
-  contentLabel: string;
-}) {
-  if (!job) {
-    return null;
-  }
-
-  const reasoning = job.reasoning_content || "";
-  const content = job.content_buffer || "";
-  const isRunning = job.status === "running";
-
-  return (
-    <div className="mt-3 grid gap-3 rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold">{title}</span>
-        <span className="rounded bg-[#edf2eb] px-2 py-1 text-xs font-medium text-[color:var(--accent-strong)]">
-          {job.status}
-        </span>
-        {job.model_used ? (
-          <span className="text-xs text-[color:var(--muted)]">{job.model_used}</span>
-        ) : null}
-      </div>
-      <div className="grid gap-1 text-xs leading-5 text-[color:var(--muted)]">
-        <span>{job.progress_message || "等待 DeepSeek 返回流式事件。"}</span>
-        <span>
-          最近更新：{formatLastEvent(job.last_event_at)} · 思考 {reasoning.length} 字 · 内容{" "}
-          {content.length} 字
-        </span>
-        <span className="break-all">任务 ID：{job.id}</span>
-      </div>
-      <details className="rounded border border-[color:var(--border)]" open={isRunning}>
-        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-          思考过程
-        </summary>
-        <pre className="app-wrap-text max-h-64 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
-          {reasoning || "尚未收到思考过程。"}
-        </pre>
-      </details>
-      <details
-        className="rounded border border-[color:var(--border)]"
-        open={isRunning && content.length > 0}
-      >
-        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-          {contentLabel}
-        </summary>
-        <pre className="app-wrap-text max-h-72 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
-          {content || "尚未收到正文内容。"}
-        </pre>
-      </details>
-    </div>
   );
 }
