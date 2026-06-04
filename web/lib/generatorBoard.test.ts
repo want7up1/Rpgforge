@@ -286,3 +286,32 @@ describe("全字段覆盖（数据派生）", () => {
     expect(blockById("generation_parameters")!.fields.find((x) => x.key === "target_min")?.type).toBe("number");
   });
 });
+
+describe("writeBlockFields 各类型无损往返", () => {
+  it("number 写回，同级键不丢", () => {
+    const src = { generation_parameters: { target_min: 1200, x: "keep" } };
+    const out = writeBlockFields(src, { kind: "settingsScalar", path: ["generation_parameters"] }, [
+      { key: "target_min", label: "x", value: 1600, type: "number" }
+    ]);
+    expect(out).toEqual({ generation_parameters: { target_min: 1600, x: "keep" } });
+  });
+  it("objectList 写回 act completion_anchors，其余字段保留", () => {
+    const src = { act_plan: [{ id: "act_1", title: "序", objective: "查案" }] };
+    const anchors = [{ id: "act_1_a1", title: "入庄", required: true }];
+    const out = writeBlockFields(
+      src,
+      { kind: "settingsItem", arrayKey: "act_plan", idKey: "id", idValue: "act_1" },
+      [{ key: "completion_anchors", label: "锚点", value: anchors, type: "objectList", itemFields: [] }]
+    ) as { act_plan: Record<string, unknown>[] };
+    expect(out.act_plan[0].completion_anchors).toEqual(anchors);
+    expect(out.act_plan[0].objective).toBe("查案");
+  });
+  it("keyValue 写回 home_base 对象", () => {
+    const src = { home_base: { name: "旧" } };
+    const out = writeBlockFields(src, { kind: "settingsScalar", path: ["home_base"] }, [
+      { key: "name", label: "名称", value: "镖局", type: "text" },
+      { key: "services", label: "服务", value: ["休整"], type: "stringList" }
+    ]);
+    expect(out).toEqual({ home_base: { name: "镖局", services: ["休整"] } });
+  });
+});
