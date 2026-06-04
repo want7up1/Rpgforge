@@ -153,7 +153,7 @@ def export_game_settings_guide(game_id: UUID, db: Session = DB_DEPENDENCY) -> Re
     game = _get_game_for_settings_transfer(db, game_id)
     filename = settings_guide_export_filename(game.title)
     return Response(
-        content=export_settings_guide_markdown(game),
+        content=export_settings_guide_markdown(),
         media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",

@@ -27,6 +27,16 @@
 
 ## 1. 已完成
 
+### Round 40 (2026-06-04) — 「下载填写说明」改为通用模板（去剧本痕迹 + 去游戏依赖）
+
+`api/app/services/settings_guide_exporter.py`。此前导出文档结构已通用，但仍有两类"非通用"：① 字段表「示例」列硬编码了一套具体剧本（雁回镇/沈砚/义庄/黑伞会/不要修仙）；② 头部含 `game.title`/`game.id`/导出时间，「当前 JSON 结构概览」按当前游戏输出条目计数。本轮改成纯通用模板：
+
+- `export_settings_guide_markdown(game)` → 无参 `export_settings_guide_markdown()`，不再读 `game.config`；标题固定 `# RPGForge 设定填写说明`；头部删导出时间/游戏 ID，`format_version` 改用常量 `STORY_SETTINGS_FORMAT_VERSION`；删除 `_append_current_summary`/`_summary_line`/`_text`。
+- 字段表「示例」列：剧本专名 → `[占位符]`（如 `[游戏标题]`/`[角色名]`/`[地点名]`），保留结构性枚举值（`act_1`/`true`/`protagonist`/数字/系统四选项契约等通用值）。
+- **接口不变**：`/api/games/{id}/settings-guide-export` 路由与文件名（仍带 `game.title`）保持原样；router 改调无参函数。
+- 同步护栏测试 `test_settings_guide_documents_every_normalized_field`（去 game 依赖、改无参调用，字段路径列未动→护栏仍有效）。
+- 验证：本地 `py_compile` + `ruff check` 干净；本地复现护栏断言 `missing=[]`；本地渲染确认 雁回镇/沈砚/义庄/修仙 痕迹全部清除。**容器内 pytest 待跑**（本地无 Postgres）。
+
 ### 修复 (2026-06-04, PR #6) — 看板「玩法机制」分类内容串台
 
 真实精修剧本暴露的 React 渲染 bug：设定页反复切到「玩法机制」时卡片内容串台。根因——看板 block 的 React `key` 用 `${arrayKey}:${name|title}`，而 `core_mechanics`/`action_style_rules`/`story_material_library` 的 name/title **没有唯一性校验**（不像 core_characters.name / act_plan.id 有 validate 唯一）；「玩法机制」合并 `core_mechanics ∪ action_style_rules` 两数组，精修剧本里常有同名条目 → block.id 重复 → React key 撞 → DOM 复用错位、内容串台。修复：`buildBoardModel` 末尾对每分类内 block.id 去重（撞了追加 `#2/#3`，唯一 id 不变、不影响生成页 diff），加 vitest 覆盖。教训：多 Agent 并行开发时，纯函数测试只用了唯一名占位数据，没覆盖"同名条目"边界，真实剧本才触发。

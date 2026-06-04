@@ -302,7 +302,7 @@ def test_settings_guide_export_is_markdown_and_does_not_change_json_export(db_se
     assert "guide" not in exported_json
 
 
-def test_settings_guide_documents_every_normalized_field(db_session) -> None:
+def test_settings_guide_documents_every_normalized_field() -> None:
     """护栏：story_settings 规范化产出的每个字段都必须在填写说明文档里有记录。
 
     防止 schema 加字段后 settings_guide_exporter 的硬编码字段表漏同步。
@@ -340,8 +340,7 @@ def test_settings_guide_documents_every_normalized_field(db_session) -> None:
 
     collect_keys(sample)
 
-    game = create_game_from_config(db_session, build_generated_config())
-    markdown = export_settings_guide_markdown(game)
+    markdown = export_settings_guide_markdown()
 
     missing = sorted(
         name
