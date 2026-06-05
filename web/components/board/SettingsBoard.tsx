@@ -5,6 +5,7 @@ import { useState } from "react";
 import { BoardTabs } from "@/components/board/BoardTabs";
 import { BoardBlockGrid } from "@/components/board/BoardBlockGrid";
 import { BlockDetailModal } from "@/components/board/BlockDetailModal";
+import { PlotMasterDetail } from "@/components/board/PlotMasterDetail";
 import { ChangeSummaryBar } from "@/components/board/ChangeSummaryBar";
 import { ARRAY_SPECS, EMPTY_DIFF, newItemBlock } from "@/lib/generatorBoard";
 import type {
@@ -52,20 +53,34 @@ export function SettingsBoard({
         changedCategories={diff.changedCategories}
         onSelect={setActiveTab}
       />
-      <label className="mt-3 flex w-fit items-center gap-2 text-xs text-[color:var(--muted)]">
-        <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} />
-        显示空设定项
-      </label>
-      <BoardBlockGrid
-        category={activeTab}
-        blocks={current.blocks}
-        changedBlockIds={diff.changedBlockIds}
-        lockedIds={lockedIds}
-        loading={loading}
-        showEmpty={showEmpty}
-        onOpen={setOpenBlock}
-        onAdd={onAddItem ? (arrayKey) => setAddingArray(arrayKey) : undefined}
-      />
+      {activeTab !== "plot" ? (
+        <label className="mt-3 flex w-fit items-center gap-2 text-xs text-[color:var(--muted)]">
+          <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} />
+          显示空设定项
+        </label>
+      ) : null}
+      {activeTab === "plot" ? (
+        <PlotMasterDetail
+          model={model}
+          lockedIds={lockedIds}
+          changedBlockIds={diff.changedBlockIds}
+          onEditBlock={onEditBlock}
+          onDeleteBlock={onDeleteBlock}
+          onAddItem={onAddItem}
+          onUnlockBlock={onUnlockBlock}
+        />
+      ) : (
+        <BoardBlockGrid
+          category={activeTab}
+          blocks={current.blocks}
+          changedBlockIds={diff.changedBlockIds}
+          lockedIds={lockedIds}
+          loading={loading}
+          showEmpty={showEmpty}
+          onOpen={setOpenBlock}
+          onAdd={onAddItem ? (arrayKey) => setAddingArray(arrayKey) : undefined}
+        />
+      )}
       {openBlock ? (
         <BlockDetailModal
           block={openBlock}
