@@ -96,6 +96,26 @@ a {
   text-decoration: none;
 }
 
+/* 键盘焦点环：全站按钮/链接/可点元素 + 原生勾选框（鼠标点击不触发 :focus-visible，不影响视觉） */
+:where(button, a, summary, [role="button"]):focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* 前庭敏感用户：关闭/弱化动效（pulse、hover 位移、过渡等） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 .bg-white,
 .bg-\[\#edf2eb\],
 .bg-\[\#f2f5ef\],

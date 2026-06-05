@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { BoardFieldEditor } from "@/components/board/BoardFieldEditor";
 import type { BoardBlock, BoardField, BoardFieldValue } from "@/lib/generatorBoard";
@@ -29,6 +29,43 @@ export function BlockDetailModal({
   );
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // 无障碍：Esc 关闭 + 打开聚焦关闭按钮 + 关闭恢复原焦点（与 CharacterModal 同模式）
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [onClose]);
+
+  // Tab 焦点陷阱：循环停留在弹窗内
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Tab") return;
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusable || focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   function handleSave() {
     onSave(block.fields.map((f) => ({ ...f, value: drafts[f.key] ?? f.value })));
@@ -61,17 +98,24 @@ export function BlockDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div
+      aria-modal="true"
+      role="dialog"
+      aria-label={block.title}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    >
+      <button aria-label="关闭" className="absolute inset-0 cursor-default" type="button" onClick={onClose} />
       <div
-        className="surface-panel surface-panel-strong max-h-[85vh] w-full max-w-2xl overflow-auto"
-        onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        onKeyDown={handleDialogKeyDown}
+        className="surface-panel surface-panel-strong relative max-h-[85vh] w-full max-w-2xl overflow-auto"
       >
         <div className="flex items-center justify-between gap-2">
           <h3 className="surface-title">
             {block.icon} {block.title}
             {locked ? <span className="app-pill ml-2">✏ 已手动修改</span> : null}
           </h3>
-          <button className="app-button" type="button" onClick={onClose}>关闭</button>
+          <button ref={closeButtonRef} className="app-button" type="button" onClick={onClose}>关闭</button>
         </div>
 
         <div className="mt-4 grid gap-4">

@@ -27,6 +27,18 @@
 
 ## 1. 已完成
 
+### Round 43 (2026-06-05) — 前端 UI 审查 + P0 可访问性修复
+
+承用户「这两天改了很多前端」做的一轮 UI/UX 审查（用 ui-ux-pro-max 技能，按 web 规则）。结论：工程底子很好（语义化 token 体系、响应式断点系统、移动端适配、文字 break 兜底齐全），问题集中在**可访问性**与最近新增看板组件的细节。本轮只落地用户选定的 **P0（影响最广、风险最低，纯前端）**：
+
+- **全站按钮键盘焦点环**：`web/app/globals.css` 此前仅 `.app-input:focus` 有反馈，`.app-button`/tabs/卡片按钮（全是裸 `<button>`）键盘 Tab 时无焦点指示（违反 CRITICAL 级 `focus-states`）。新增 `:where(button, a, summary, [role="button"]):focus-visible` + checkbox/radio 焦点环（`outline: 2px var(--accent-strong)`；`:focus-visible` 鼠标点击不触发，不影响视觉）。
+- **BlockDetailModal 补无障碍**：`web/components/board/BlockDetailModal.tsx` 是看板/工坊/剧情主从视图到处复用的核心弹窗，此前缺 Esc/aria/焦点管理（旧 `CharacterModal` 反而有，属退化）。照搬 CharacterModal 已验证模式——`role="dialog"`/`aria-modal`/`aria-label`、Esc 关闭、打开聚焦关闭按钮、关闭恢复原焦点、Tab 焦点陷阱、背景按钮点击关闭（替掉原 `onClick`+`stopPropagation`）。
+- **prefers-reduced-motion 降级**：`globals.css` 追加全局 reduced-motion 媒体查询，弱化 pulse/hover 位移/过渡，照顾前庭敏感用户。
+
+**审查留存的待办（本轮未做，用户选择只修 P0）**：P1 ——「新增」弹窗取消按钮误写「🗑 删除」（`SettingsBoard.tsx:120`/`PlotMasterDetail.tsx:225` 把 `onDelete` 当取消用）、保存校验静默失败无反馈（`SettingsBoard.tsx:116`）、PlotMasterDetail 变更态仅靠红边色传达无文字标记（与 BoardBlockGrid「刚更新」药丸不一致，违反 `color-not-only`）、14 处硬编码状态色（`#e0533d`变更/`#e0a23d`选中/`#4a9a6f` 应进 token）；P2 ——原生 checkbox 未定制、BoardTabs 触控偏小（28px<44px）、stringList/keyValue 编辑摩擦。
+
+**验证**：`npm run lint` 0/0、`tsc --noEmit` 0、vitest **52 passed**、`next build` 全路由通过。纯前端、后端零改动、无需迁移。
+
 ### Round 42 (2026-06-05) — 看板新增设定体验增强：字段统一 + id 自动生成 + AI 补全
 
 承接 Round 41，同 PR #7。两部分：
