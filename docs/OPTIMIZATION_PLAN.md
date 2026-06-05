@@ -27,6 +27,17 @@
 
 ## 1. 已完成
 
+### Round 41 (2026-06-05) — 看板「剧情结构」升级为主从视图（纲领总览 + 幕大纲 + 幕详情）
+
+纯前端，后端零改动。此前剧情线（`act_plan` 幕 + `main_quest_path` 主线节点）与其它设定共用通用卡片网格 `BoardBlockGrid`，看不清「幕 → 节点」从属与走向。本轮在看板「剧情结构」标签页换成专门的主从视图：
+
+- 新增 `web/lib/plotView.ts`（纯函数 `derivePlotView` + `actKeyOf`）：从 `BoardModel` 派生 `{ overview, acts, unassignedNodes }`。纲领 = world 分类里 `settingsScalar` 且 `path=["story_core", k]` 的 6 个标量块；幕 = plot 分类 `arrayKey==="act_plan"`；节点 = `arrayKey==="main_quest_path"`，按 `act_id` 分组到幕，`act_id` 空或指向不存在幕 → `unassignedNodes`（孤儿不丢失）。配 4 个 vitest 用例。
+- 新增 `web/components/board/PlotMasterDetail.tsx`：顶部剧情纲领总览（镜像 story_core，与世界观 tab 同源），左幕大纲（选中高亮 + ＋新增幕），右幕详情（目标/转场 + 该幕节点列表 + ＋新增节点，新增节点 `act_id` 预填当前幕）。编辑/删除/新增全复用 `BlockDetailModal` 与 `SettingsBoard` 既有 `onEditBlock/onDeleteBlock/onAddItem` 回调，diff/写回/后端零改动。
+- `web/components/board/SettingsBoard.tsx`：`activeTab === "plot"` 时渲染 `PlotMasterDetail` 替换 `BoardBlockGrid`（其它 tab 不变），plot tab 隐藏「显示空设定项」开关（主从视图自管空态）。
+- **不做**：节点拖拽重排/跨幕改归属（顺序与归属靠字段）、后端 schema/`story_blueprint` 运行时改动。
+- 设计与计划文档：`docs/superpowers/specs|plans/2026-06-05-plot-line-masterdetail*`。
+- 验证：`npm run test`（含 plotView 4 绿）/ `npm run lint` / `npm run build` 全通过；**UI 手动验证待在带数据环境跑**（本地需 API + Postgres + 已有游戏）。
+
 ### Round 40 (2026-06-04) — 「下载填写说明」改为通用模板（去剧本痕迹 + 去游戏依赖）
 
 `api/app/services/settings_guide_exporter.py`。此前导出文档结构已通用，但仍有两类"非通用"：① 字段表「示例」列硬编码了一套具体剧本（雁回镇/沈砚/义庄/黑伞会/不要修仙）；② 头部含 `game.title`/`game.id`/导出时间，「当前 JSON 结构概览」按当前游戏输出条目计数。本轮改成纯通用模板：
