@@ -27,6 +27,22 @@
 
 ## 1. 已完成
 
+### Round 42 (2026-06-05) — 看板新增设定体验增强：字段统一 + id 自动生成 + AI 补全
+
+承接 Round 41，同 PR #7。两部分：
+
+**① 新增表单与编辑共用完整字段规格 + id 自动生成（纯前端）**
+- 抽 `web/lib/generatorBoard.ts` 的 `ITEM_FIELD_SPECS`（6 类数组项完整字段规格），`buildFromSettings` 与 `newItemBlock` 共用 → 新增表单字段不再比编辑面少（此前 `newItemBlock` 只用 `ARRAY_SPECS.keys` 的 2-3 个最小字段）。
+- 新增 `generateItemId(arrayKey, existingIds)` / `itemIdsOf(model, arrayKey)`：幕/主线节点的 `id` 自动生成唯一值（`act_N`/`quest_N`），新增表单不再要求手填 id；`SettingsBoard`/`PlotMasterDetail` 新增保存处对 idKey="id" 数组注入自动 id。
+
+**② 新增设定 AI 补全（前后端）**
+- 新 prompt `api/app/prompts/suggest_item.md`（固定系统提示，吃前缀缓存）。
+- 新 `api/app/services/item_suggester.py`（`ItemSuggester`）：`use_flash` + `reasoning_effort=None` + `SUGGEST_ITEM_TIMEOUT_SECONDS=40s`；失败/超时/解析/漂移 → 空 dict fallback；`build_outline` 仅取 game_profile + story_core + worldview 概要省 token；结果过滤（剔身份字段/越界字段，不覆盖用户输入）。
+- 新端点 `POST /api/games/{id}/settings/suggest-item`。
+- 前端 `BlockDetailModal` 新增态「✨ AI 补全」按钮（传 `aiSuggest` 回调才显示）：用户填标题 → AI 补其余字段（**用户已填值优先**）；仅游戏设定页注入 `onSuggestItem`，工坊不启用。
+- 测试：`api/tests/test_item_suggester.py`（5 绿）+ `test_games.py` 端点用例；前端 tsc/lint/build 通过。
+- 设计/计划：`docs/superpowers/specs|plans/2026-06-05-ai-suggest-item*` 与 `2026-06-05-plot-line-masterdetail*`。
+
 ### Round 41 (2026-06-05) — 看板「剧情结构」升级为主从视图（纲领总览 + 幕大纲 + 幕详情）
 
 纯前端，后端零改动。此前剧情线（`act_plan` 幕 + `main_quest_path` 主线节点）与其它设定共用通用卡片网格 `BoardBlockGrid`，看不清「幕 → 节点」从属与走向。本轮在看板「剧情结构」标签页换成专门的主从视图：
