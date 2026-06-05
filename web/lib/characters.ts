@@ -3,6 +3,7 @@ import type { RelationshipTrack, StateV2 } from "@/lib/stateV2";
 
 export const characterRoleLabels: Record<CharacterRole, string> = {
   protagonist: "主角",
+  antagonist: "反派",
   companion: "同伴",
   npc: "NPC",
   other: "其他"

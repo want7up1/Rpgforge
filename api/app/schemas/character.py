@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-CharacterRole = Literal["protagonist", "npc", "companion", "other"]
+CharacterRole = Literal["protagonist", "antagonist", "npc", "companion", "other"]
 CharacterVisibility = Literal["visible", "hidden"]
 
 

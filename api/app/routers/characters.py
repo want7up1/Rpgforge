@@ -93,7 +93,7 @@ def character_payload(
 
 
 def sorted_characters(characters: list[Character]) -> list[Character]:
-    role_order = {"protagonist": 0, "companion": 1, "npc": 2, "other": 3}
+    role_order = {"protagonist": 0, "antagonist": 1, "companion": 2, "npc": 3, "other": 4}
     return sorted(characters, key=lambda item: (role_order.get(item.role, 9), item.name))
 
 

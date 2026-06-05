@@ -52,7 +52,7 @@ SETTINGS_EXPORT_FORMAT_VERSION = STORY_SETTINGS_FORMAT_VERSION
 ACCEPTED_SETTINGS_FORMAT_VERSIONS = {
     SETTINGS_EXPORT_FORMAT_VERSION,
 }
-CHARACTER_ROLES = {"protagonist", "npc", "companion", "other"}
+CHARACTER_ROLES = {"protagonist", "antagonist", "npc", "companion", "other"}
 CHARACTER_VISIBILITIES = {"visible", "hidden"}
 
 

@@ -58,7 +58,7 @@ export type SummaryRead = {
   updated_at: string;
 };
 
-export type CharacterRole = "protagonist" | "npc" | "companion" | "other";
+export type CharacterRole = "protagonist" | "antagonist" | "npc" | "companion" | "other";
 export type CharacterListScope = "director" | "public";
 
 export type CharacterStoryProfile = {

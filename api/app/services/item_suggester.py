@@ -32,7 +32,7 @@ IDENTITY_FIELD: dict[str, str] = {
 # 各数组的待补字段 → 中文说明（不含 id / 身份字段 / act_id）。
 SUGGEST_FIELDS: dict[str, dict[str, str]] = {
     "core_characters": {
-        "role": "定位：protagonist/npc/companion/other",
+        "role": "定位：protagonist/antagonist/npc/companion/other",
         "identity": "身份背景",
         "aliases": "别名（字符串数组）",
         "description": "人物描述",
