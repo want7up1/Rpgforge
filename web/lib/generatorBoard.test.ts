@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildBoardModel, BOARD_CATEGORIES, diffBoard, isLocked, lockBlock, unlockBlock, writeBlockFields, deleteBlock, createEmptyItem, appendItem, ARRAY_SPECS } from "@/lib/generatorBoard";
+import { buildBoardModel, BOARD_CATEGORIES, diffBoard, isLocked, lockBlock, unlockBlock, writeBlockFields, deleteBlock, createEmptyItem, appendItem, ARRAY_SPECS, newItemBlock, generateItemId, itemIdsOf } from "@/lib/generatorBoard";
 
 describe("buildBoardModel from story_settings", () => {
   const settings = {
@@ -331,5 +331,68 @@ describe("新增数组项", () => {
     const out = appendItem(src, "core_characters", { name: "红伞客", role: "npc" }) as { core_characters: unknown[] };
     expect(out.core_characters).toHaveLength(2);
     expect(out).not.toBe(src);
+  });
+});
+
+describe("新增字段与编辑字段统一", () => {
+  it("newItemBlock(main_quest_path) 含完整节点字段且不含 id", () => {
+    const keys = newItemBlock("main_quest_path").fields.map((f) => f.key);
+    expect(keys).toEqual(
+      expect.arrayContaining(["title", "objective", "act_id", "player_visible", "completion_signal", "optional"])
+    );
+    expect(keys).not.toContain("id");
+  });
+
+  it("newItemBlock(act_plan) 含完整剧情字段（戏剧问题/揭示/锚点/转场）", () => {
+    const keys = newItemBlock("act_plan").fields.map((f) => f.key);
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        "title", "objective", "dramatic_question", "must_hit_beats",
+        "allowed_reveals", "forbidden_reveals", "completion_anchors", "transition_to_next_act"
+      ])
+    );
+  });
+
+  it("新增字段集合 = 编辑还原字段集合（以节点为例，顺序一致）", () => {
+    const editKeys = buildBoardModel({ source: "settings", settings: { main_quest_path: [{ id: "q1", title: "t" }] } })
+      .categories.find((c) => c.id === "plot")!
+      .blocks.find((b) => b.id === "main_quest_path:q1")!
+      .fields.map((f) => f.key);
+    const addKeys = newItemBlock("main_quest_path").fields.map((f) => f.key);
+    expect(addKeys).toEqual(editKeys);
+  });
+
+  it("completion_anchors 在新增表单里带 objectList 子字段规格", () => {
+    const anchors = newItemBlock("act_plan").fields.find((f) => f.key === "completion_anchors")!;
+    expect(anchors.type).toBe("objectList");
+    expect(anchors.itemFields?.some((s) => s.key === "required")).toBe(true);
+  });
+});
+
+describe("generateItemId / itemIdsOf", () => {
+  it("act_plan 用 act_ 前缀，递增并填补空缺", () => {
+    expect(generateItemId("act_plan", [])).toBe("act_1");
+    expect(generateItemId("act_plan", ["act_1", "act_2"])).toBe("act_3");
+    expect(generateItemId("act_plan", ["act_1", "act_3"])).toBe("act_2");
+  });
+
+  it("main_quest_path 用 quest_ 前缀", () => {
+    expect(generateItemId("main_quest_path", ["quest_1"])).toBe("quest_2");
+  });
+
+  it("itemIdsOf 从 model 提取某数组所有 idValue", () => {
+    const model = buildBoardModel({
+      source: "settings",
+      settings: { act_plan: [{ id: "act_1", title: "一" }, { id: "act_2", title: "二" }] }
+    });
+    expect(itemIdsOf(model, "act_plan").sort()).toEqual(["act_1", "act_2"]);
+  });
+
+  it("generateItemId 接 itemIdsOf 不与现有冲突", () => {
+    const model = buildBoardModel({
+      source: "settings",
+      settings: { act_plan: [{ id: "act_1", title: "一" }] }
+    });
+    expect(generateItemId("act_plan", itemIdsOf(model, "act_plan"))).toBe("act_2");
   });
 });

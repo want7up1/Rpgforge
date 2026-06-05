@@ -7,7 +7,7 @@ import { BoardBlockGrid } from "@/components/board/BoardBlockGrid";
 import { BlockDetailModal } from "@/components/board/BlockDetailModal";
 import { PlotMasterDetail } from "@/components/board/PlotMasterDetail";
 import { ChangeSummaryBar } from "@/components/board/ChangeSummaryBar";
-import { ARRAY_SPECS, EMPTY_DIFF, newItemBlock } from "@/lib/generatorBoard";
+import { ARRAY_SPECS, EMPTY_DIFF, newItemBlock, generateItemId, itemIdsOf } from "@/lib/generatorBoard";
 import type {
   BoardBlock,
   BoardCategoryId,
@@ -106,7 +106,11 @@ export function SettingsBoard({
             const spec = ARRAY_SPECS[addingArray];
             const item = Object.fromEntries(fields.map((f) => [f.key, f.value]));
             const idKey = spec?.idKey ?? "id";
-            if (!String(item[idKey] ?? "").trim()) return; // 身份必填（重名/合法性由后端 validate 兜底）
+            // 身份为独立 id 的数组（幕/主线节点）：自动生成唯一 id，无需用户手填
+            if (idKey === "id" && !String(item.id ?? "").trim()) {
+              item.id = generateItemId(addingArray, itemIdsOf(model, addingArray));
+            }
+            if (!String(item[idKey] ?? "").trim()) return; // 身份（name/title）必填（重名/合法性由后端 validate 兜底）
             onAddItem?.(addingArray, item);
             setAddingArray(null);
           }}

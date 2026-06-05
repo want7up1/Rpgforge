@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { BlockDetailModal } from "@/components/board/BlockDetailModal";
-import { newItemBlock } from "@/lib/generatorBoard";
+import { newItemBlock, generateItemId, itemIdsOf } from "@/lib/generatorBoard";
 import type { BoardBlock, BoardField, BoardModel } from "@/lib/generatorBoard";
 import { actKeyOf, derivePlotView } from "@/lib/plotView";
 
@@ -46,17 +46,11 @@ export function PlotMasterDetail({
       : adding === "node"
         ? (() => {
             const base = newItemBlock("main_quest_path");
+            const actId = selectedAct ? actKeyOf(selectedAct.actBlock) : "";
+            // act_id 字段已在完整规格里，预填为当前选中幕
             return {
               ...base,
-              fields: [
-                ...base.fields,
-                {
-                  key: "act_id",
-                  label: "所属幕",
-                  value: selectedAct ? actKeyOf(selectedAct.actBlock) : "",
-                  type: "text" as const
-                }
-              ]
+              fields: base.fields.map((f) => (f.key === "act_id" ? { ...f, value: actId } : f))
             };
           })()
         : null;
@@ -217,9 +211,13 @@ export function PlotMasterDetail({
           block={addingBlock}
           locked={false}
           onSave={(fields) => {
+            const arrayKey = adding === "node" ? "main_quest_path" : "act_plan";
             const item = Object.fromEntries(fields.map((f) => [f.key, f.value]));
-            if (!String(item.id ?? "").trim()) return; // 身份必填，重名/合法性由后端 validate 兜底
-            onAddItem(adding === "node" ? "main_quest_path" : "act_plan", item);
+            // 自动生成唯一 id（不再让用户手填）
+            if (!String(item.id ?? "").trim()) {
+              item.id = generateItemId(arrayKey, itemIdsOf(model, arrayKey));
+            }
+            onAddItem(arrayKey, item);
             setAdding(null);
           }}
           onDelete={() => setAdding(null)}
