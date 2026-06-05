@@ -6,11 +6,11 @@ import { AppShell } from "@/components/AppShell";
 import { BlockDetailModal } from "@/components/board/BlockDetailModal";
 import { deleteModule, importModules, listModules, moduleExportUrl, patchModule } from "@/lib/api";
 import {
-  buildBoardModel,
   writeBlockFields,
   type BoardBlock,
   type BoardField
 } from "@/lib/generatorBoard";
+import { moduleEditBlock } from "@/lib/moduleFragment";
 import type { SettingModule } from "@/lib/types";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -19,12 +19,6 @@ const TYPE_LABELS: Record<string, string> = {
 };
 // 分类展示顺序（与看板一致）
 const CATEGORY_ORDER = Object.keys(TYPE_LABELS);
-
-// 取模块 payload 还原出的（唯一）block，供编辑用
-function moduleBlock(module: SettingModule): BoardBlock | null {
-  const model = buildBoardModel({ source: "settings", settings: module.payload });
-  return model.categories.flatMap((c) => c.blocks)[0] ?? null;
-}
 
 export default function WorkshopPage() {
   const [modules, setModules] = useState<SettingModule[]>([]);
@@ -118,7 +112,7 @@ export default function WorkshopPage() {
     groups.push({ cat: "__other", label: "其它", items: others });
   }
 
-  const editBlock = editing ? moduleBlock(editing) : null;
+  const editBlock = editing ? moduleEditBlock(editing.payload) : null;
 
   return (
     <AppShell>

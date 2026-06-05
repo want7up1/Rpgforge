@@ -1,4 +1,4 @@
-import type { BoardBlock } from "@/lib/generatorBoard";
+import { buildBoardModel, isEmptyBlock, type BoardBlock } from "@/lib/generatorBoard";
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
@@ -60,4 +60,14 @@ export function buildModulePayload(
 // block 是否可提取为模块（仅 settings 形态地址）
 export function isExtractable(block: BoardBlock): boolean {
   return block.address.kind !== "confirmedField";
+}
+
+// 把模块最小片段 payload 还原成它唯一对应的可编辑 block。
+// 注意：buildFromSettings 的固定块（game_profile/worldview/...）现在无条件建块，
+// 直接取 flatMap[0] 会恒为空 game_profile（工坊「编辑内容」全空白的根因）。
+// 模块 payload 只含一个逻辑设定 → 取第一个非空块；全空时退回首块。
+export function moduleEditBlock(payload: Record<string, unknown>): BoardBlock | null {
+  const blocks = buildBoardModel({ source: "settings", settings: payload })
+    .categories.flatMap((c) => c.blocks);
+  return blocks.find((b) => !isEmptyBlock(b)) ?? blocks[0] ?? null;
 }

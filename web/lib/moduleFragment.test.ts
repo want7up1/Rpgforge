@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildModulePayload, moduleTypeFromBlock } from "@/lib/moduleFragment";
+import { buildModulePayload, moduleEditBlock, moduleTypeFromBlock } from "@/lib/moduleFragment";
 import { buildBoardModel, type BoardBlock } from "@/lib/generatorBoard";
 
 const settings = {
@@ -32,5 +32,29 @@ describe("buildModulePayload", () => {
   it("module_type = block.category", () => {
     expect(moduleTypeFromBlock(block("红伞女人"))).toBe("characters");
     expect(moduleTypeFromBlock(block("检定"))).toBe("mechanics");
+  });
+});
+
+describe("moduleEditBlock", () => {
+  // 回归护栏：固定块无条件建块后，模块 payload 还原的首块恒为空 game_profile，
+  // 导致工坊「编辑内容」全空白。moduleEditBlock 必须取真正有内容的块。
+  it("素材模块片段 → 命中素材块而非空 game_profile", () => {
+    const b = moduleEditBlock({ story_material_library: [{ title: "占位素材", content: "占位内容" }] });
+    expect(b?.title).toBe("占位素材");
+    expect(b?.address).toMatchObject({ kind: "settingsItem", arrayKey: "story_material_library" });
+  });
+  it("角色模块片段 → 命中角色块", () => {
+    const b = moduleEditBlock({ core_characters: [{ name: "占位角色", role: "npc" }] });
+    expect(b?.title).toBe("占位角色");
+    expect(b?.address).toMatchObject({ kind: "settingsItem", arrayKey: "core_characters" });
+  });
+  it("标量片段 → 命中对应单值块", () => {
+    const b = moduleEditBlock({ story_core: { central_mystery: "占位悬念" } });
+    expect(b?.fields.some((f) => f.key === "central_mystery" && f.value === "占位悬念")).toBe(true);
+  });
+  it("字符串列表片段 → 命中对应桶块", () => {
+    const b = moduleEditBlock({ hard_rules: { must_follow: ["占位规则"] } });
+    expect(b?.title).toBe("必须遵守");
+    expect(b?.fields[0]?.value).toEqual(["占位规则"]);
   });
 });
