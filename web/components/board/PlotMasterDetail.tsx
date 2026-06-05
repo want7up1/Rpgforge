@@ -16,7 +16,8 @@ export function PlotMasterDetail({
   onEditBlock,
   onDeleteBlock,
   onAddItem,
-  onUnlockBlock
+  onUnlockBlock,
+  onSuggestItem
 }: {
   model: BoardModel;
   lockedIds?: string[];
@@ -25,6 +26,7 @@ export function PlotMasterDetail({
   onDeleteBlock: (block: BoardBlock) => void;
   onAddItem?: (arrayKey: string, item: Record<string, unknown>) => void;
   onUnlockBlock?: (block: BoardBlock) => void;
+  onSuggestItem?: (arrayKey: string, draft: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) {
   const { overview, acts, unassignedNodes } = derivePlotView(model);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -221,6 +223,11 @@ export function PlotMasterDetail({
             setAdding(null);
           }}
           onDelete={() => setAdding(null)}
+          aiSuggest={
+            onSuggestItem
+              ? (draft) => onSuggestItem(adding === "node" ? "main_quest_path" : "act_plan", draft)
+              : undefined
+          }
           onClose={() => setAdding(null)}
         />
       ) : null}

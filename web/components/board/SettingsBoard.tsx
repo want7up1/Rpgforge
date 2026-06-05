@@ -25,7 +25,8 @@ export function SettingsBoard({
   onDeleteBlock,
   onUnlockBlock,
   onSaveAsModule,
-  onAddItem
+  onAddItem,
+  onSuggestItem
 }: {
   model: BoardModel;
   diff?: BoardDiff;
@@ -36,6 +37,7 @@ export function SettingsBoard({
   onUnlockBlock?: (block: BoardBlock) => void;
   onSaveAsModule?: (block: BoardBlock) => void;
   onAddItem?: (arrayKey: string, item: Record<string, unknown>) => void;
+  onSuggestItem?: (arrayKey: string, draft: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) {
   const [activeTab, setActiveTab] = useState<BoardCategoryId>("world");
   const [openBlock, setOpenBlock] = useState<BoardBlock | null>(null);
@@ -68,6 +70,7 @@ export function SettingsBoard({
           onDeleteBlock={onDeleteBlock}
           onAddItem={onAddItem}
           onUnlockBlock={onUnlockBlock}
+          onSuggestItem={onSuggestItem}
         />
       ) : (
         <BoardBlockGrid
@@ -115,6 +118,7 @@ export function SettingsBoard({
             setAddingArray(null);
           }}
           onDelete={() => setAddingArray(null)}
+          aiSuggest={onSuggestItem ? (draft) => onSuggestItem(addingArray, draft) : undefined}
           onClose={() => setAddingArray(null)}
         />
       ) : null}

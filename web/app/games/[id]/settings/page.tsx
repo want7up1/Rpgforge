@@ -9,7 +9,7 @@ import { SettingsBoard } from "@/components/board/SettingsBoard";
 import { SettingsAdvanced } from "@/components/settings/SettingsAdvanced";
 import { ModuleMergePanel } from "@/components/workshop/ModuleMergePanel";
 import { SaveAsModuleDialog } from "@/components/workshop/SaveAsModuleDialog";
-import { getGame, getSettingVersions, updateGameConfig } from "@/lib/api";
+import { getGame, getSettingVersions, suggestItem, updateGameConfig } from "@/lib/api";
 import {
   appendItem,
   buildBoardModel,
@@ -133,6 +133,7 @@ function SettingsView({
         onDeleteBlock={handleDeleteBlock}
         onSaveAsModule={(block) => { if (isExtractable(block)) setModuleBlock(block); }}
         onAddItem={(arrayKey, item) => { void persist(appendItem(settings, arrayKey, item)); }}
+        onSuggestItem={(arrayKey, draft) => suggestItem(game.id, arrayKey, draft)}
       />
       <SettingsAdvanced
         key={game.config?.updated_at ?? ""}
