@@ -24,6 +24,8 @@ from app.schemas.game import (
     GameListItem,
     GameMemoryRead,
     GameSettingVersionRead,
+    SuggestItemRequest,
+    SuggestItemResponse,
     SummaryRead,
     SummaryRebuildResponse,
 )
@@ -31,6 +33,7 @@ from app.services.context_compressor import ContextCompressor
 from app.services.context_diagnostics import ContextDiagnosticService
 from app.services.game_activity import touch_game
 from app.services.game_creator import build_manual_generated_config, create_game_from_config
+from app.services.item_suggester import ItemSuggester
 from app.services.script_exporter import export_game_script_markdown, script_export_filename
 from app.services.settings_guide_exporter import (
     export_settings_guide_markdown,
@@ -49,7 +52,7 @@ SETTINGS_EXPORT_FORMAT_VERSION = STORY_SETTINGS_FORMAT_VERSION
 ACCEPTED_SETTINGS_FORMAT_VERSIONS = {
     SETTINGS_EXPORT_FORMAT_VERSION,
 }
-CHARACTER_ROLES = {"protagonist", "npc", "companion", "other"}
+CHARACTER_ROLES = {"protagonist", "antagonist", "npc", "companion", "other"}
 CHARACTER_VISIBILITIES = {"visible", "hidden"}
 
 
@@ -606,3 +609,15 @@ def remove_game_portrait_files(db: Session, game_id: UUID) -> None:
     game_dir = root / str(game_id)
     if game_dir.exists() and game_dir.is_dir():
         shutil.rmtree(game_dir)
+
+
+@router.post("/{game_id}/settings/suggest-item", response_model=SuggestItemResponse)
+async def suggest_settings_item(
+    game_id: UUID,
+    payload: SuggestItemRequest,
+    db: Session = DB_DEPENDENCY,
+) -> SuggestItemResponse:
+    game = get_game_or_404(db, game_id)
+    story_settings = game.config.story_settings if game.config else {}
+    fields = await ItemSuggester().suggest(payload.array_key, payload.draft, story_settings)
+    return SuggestItemResponse(fields=fields)

@@ -5,8 +5,9 @@ import { useState } from "react";
 import { BoardTabs } from "@/components/board/BoardTabs";
 import { BoardBlockGrid } from "@/components/board/BoardBlockGrid";
 import { BlockDetailModal } from "@/components/board/BlockDetailModal";
+import { PlotMasterDetail } from "@/components/board/PlotMasterDetail";
 import { ChangeSummaryBar } from "@/components/board/ChangeSummaryBar";
-import { ARRAY_SPECS, EMPTY_DIFF, newItemBlock } from "@/lib/generatorBoard";
+import { ARRAY_SPECS, EMPTY_DIFF, newItemBlock, generateItemId, itemIdsOf } from "@/lib/generatorBoard";
 import type {
   BoardBlock,
   BoardCategoryId,
@@ -24,7 +25,8 @@ export function SettingsBoard({
   onDeleteBlock,
   onUnlockBlock,
   onSaveAsModule,
-  onAddItem
+  onAddItem,
+  onSuggestItem
 }: {
   model: BoardModel;
   diff?: BoardDiff;
@@ -35,6 +37,7 @@ export function SettingsBoard({
   onUnlockBlock?: (block: BoardBlock) => void;
   onSaveAsModule?: (block: BoardBlock) => void;
   onAddItem?: (arrayKey: string, item: Record<string, unknown>) => void;
+  onSuggestItem?: (arrayKey: string, draft: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }) {
   const [activeTab, setActiveTab] = useState<BoardCategoryId>("world");
   const [openBlock, setOpenBlock] = useState<BoardBlock | null>(null);
@@ -52,20 +55,35 @@ export function SettingsBoard({
         changedCategories={diff.changedCategories}
         onSelect={setActiveTab}
       />
-      <label className="mt-3 flex w-fit items-center gap-2 text-xs text-[color:var(--muted)]">
-        <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} />
-        显示空设定项
-      </label>
-      <BoardBlockGrid
-        category={activeTab}
-        blocks={current.blocks}
-        changedBlockIds={diff.changedBlockIds}
-        lockedIds={lockedIds}
-        loading={loading}
-        showEmpty={showEmpty}
-        onOpen={setOpenBlock}
-        onAdd={onAddItem ? (arrayKey) => setAddingArray(arrayKey) : undefined}
-      />
+      {activeTab !== "plot" ? (
+        <label className="mt-3 flex w-fit items-center gap-2 text-xs text-[color:var(--muted)]">
+          <input type="checkbox" checked={showEmpty} onChange={(e) => setShowEmpty(e.target.checked)} />
+          显示空设定项
+        </label>
+      ) : null}
+      {activeTab === "plot" ? (
+        <PlotMasterDetail
+          model={model}
+          lockedIds={lockedIds}
+          changedBlockIds={diff.changedBlockIds}
+          onEditBlock={onEditBlock}
+          onDeleteBlock={onDeleteBlock}
+          onAddItem={onAddItem}
+          onUnlockBlock={onUnlockBlock}
+          onSuggestItem={onSuggestItem}
+        />
+      ) : (
+        <BoardBlockGrid
+          category={activeTab}
+          blocks={current.blocks}
+          changedBlockIds={diff.changedBlockIds}
+          lockedIds={lockedIds}
+          loading={loading}
+          showEmpty={showEmpty}
+          onOpen={setOpenBlock}
+          onAdd={onAddItem ? (arrayKey) => setAddingArray(arrayKey) : undefined}
+        />
+      )}
       {openBlock ? (
         <BlockDetailModal
           block={openBlock}
@@ -91,11 +109,16 @@ export function SettingsBoard({
             const spec = ARRAY_SPECS[addingArray];
             const item = Object.fromEntries(fields.map((f) => [f.key, f.value]));
             const idKey = spec?.idKey ?? "id";
-            if (!String(item[idKey] ?? "").trim()) return; // 身份必填（重名/合法性由后端 validate 兜底）
+            // 身份为独立 id 的数组（幕/主线节点）：自动生成唯一 id，无需用户手填
+            if (idKey === "id" && !String(item.id ?? "").trim()) {
+              item.id = generateItemId(addingArray, itemIdsOf(model, addingArray));
+            }
+            if (!String(item[idKey] ?? "").trim()) return; // 身份（name/title）必填（重名/合法性由后端 validate 兜底）
             onAddItem?.(addingArray, item);
             setAddingArray(null);
           }}
           onDelete={() => setAddingArray(null)}
+          aiSuggest={onSuggestItem ? (draft) => onSuggestItem(addingArray, draft) : undefined}
           onClose={() => setAddingArray(null)}
         />
       ) : null}

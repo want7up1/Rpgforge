@@ -12,7 +12,8 @@ export function BlockDetailModal({
   onDelete,
   onUnlock,
   onSaveAsModule,
-  onClose
+  onClose,
+  aiSuggest
 }: {
   block: BoardBlock;
   locked: boolean;
@@ -21,13 +22,42 @@ export function BlockDetailModal({
   onUnlock?: () => void;
   onSaveAsModule?: () => void;
   onClose: () => void;
+  aiSuggest?: (draft: Record<string, BoardFieldValue>) => Promise<Record<string, unknown>>;
 }) {
   const [drafts, setDrafts] = useState<Record<string, BoardFieldValue>>(() =>
     Object.fromEntries(block.fields.map((f) => [f.key, f.value]))
   );
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   function handleSave() {
     onSave(block.fields.map((f) => ({ ...f, value: drafts[f.key] ?? f.value })));
+  }
+
+  async function handleSuggest() {
+    if (!aiSuggest) return;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const fields = await aiSuggest(drafts);
+      setDrafts((d) => {
+        const next = { ...d };
+        for (const [k, v] of Object.entries(fields)) {
+          // 仅覆盖用户尚未改动的字段（值仍等于初始值）→ 布尔默认 false 也能被 AI 建议填入，
+          // 同时保留用户已填/改过的值不被覆盖。
+          const initial = block.fields.find((f) => f.key === k)?.value;
+          if (JSON.stringify(next[k]) === JSON.stringify(initial)) {
+            next[k] = v as BoardFieldValue;
+          }
+        }
+        return next;
+      });
+      if (Object.keys(fields).length === 0) setSuggestError("AI 补全失败，请手动填写");
+    } catch {
+      setSuggestError("AI 补全失败，请手动填写");
+    } finally {
+      setSuggesting(false);
+    }
   }
 
   return (
@@ -57,7 +87,13 @@ export function BlockDetailModal({
           ))}
         </div>
 
+        {suggestError ? <p className="mt-3 text-sm text-[#e0533d]">{suggestError}</p> : null}
         <div className="mt-5 flex flex-wrap gap-2">
+          {aiSuggest ? (
+            <button className="app-button" type="button" onClick={handleSuggest} disabled={suggesting}>
+              {suggesting ? "AI 补全中…" : "✨ AI 补全"}
+            </button>
+          ) : null}
           <button className="app-button app-button-primary" type="button" onClick={handleSave}>保存</button>
           {locked && onUnlock ? (
             <button className="app-button" type="button" onClick={onUnlock} title="恢复 AI 最近一次生成的值并解除锁定">

@@ -830,3 +830,15 @@ export async function mergePreviewModules(body: {
 export function moduleExportUrl(ids: string[]): string {
   return `${getApiBaseUrl()}/api/modules/export?ids=${encodeURIComponent(ids.join(","))}`;
 }
+
+export async function suggestItem(
+  gameId: string,
+  arrayKey: string,
+  draft: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const data = await requestJson<{ fields: Record<string, unknown> }>(
+    `/api/games/${gameId}/settings/suggest-item`,
+    { method: "POST", body: JSON.stringify({ array_key: arrayKey, draft }) }
+  );
+  return data.fields ?? {};
+}

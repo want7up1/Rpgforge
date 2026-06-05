@@ -195,6 +195,51 @@ function deriveFields(data: Record<string, unknown>, spec: FieldSpec[]): BoardFi
   return out;
 }
 
+// 各可新增数组项的「完整字段规格」——新增表单与编辑面共用同一份，避免两套定义漂移。
+// 注意：不含 id（id 是被引用的稳定键，编辑隐藏、新增自动生成 → 见 generateItemId）。
+const ITEM_FIELD_SPECS: Record<string, FieldSpec[]> = {
+  core_characters: [
+    { key: "name", type: "text" }, { key: "role", type: "text" },
+    { key: "identity", type: "text" }, { key: "aliases", type: "stringList" },
+    { key: "description", type: "textarea" }, { key: "appearance", type: "textarea" },
+    { key: "desire", type: "text" }, { key: "fear", type: "text" },
+    { key: "leverage", type: "text" }, { key: "relationship_arc", type: "textarea" },
+    { key: "dramatic_function", type: "textarea" }, { key: "public_limit", type: "text" },
+    { key: "portrait_prompt", type: "textarea" }, { key: "visibility", type: "text" }
+  ],
+  act_plan: [
+    { key: "title", type: "text" }, { key: "objective", type: "textarea" },
+    { key: "dramatic_question", type: "textarea" },
+    { key: "must_hit_beats", type: "stringList" },
+    { key: "allowed_reveals", type: "stringList" },
+    { key: "forbidden_reveals", type: "stringList" },
+    { key: "completion_anchors", type: "objectList", itemFields: ANCHOR_ITEM_FIELDS },
+    { key: "transition_to_next_act", type: "keyValue" }
+  ],
+  main_quest_path: [
+    { key: "title", type: "text" }, { key: "objective", type: "textarea" },
+    { key: "act_id", type: "text" }, { key: "player_visible", type: "text" },
+    { key: "completion_signal", type: "text" }, { key: "optional", type: "bool" }
+  ],
+  core_mechanics: [
+    { key: "name", type: "text" }, { key: "rule", type: "textarea" },
+    { key: "visibility", type: "text" }
+  ],
+  action_style_rules: [
+    { key: "name", type: "text" }, { key: "triggers", type: "stringList" },
+    { key: "rule", type: "textarea" }, { key: "priority", type: "text" },
+    { key: "enabled", type: "bool" }
+  ],
+  story_material_library: [
+    { key: "title", type: "text" }, { key: "type", type: "text" },
+    { key: "keywords", type: "stringList" }, { key: "triggers", type: "stringList" },
+    { key: "priority", type: "text" }, { key: "always_on", type: "bool" },
+    { key: "visibility", type: "text" }, { key: "public_info", type: "textarea" },
+    { key: "gm_secret", type: "textarea" }, { key: "content", type: "textarea" },
+    { key: "usage", type: "textarea" }, { key: "enabled", type: "bool" }
+  ]
+};
+
 function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
   const profile = asRecord(settings.game_profile);
   const worldview = asRecord(settings.worldview);
@@ -252,15 +297,7 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.characters.push({
       id: `core_characters:${name}`, category: "characters", title: name, icon: "👤",
       summary: [str(ch.role), firstLine(str(ch.description))].filter(Boolean).join(" · "),
-      fields: deriveFields(ch, [
-        { key: "name", type: "text" }, { key: "role", type: "text" },
-        { key: "identity", type: "text" }, { key: "aliases", type: "stringList" },
-        { key: "description", type: "textarea" }, { key: "appearance", type: "textarea" },
-        { key: "desire", type: "text" }, { key: "fear", type: "text" },
-        { key: "leverage", type: "text" }, { key: "relationship_arc", type: "textarea" },
-        { key: "dramatic_function", type: "textarea" }, { key: "public_limit", type: "text" },
-        { key: "portrait_prompt", type: "textarea" }, { key: "visibility", type: "text" }
-      ]),
+      fields: deriveFields(ch, ITEM_FIELD_SPECS.core_characters),
       address: { kind: "settingsItem", arrayKey: "core_characters", idKey: "name", idValue: name },
       deletable: true
     });
@@ -273,15 +310,7 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.plot.push({
       id: `act_plan:${id}`, category: "plot", title: str(act.title) || id, icon: "🎬",
       summary: firstLine(str(act.objective)),
-      fields: deriveFields(act, [
-        { key: "title", type: "text" }, { key: "objective", type: "textarea" },
-        { key: "dramatic_question", type: "textarea" },
-        { key: "must_hit_beats", type: "stringList" },
-        { key: "allowed_reveals", type: "stringList" },
-        { key: "forbidden_reveals", type: "stringList" },
-        { key: "completion_anchors", type: "objectList", itemFields: ANCHOR_ITEM_FIELDS },
-        { key: "transition_to_next_act", type: "keyValue" }
-      ]),
+      fields: deriveFields(act, ITEM_FIELD_SPECS.act_plan),
       address: {
         kind: "settingsItem", arrayKey: "act_plan",
         idKey: str(act.id) ? "id" : "title", idValue: str(act.id) || str(act.title)
@@ -295,11 +324,7 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.plot.push({
       id: `main_quest_path:${id}`, category: "plot", title: str(q.title) || id, icon: "🧭",
       summary: firstLine(str(q.objective)),
-      fields: deriveFields(q, [
-        { key: "title", type: "text" }, { key: "objective", type: "textarea" },
-        { key: "act_id", type: "text" }, { key: "player_visible", type: "text" },
-        { key: "completion_signal", type: "text" }, { key: "optional", type: "bool" }
-      ]),
+      fields: deriveFields(q, ITEM_FIELD_SPECS.main_quest_path),
       address: {
         kind: "settingsItem", arrayKey: "main_quest_path",
         idKey: str(q.id) ? "id" : "title", idValue: str(q.id) || str(q.title)
@@ -315,10 +340,7 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.mechanics.push({
       id: `core_mechanics:${name}`, category: "mechanics", title: name, icon: "⚙",
       summary: firstLine(str(m.rule)),
-      fields: deriveFields(m, [
-        { key: "name", type: "text" }, { key: "rule", type: "textarea" },
-        { key: "visibility", type: "text" }
-      ]),
+      fields: deriveFields(m, ITEM_FIELD_SPECS.core_mechanics),
       address: { kind: "settingsItem", arrayKey: "core_mechanics", idKey: "name", idValue: name },
       deletable: true
     });
@@ -329,11 +351,7 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.mechanics.push({
       id: `action_style_rules:${name}`, category: "mechanics", title: name, icon: "🖋",
       summary: firstLine(str(s.rule)),
-      fields: deriveFields(s, [
-        { key: "name", type: "text" }, { key: "triggers", type: "stringList" },
-        { key: "rule", type: "textarea" }, { key: "priority", type: "text" },
-        { key: "enabled", type: "bool" }
-      ]),
+      fields: deriveFields(s, ITEM_FIELD_SPECS.action_style_rules),
       address: { kind: "settingsItem", arrayKey: "action_style_rules", idKey: "name", idValue: name },
       deletable: true
     });
@@ -378,14 +396,7 @@ function buildFromSettings(settings: Record<string, unknown>): BoardCategory[] {
     byId.materials.push({
       id: `story_material_library:${title}`, category: "materials", title, icon: "📦",
       summary: firstLine(str(mat.content)),
-      fields: deriveFields(mat, [
-        { key: "title", type: "text" }, { key: "type", type: "text" },
-        { key: "keywords", type: "stringList" }, { key: "triggers", type: "stringList" },
-        { key: "priority", type: "text" }, { key: "always_on", type: "bool" },
-        { key: "visibility", type: "text" }, { key: "public_info", type: "textarea" },
-        { key: "gm_secret", type: "textarea" }, { key: "content", type: "textarea" },
-        { key: "usage", type: "textarea" }, { key: "enabled", type: "bool" }
-      ]),
+      fields: deriveFields(mat, ITEM_FIELD_SPECS.story_material_library),
       address: {
         kind: "settingsItem", arrayKey: "story_material_library",
         idKey: str(mat.id) ? "id" : "title", idValue: str(mat.id) || title
@@ -632,25 +643,42 @@ const CATEGORY_OF_ARRAY: Record<string, BoardCategoryId> = {
   core_mechanics: "mechanics", action_style_rules: "mechanics", story_material_library: "materials"
 };
 
-// 「新增数组项」时的空白合成块（Modal 据此渲染表单；保存后由调用方 appendItem）
+// 「新增数组项」时的空白合成块（Modal 据此渲染表单；保存后由调用方 appendItem）。
+// 字段来自与编辑面共用的 ITEM_FIELD_SPECS（完整、不含 id）；id 由 generateItemId 自动生成。
 export function newItemBlock(arrayKey: string): BoardBlock {
   const spec = ARRAY_SPECS[arrayKey];
-  const item = createEmptyItem(arrayKey);
   return {
     id: `__new__:${arrayKey}`,
     category: CATEGORY_OF_ARRAY[arrayKey] ?? "world",
     title: `新增${spec?.label ?? "项"}`,
     icon: "＋",
     summary: "",
-    fields: (spec?.keys ?? []).map((k) => ({
-      key: k,
-      label: label(k),
-      value: (item[k] as BoardFieldValue) ?? "",
-      type: TEXTAREA_KEYS.has(k) ? "textarea" : "text"
-    })),
+    fields: deriveFields({}, ITEM_FIELD_SPECS[arrayKey] ?? []),
     address: { kind: "settingsItem", arrayKey, idKey: spec?.idKey ?? "id", idValue: "" },
     deletable: false
   };
+}
+
+// 为 idKey="id" 的数组（act_plan/main_quest_path）生成不与现有冲突的唯一 id。
+export function generateItemId(arrayKey: string, existingIds: string[]): string {
+  const prefix = arrayKey === "act_plan" ? "act" : arrayKey === "main_quest_path" ? "quest" : "item";
+  const set = new Set(existingIds);
+  let n = 1;
+  while (set.has(`${prefix}_${n}`)) n += 1;
+  return `${prefix}_${n}`;
+}
+
+// 从 BoardModel 提取某数组所有现有项的 idValue（供 generateItemId 去重）。
+export function itemIdsOf(model: BoardModel, arrayKey: string): string[] {
+  const ids: string[] = [];
+  for (const cat of model.categories) {
+    for (const b of cat.blocks) {
+      if (b.address.kind === "settingsItem" && b.address.arrayKey === arrayKey) {
+        ids.push(b.address.idValue);
+      }
+    }
+  }
+  return ids;
 }
 
 // 固定块"空"判定：全字段为空字符串/空数组/空对象（数值/布尔不算空）

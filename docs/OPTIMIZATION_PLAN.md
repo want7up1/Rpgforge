@@ -27,6 +27,33 @@
 
 ## 1. 已完成
 
+### Round 42 (2026-06-05) — 看板新增设定体验增强：字段统一 + id 自动生成 + AI 补全
+
+承接 Round 41，同 PR #7。两部分：
+
+**① 新增表单与编辑共用完整字段规格 + id 自动生成（纯前端）**
+- 抽 `web/lib/generatorBoard.ts` 的 `ITEM_FIELD_SPECS`（6 类数组项完整字段规格），`buildFromSettings` 与 `newItemBlock` 共用 → 新增表单字段不再比编辑面少（此前 `newItemBlock` 只用 `ARRAY_SPECS.keys` 的 2-3 个最小字段）。
+- 新增 `generateItemId(arrayKey, existingIds)` / `itemIdsOf(model, arrayKey)`：幕/主线节点的 `id` 自动生成唯一值（`act_N`/`quest_N`），新增表单不再要求手填 id；`SettingsBoard`/`PlotMasterDetail` 新增保存处对 idKey="id" 数组注入自动 id。
+
+**② 新增设定 AI 补全（前后端）**
+- 新 prompt `api/app/prompts/suggest_item.md`（固定系统提示，吃前缀缓存）。
+- 新 `api/app/services/item_suggester.py`（`ItemSuggester`）：`use_flash` + `reasoning_effort=None` + `SUGGEST_ITEM_TIMEOUT_SECONDS=40s`；失败/超时/解析/漂移 → 空 dict fallback；`build_outline` 仅取 game_profile + story_core + worldview 概要省 token；结果过滤（剔身份字段/越界字段，不覆盖用户输入）。
+- 新端点 `POST /api/games/{id}/settings/suggest-item`。
+- 前端 `BlockDetailModal` 新增态「✨ AI 补全」按钮（传 `aiSuggest` 回调才显示）：用户填标题 → AI 补其余字段（**用户已填值优先**）；仅游戏设定页注入 `onSuggestItem`，工坊不启用。
+- 测试：`api/tests/test_item_suggester.py`（5 绿）+ `test_games.py` 端点用例；前端 tsc/lint/build 通过。
+- 设计/计划：`docs/superpowers/specs|plans/2026-06-05-ai-suggest-item*` 与 `2026-06-05-plot-line-masterdetail*`。
+
+### Round 41 (2026-06-05) — 看板「剧情结构」升级为主从视图（纲领总览 + 幕大纲 + 幕详情）
+
+纯前端，后端零改动。此前剧情线（`act_plan` 幕 + `main_quest_path` 主线节点）与其它设定共用通用卡片网格 `BoardBlockGrid`，看不清「幕 → 节点」从属与走向。本轮在看板「剧情结构」标签页换成专门的主从视图：
+
+- 新增 `web/lib/plotView.ts`（纯函数 `derivePlotView` + `actKeyOf`）：从 `BoardModel` 派生 `{ overview, acts, unassignedNodes }`。纲领 = world 分类里 `settingsScalar` 且 `path=["story_core", k]` 的 6 个标量块；幕 = plot 分类 `arrayKey==="act_plan"`；节点 = `arrayKey==="main_quest_path"`，按 `act_id` 分组到幕，`act_id` 空或指向不存在幕 → `unassignedNodes`（孤儿不丢失）。配 4 个 vitest 用例。
+- 新增 `web/components/board/PlotMasterDetail.tsx`：顶部剧情纲领总览（镜像 story_core，与世界观 tab 同源），左幕大纲（选中高亮 + ＋新增幕），右幕详情（目标/转场 + 该幕节点列表 + ＋新增节点，新增节点 `act_id` 预填当前幕）。编辑/删除/新增全复用 `BlockDetailModal` 与 `SettingsBoard` 既有 `onEditBlock/onDeleteBlock/onAddItem` 回调，diff/写回/后端零改动。
+- `web/components/board/SettingsBoard.tsx`：`activeTab === "plot"` 时渲染 `PlotMasterDetail` 替换 `BoardBlockGrid`（其它 tab 不变），plot tab 隐藏「显示空设定项」开关（主从视图自管空态）。
+- **不做**：节点拖拽重排/跨幕改归属（顺序与归属靠字段）、后端 schema/`story_blueprint` 运行时改动。
+- 设计与计划文档：`docs/superpowers/specs|plans/2026-06-05-plot-line-masterdetail*`。
+- 验证：`npm run test`（含 plotView 4 绿）/ `npm run lint` / `npm run build` 全通过；**UI 手动验证待在带数据环境跑**（本地需 API + Postgres + 已有游戏）。
+
 ### Round 40 (2026-06-04) — 「下载填写说明」改为通用模板（去剧本痕迹 + 去游戏依赖）
 
 `api/app/services/settings_guide_exporter.py`。此前导出文档结构已通用，但仍有两类"非通用"：① 字段表「示例」列硬编码了一套具体剧本（雁回镇/沈砚/义庄/黑伞会/不要修仙）；② 头部含 `game.title`/`game.id`/导出时间，「当前 JSON 结构概览」按当前游戏输出条目计数。本轮改成纯通用模板：

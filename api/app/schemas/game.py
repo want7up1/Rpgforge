@@ -130,3 +130,12 @@ class GameProgressSaveRead(BaseModel):
     summary_count: int
     created_at: datetime
     updated_at: datetime
+
+
+class SuggestItemRequest(BaseModel):
+    array_key: str
+    draft: dict[str, Any] = Field(default_factory=dict)
+
+
+class SuggestItemResponse(BaseModel):
+    fields: dict[str, Any]

@@ -9,6 +9,7 @@ import { CharacterPortrait } from "@/components/CharacterPortrait";
 
 const roleLabels: Record<CharacterRead["role"], string> = {
   protagonist: "主角",
+  antagonist: "反派",
   companion: "同伴",
   npc: "NPC",
   other: "角色"
