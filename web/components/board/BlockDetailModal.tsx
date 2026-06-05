@@ -43,9 +43,12 @@ export function BlockDetailModal({
       setDrafts((d) => {
         const next = { ...d };
         for (const [k, v] of Object.entries(fields)) {
-          const cur = next[k];
-          const empty = cur == null || cur === "" || (Array.isArray(cur) && cur.length === 0);
-          if (empty) next[k] = v as BoardFieldValue; // 用户已填值优先，不覆盖
+          // 仅覆盖用户尚未改动的字段（值仍等于初始值）→ 布尔默认 false 也能被 AI 建议填入，
+          // 同时保留用户已填/改过的值不被覆盖。
+          const initial = block.fields.find((f) => f.key === k)?.value;
+          if (JSON.stringify(next[k]) === JSON.stringify(initial)) {
+            next[k] = v as BoardFieldValue;
+          }
         }
         return next;
       });

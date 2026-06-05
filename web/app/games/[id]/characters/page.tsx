@@ -30,7 +30,7 @@ import type {
   GameDetail
 } from "@/lib/types";
 
-const roleOrder: CharacterRole[] = ["protagonist", "companion", "npc", "other"];
+const roleOrder: CharacterRole[] = ["protagonist", "antagonist", "companion", "npc", "other"];
 const allowedPortraitTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 const maxPortraitBytes = 8 * 1024 * 1024;
 
