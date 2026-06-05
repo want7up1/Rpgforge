@@ -426,3 +426,23 @@ def test_context_diagnostic_returns_runtime_story_and_materials(db_session) -> N
     assert body["runtime_story"]["current_act"]["id"] == "act_1"
     assert body["selected_action_style"]["id"] == "investigation"
     assert "雁回镇义庄" in [item["title"] for item in body["related_story_materials"]]
+
+
+def test_suggest_item_endpoint_returns_fields(reset_database, monkeypatch) -> None:
+    async def fake_suggest(self, array_key, draft, story_settings):
+        return {"role": "npc", "description": "占位"}
+
+    monkeypatch.setattr(
+        "app.services.item_suggester.ItemSuggester.suggest", fake_suggest
+    )
+    client = TestClient(app)
+    created = client.post(
+        "/api/games",
+        json={"title": "占位剧名", "genre": "悬疑", "description": "占位"},
+    ).json()
+    resp = client.post(
+        f"/api/games/{created['id']}/settings/suggest-item",
+        json={"array_key": "core_characters", "draft": {"name": "占位角色"}},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["fields"]["role"] == "npc"
