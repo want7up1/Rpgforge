@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim AS deps
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm install --registry=https://registry.npmmirror.com
 
 FROM node:22-bookworm-slim AS builder
 
