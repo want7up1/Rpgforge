@@ -28,3 +28,12 @@ portrait_data/
 *.sql
 exports/
 .superpowers/
+
+# === 部署私密信息（内网 IP / NAS 路径 / 密钥），勿提交 ===
+docker-compose.override.yml
+*.local.md
+*.local.yml
+DEPLOY.local.md
+cookie.json
+user_config.json
+config.json
