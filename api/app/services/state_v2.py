@@ -433,6 +433,18 @@ def _progression(state: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+# 默认六维属性（D&D 式：10=常人均值，判定加成=(值-10)//2）。
+# 用于老存档/未生成属性时的中性兜底，让属性判定系统对所有存档统一生效。
+DEFAULT_PROTAGONIST_ATTRIBUTES: dict[str, int] = {
+    "力量": 10,
+    "敏捷": 10,
+    "体质": 10,
+    "智力": 10,
+    "感知": 10,
+    "魅力": 10,
+}
+
+
 def _protagonist_sheet(
     state: dict[str, Any],
     progression: dict[str, Any],
@@ -443,6 +455,10 @@ def _protagonist_sheet(
     attributes = _mapping(state.get("attributes"))
     if not attributes:
         attributes = _mapping(protagonist.get("attributes"))
+    if not attributes:
+        # 老存档/未生成属性：懒注入中性默认六维（不动存档、rebuild 可复现），
+        # 让 Director 有属性名可引用、判定层有数值可读。
+        attributes = dict(DEFAULT_PROTAGONIST_ATTRIBUTES)
     return {
         "name": _first_text(protagonist.get("name")),
         "identity": _first_text(protagonist.get("identity")),

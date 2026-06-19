@@ -109,3 +109,44 @@ def test_outcome_instruction_mentions_failure_consequence() -> None:
     text = build_outcome_instruction(result)
     assert "失败" in text
     assert "硬约束" in text
+
+
+def test_default_attributes_injected_for_empty_protagonist() -> None:
+    """老存档/未生成属性：state_v2 投影懒注入中性默认六维，让判定层有可读数值（调整值 0）。"""
+    from app.services.state_v2 import DEFAULT_PROTAGONIST_ATTRIBUTES, state_v2_view
+
+    view = state_v2_view({"protagonist": {"name": "无名"}})
+    assert view["protagonist_sheet"]["attributes"] == DEFAULT_PROTAGONIST_ATTRIBUTES
+    result = resolve_action_check(
+        {"action": "搜查", "difficulty": "normal", "attribute": "感知"},
+        view,
+        rng=_FixedRoll(10),
+    )
+    assert result["breakdown"]["attribute"] == 0
+
+
+def test_real_attributes_preserved_over_default() -> None:
+    """已有真实属性时不被默认六维覆盖（投影原样带出，build 真正生效）。"""
+    from app.services.state_v2 import state_v2_view
+
+    view = state_v2_view({"protagonist": {"attributes": {"力量": 16}}})
+    assert view["protagonist_sheet"]["attributes"] == {"力量": 16}
+
+
+def test_game_creator_fills_default_attributes_when_empty() -> None:
+    """game_creator：AI 未生成/手动建档时填默认六维（即使无 configured 主角也执行）。"""
+    from app.services.game_creator import _fill_protagonist_from_story_settings
+    from app.services.state_v2 import DEFAULT_PROTAGONIST_ATTRIBUTES
+
+    initial_state: dict = {"protagonist": {"name": "阿强", "attributes": {}}}
+    _fill_protagonist_from_story_settings(initial_state, {})
+    assert initial_state["protagonist"]["attributes"] == DEFAULT_PROTAGONIST_ATTRIBUTES
+
+
+def test_game_creator_keeps_generated_attributes() -> None:
+    """game_creator：生成器已产出属性时不覆盖。"""
+    from app.services.game_creator import _fill_protagonist_from_story_settings
+
+    initial_state: dict = {"protagonist": {"attributes": {"力量": 15, "敏捷": 9}}}
+    _fill_protagonist_from_story_settings(initial_state, {})
+    assert initial_state["protagonist"]["attributes"] == {"力量": 15, "敏捷": 9}

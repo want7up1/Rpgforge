@@ -183,7 +183,7 @@ target_section = "initial_state"
       "identity": "",
       "appearance": "",
       "portrait_prompt": "",
-      "attributes": {}
+      "attributes": {"力量": 10, "敏捷": 12, "体质": 11, "智力": 13, "感知": 10, "魅力": 9}
     },
     "progression": {
       "level": 1,
@@ -206,4 +206,4 @@ target_section = "initial_state"
     "open_threads": []
   }
 }
-限制：只写开局此刻已经成立的状态，不写完整世界背景或未来剧情计划。relationships 只包含玩家初始可见关系，数值 0-100。known_facts 只写玩家已知信息；hidden_facts 只写系统当前必须记住但玩家未知的事实。
+限制：只写开局此刻已经成立的状态，不写完整世界背景或未来剧情计划。relationships 只包含玩家初始可见关系，数值 0-100。known_facts 只写玩家已知信息；hidden_facts 只写系统当前必须记住但玩家未知的事实。attributes 必须给出主角六维（力量/敏捷/体质/智力/感知/魅力），数值 8–16、10 为常人均值；依主角设定分配出明显强弱（强项 13–16、弱项 8–9），让角色特长能真正影响后续行动判定，不要全部填 10 或留空。

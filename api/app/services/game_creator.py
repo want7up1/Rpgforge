@@ -7,7 +7,7 @@ from app.models.character import Character
 from app.models.game import Game, GameConfig
 from app.models.state import GameState
 from app.schemas.generator import GeneratedGameConfig
-from app.services.state_v2 import normalize_state_v2
+from app.services.state_v2 import DEFAULT_PROTAGONIST_ATTRIBUTES, normalize_state_v2
 from app.services.story_settings import (
     default_story_settings,
     game_profile,
@@ -125,6 +125,11 @@ def _fill_protagonist_from_story_settings(
     if not isinstance(protagonist, dict):
         protagonist = {}
         initial_state["protagonist"] = protagonist
+    # 属性兜底（总执行，在下方 configured 早返回之前）：AI 未生成或手动建档时填中性默认六维，
+    # 让角色 build / 行动判定从开局就有依托，而不是空属性→判定纯靠运气。
+    existing_attrs = protagonist.get("attributes")
+    if not isinstance(existing_attrs, dict) or not existing_attrs:
+        protagonist["attributes"] = dict(DEFAULT_PROTAGONIST_ATTRIBUTES)
     configured = next(
         (
             character

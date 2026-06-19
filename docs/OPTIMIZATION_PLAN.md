@@ -27,6 +27,20 @@
 
 ## 1. 已完成
 
+### Round 47 (2026-06-19) — T1 属性 seeding：让 d20 判定真实生效（角色 build 影响成败）
+
+承接 T0 的「行动后果卡」——审计发现开局 `protagonist.attributes` 多为空 → `_compute_modifier` 的 attribute 加成恒 0 → 前中期判定纯靠运气、角色 build 不影响成败、后果卡的 `+modifier` 永远是 0。本轮让属性真正进入判定。纯后端，无迁移。
+
+**统一六维**：力量/敏捷/体质/智力/感知/魅力（D&D 式，10=常人均值，加成 `(值-10)//2`）。判定层 `_attribute_bonus` 大小写+子串匹配 `action_check.attribute`；Director（`story_director.md` 规则12）被要求"用 current_state_v2 里已有的名字"填 attribute → 同名即匹配，**属性名对齐天然成立**（六维或自定义属性都行）。
+
+- **生成侧**（`generate_config_section.md`）：`initial_state.protagonist.attributes` 模板由 `{}` 改为填满六维示例 + 规则"数值 8–16、按主角设定分配明显强弱（强项 13–16/弱项 8–9），不要全填 10 或留空"。→ 新游戏开局就有 build 差异。
+- **初始化兜底**（`game_creator`）：新增 `DEFAULT_PROTAGONIST_ATTRIBUTES`（六维全 10，定义在 `state_v2`）；`_fill_protagonist_from_story_settings` 在 configured 早返回**之前**，属性空则填默认（AI 未产出/手动建档也不空）。
+- **老存档零迁移**（`state_v2._protagonist_sheet`）：投影时属性仍空则懒注入默认六维。不动存档、rebuild 可复现。**注意**：仅影响后端 `state_v2_view`（判定层/Director/GM 投影）；前端 `getStateV2FromGame` 是独立客户端归一、读原始 state——故空属性老存档"判定用中性六维生效、但前端状态页仍显示空"，属轻微展示侧不一致、非 bug（新游戏两端一致）。
+- **DC**：本轮**不动**（观察驱动）。中性默认让老存档/非专长行动难度不变；专长行动变易是"build 该起作用"的正确表现；hard(16)/extreme(20) 在典型 +3~+5 修正下仍有真实不确定性（hard 需 roll≥11~13）。盲目通胀 DC 会变 grindy——上线后看真实掷骰分布再定。
+- **可见度**：行动后果卡（Round 44）已在阅读流展示 outcome_label + 骰面；只露结果不露 breakdown（防泄露关系/隐藏值）。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **247 passed**（+4：懒投影默认/真值保留/game_creator 填充/填充不覆盖生成值）；真实老存档 rebuild 实测属性原样保留、空属性投影得默认六维。**部署**：api/worker 镜像已重建重启（无 web 改动、无迁移）。
+
 ### Round 46 (2026-06-18) — T1 Drift 改异步事后审计（去延迟尖峰 + 不再压制能动性）
 
 承接路线图 T1，把"偏离校验(drift)"从玩家同步路径改成异步事后审计。**§2.1/§2.3/§2.5 链路表已变，下次维护文档时同步**（玩家路径少一层、stage_total 7→6）。
