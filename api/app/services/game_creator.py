@@ -75,6 +75,73 @@ def build_manual_generated_config(
     )
 
 
+def _extract_story_settings(payload: Any) -> Any:
+    """从粘贴的 JSON 里解出 story_settings 本体。
+
+    兼容三种形态：① 裸 story_settings 对象；② settings-export 包裹体
+    （含 story_settings 键）；③ 前端再包一层。靠 format_version/game_profile
+    标记判定是否已到本体，最多向下钻 3 层防御无限递归。
+    """
+    current = payload
+    for _ in range(3):
+        if not isinstance(current, dict):
+            break
+        if current.get("format_version") or current.get("game_profile"):
+            return current
+        nested = current.get("story_settings")
+        if isinstance(nested, dict):
+            current = nested
+            continue
+        break
+    return current
+
+
+def _story_has_content(story: dict[str, Any]) -> bool:
+    """判断归一化后的剧本是否含真实剧情设定。
+
+    normalize 会把任意输入纠成合法空壳（title 缺省「未命名游戏」、format_version 纠回），
+    所以仅靠 validate 挡不住垃圾粘贴。只要标题/世界观/角色/幕/故事核心任一非空即视为有内容。
+    """
+    profile = story.get("game_profile") or {}
+    title = str(profile.get("title") or "").strip()
+    if title not in ("", "未命名游戏"):
+        return True
+    worldview = story.get("worldview")
+    if isinstance(worldview, dict) and any(worldview.values()):
+        return True
+    if story.get("core_characters") or story.get("act_plan"):
+        return True
+    core = story.get("story_core") or {}
+    return bool(
+        str(core.get("premise") or "").strip()
+        or str(core.get("main_goal") or "").strip()
+        or str(core.get("central_mystery") or "").strip()
+    )
+
+
+def build_imported_game_config(payload: Any) -> GeneratedGameConfig:
+    """把外部 AI 写的 story_settings JSON 校验+归一化成 GeneratedGameConfig。
+
+    校验失败（角色重名、幕 id 重复、内容为空等）抛 ValueError，由路由层转成 400。
+    不建游戏、不落库——预览满意后再走 create_game_from_config。
+    """
+    raw = _extract_story_settings(payload)
+    story_settings = validate_story_settings(raw)
+    if not _story_has_content(story_settings):
+        raise ValueError(
+            "剧本内容为空或格式不正确：未识别到任何剧情设定"
+            "（标题、世界观、角色、幕、故事核心都为空）。"
+            "请确认粘贴的是完整的 story_settings JSON。"
+        )
+    profile = game_profile(story_settings)
+    return GeneratedGameConfig(
+        title=profile["title"],
+        genre=profile["genre"] or None,
+        description=profile["description"] or None,
+        story_settings=story_settings,
+    )
+
+
 def create_game_from_config(db: Session, config: GeneratedGameConfig) -> Game:
     story_settings = validate_story_settings(config.story_settings)
     profile = game_profile(story_settings)

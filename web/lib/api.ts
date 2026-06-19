@@ -515,6 +515,36 @@ export async function createGeneratedGame(
   });
 }
 
+// 导入外部 AI 写的 story_settings JSON：校验+归一化后返回可预览的 config（不建游戏）。
+export async function importScript(
+  payload: unknown
+): Promise<{ config: GeneratedGameConfig; model_used: string }> {
+  return requestJson<{ config: GeneratedGameConfig; model_used: string }>(
+    "/api/generator/import-script",
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+// 下载「剧本创作包」Markdown（填写指南 + 完整范例 + AI 指令）。
+export async function getAuthoringKit(): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`${getApiBaseUrl()}/api/generator/authoring-kit`, {
+    headers: { Accept: "text/markdown" },
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition"))
+  };
+}
+
 export async function getTurns(gameId: string): Promise<TurnRead[]> {
   return requestJson<TurnRead[]>(`/api/games/${gameId}/turns`);
 }

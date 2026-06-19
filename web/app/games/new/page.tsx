@@ -15,7 +15,9 @@ import {
   createGeneratorChatJob,
   createGeneratorFinalizeJob,
   getActiveGeneratorChatJob,
-  getActiveGeneratorFinalizeJob
+  getActiveGeneratorFinalizeJob,
+  getAuthoringKit,
+  importScript
 } from "@/lib/api";
 import {
   BOARD_CATEGORIES,
@@ -67,6 +69,9 @@ export default function NewGamePage() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [chatProcess, setChatProcess] = useState<GeneratorChatJobRead | null>(null);
   const [finalizeProcess, setFinalizeProcess] = useState<GeneratorFinalizeJobRead | null>(null);
+  // 创建方式：ai = AI 访谈生成；import = 导入外部 AI 写的剧本 JSON。
+  const [mode, setMode] = useState<"ai" | "import">("ai");
+  const [scriptText, setScriptText] = useState("");
 
   // 解锁时恢复 AI 原值用：最近一次 AI 产出的快照。
   const aiConfirmedRef = useRef<Record<string, unknown>>({});
@@ -248,6 +253,53 @@ export default function NewGamePage() {
     }
   }
 
+  async function handleDownloadKit() {
+    setError(null);
+    try {
+      const { blob, filename } = await getAuthoringKit();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename || "RPGForge-剧本创作包.md";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "下载创作包失败。");
+    }
+  }
+
+  async function handleImportScript() {
+    setError(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(scriptText);
+    } catch {
+      setError("剧本 JSON 解析失败：请确认粘贴的是合法 JSON。");
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      setError("剧本必须是一个 JSON 对象。");
+      return;
+    }
+    baselineRef.current = model;
+    setPendingAction("import");
+    try {
+      const { config } = await importScript(parsed);
+      aiSettingsRef.current = config.story_settings;
+      setLockedIds([]);
+      setConfirmed({});
+      setGeneratedConfig(config);
+      const next = buildBoardModel({ source: "settings", settings: config.story_settings });
+      setLastDiff(diffBoard(baselineRef.current, next));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "剧本导入失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   const canFinalize = stage === "ready_to_generate" && !generatedConfig;
   const progressItems: ProgressItem[] = BOARD_CATEGORIES.filter((c) => c.id !== "advanced").map(
     (c) => ({
@@ -304,6 +356,71 @@ export default function NewGamePage() {
         </div>
       </section>
 
+      {!generatedConfig ? (
+        <section className="game-page-hero">
+          <div className="flex gap-2">
+            <button
+              className={mode === "ai" ? "app-button app-button-primary" : "app-button"}
+              disabled={pendingAction !== null}
+              onClick={() => setMode("ai")}
+              type="button"
+            >
+              AI 访谈生成
+            </button>
+            <button
+              className={mode === "import" ? "app-button app-button-primary" : "app-button"}
+              disabled={pendingAction !== null}
+              onClick={() => setMode("import")}
+              type="button"
+            >
+              导入剧本
+            </button>
+          </div>
+
+          {mode === "import" ? (
+            <div className="mt-3 flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button className="app-button" onClick={handleDownloadKit} type="button">
+                  下载创作包
+                </button>
+                <label className="app-button cursor-pointer">
+                  上传 .json
+                  <input
+                    accept=".json,application/json"
+                    className="hidden"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (file) setScriptText(await file.text());
+                      event.target.value = "";
+                    }}
+                    type="file"
+                  />
+                </label>
+                <span className="text-xs text-[color:var(--muted)]">
+                  把创作包连同你的想法发给外部 AI，拿到 story_settings JSON 粘贴到下方。
+                </span>
+              </div>
+              <textarea
+                className="app-input min-h-[200px] resize-y font-mono text-sm leading-6"
+                onChange={(event) => setScriptText(event.target.value)}
+                placeholder="在此粘贴外部 AI 产出的 story_settings JSON…"
+                value={scriptText}
+              />
+              <div>
+                <button
+                  className="app-button app-button-primary"
+                  disabled={pendingAction !== null || !scriptText.trim()}
+                  onClick={handleImportScript}
+                  type="button"
+                >
+                  {pendingAction === "import" ? "解析中..." : "解析预览"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {error ? <section className="app-alert">{error}</section> : null}
 
       {pendingAction === "finalize" || (generatedConfig && content) ? (
@@ -327,14 +444,16 @@ export default function NewGamePage() {
         />
       ) : null}
 
-      <ChatDock
-        latestReply={history.length ? history[history.length - 1].content : ""}
-        input={chatInput}
-        disabled={pendingAction !== null}
-        onInput={setChatInput}
-        onSend={handleChat}
-        onToggleHistory={() => setHistoryOpen((v) => !v)}
-      />
+      {mode === "ai" ? (
+        <ChatDock
+          latestReply={history.length ? history[history.length - 1].content : ""}
+          input={chatInput}
+          disabled={pendingAction !== null}
+          onInput={setChatInput}
+          onSend={handleChat}
+          onToggleHistory={() => setHistoryOpen((v) => !v)}
+        />
+      ) : null}
       <ChatHistorySheet open={historyOpen} history={history} onClose={() => setHistoryOpen(false)} />
     </AppShell>
   );

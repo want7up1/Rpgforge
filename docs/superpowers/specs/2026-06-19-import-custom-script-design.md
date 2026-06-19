@@ -2,7 +2,7 @@
 
 - 日期：2026-06-19
 - 分支：feat/narrative-quality-overhaul
-- 状态：设计已确认，待写实现计划
+- 状态：已实现（见 OPTIMIZATION_PLAN.md Round 50）
 
 ## 1. 背景与目标
 

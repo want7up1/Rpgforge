@@ -1,8 +1,10 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,8 +28,9 @@ from app.schemas.generator import (
     GeneratorFinalizeResponse,
 )
 from app.services.agent_traces import set_trace_context
+from app.services.authoring_kit_exporter import export_authoring_kit_markdown
 from app.services.deepseek_client import DeepSeekAPIError, DeepSeekConfigurationError
-from app.services.game_creator import create_game_from_config
+from app.services.game_creator import build_imported_game_config, create_game_from_config
 from app.services.game_generator import GameGeneratorService, ModelOutputValidationError
 from app.services.generator_stream_events import generator_stream_event_broker
 from app.services.job_queue import enqueue_chat_job, enqueue_finalize_job
@@ -270,6 +273,30 @@ async def generator_create_game(
     # C1 开局序章：建好游戏后生成开场白写入 turn 0；失败/超时静默跳过，保持原空开局。
     await _generate_opening_scene(db, game)
     return GeneratorCreateGameResponse(game=game_detail_response(get_game_or_404(db, game.id)))
+
+
+@router.get("/authoring-kit")
+def export_authoring_kit() -> Response:
+    """下载「剧本创作包」：填写指南 + 完整范例 + AI 指令，喂给外部 AI 写剧本。"""
+    filename = "RPGForge-剧本创作包.md"
+    return Response(
+        content=export_authoring_kit_markdown(),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.post("/import-script", response_model=GeneratorFinalizeResponse)
+def generator_import_script(payload: dict[str, Any]) -> GeneratorFinalizeResponse:
+    """校验+归一化外部 AI 写的 story_settings JSON，返回可预览的 config（不建游戏）。"""
+    try:
+        config = build_imported_game_config(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    return GeneratorFinalizeResponse(config=config, model_used="import")
 
 
 async def _generate_opening_scene(db: Session, game: Game) -> None:

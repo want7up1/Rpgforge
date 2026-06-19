@@ -27,6 +27,26 @@
 
 ## 1. 已完成
 
+### Round 50 (2026-06-19) — 导入自定义剧本（外部 AI 写 → 粘贴 JSON → 看板预览 → 建游戏）
+
+新功能：玩家在外部 AI（Claude/ChatGPT）里按 RPGForge 结构写好剧本，粘贴 JSON 即可新建一个"契合自己想法"的可玩游戏。设计 spec 见 `docs/superpowers/specs/2026-06-19-import-custom-script-design.md`。
+
+**复用为主、零新增 LLM 链路**：`games/new` 现有流水线本就是 `generatedConfig → buildBoardModel → SettingsBoard 分块预览 → create-game`；本轮只给它加一个"喂入口"，下游预览/编辑/建游戏/开场白全复用。
+
+**后端**（2 端点，`api/app/routers/generator.py`）：
+- `GET /api/generator/authoring-kit`：下载"剧本创作包" Markdown = 现成 v2 指南（`export_settings_guide_markdown`）+ 完整范例剧本 + AI 指令。新模块 `app/services/authoring_kit_exporter.py`，范例 `AUTHORING_KIT_EXAMPLE`（全新编写的侦探题材，**不碰任何真实存档**）由测试守护必须能过 `validate_story_settings`。
+- `POST /api/generator/import-script`：吃粘贴 JSON → `build_imported_game_config`（`game_creator.py`）校验+归一化 → 返回 `GeneratorFinalizeResponse`（与 finalize 同构，`model_used="import"`）；不建游戏、不落库。
+
+**关键坑 + 兜底**：① 给 AI 的指南必须用 **story_settings v2** 真实 schema，`docs/AI_STORY_RUNTIME_GUIDE.md` 那份旧结构（script_outline/campaign_contract）**不可导入**。② `normalize_story_settings` 会把任意输入静默纠成合法空壳（title 缺省「未命名游戏」、format_version 纠回），故 `validate` 挡不住垃圾粘贴 → 新增 `_story_has_content` 防线：标题/世界观/角色/幕/故事核心全空则 400。③ `_extract_story_settings` 兼容裸对象 / settings-export 包裹体 / 前端再包一层。
+
+**前端**（`web/app/games/new/page.tsx` + `web/lib/api.ts`）：顶部加「AI 访谈生成 | 导入剧本」模式切换；导入面板 = 下载创作包 + 粘贴 textarea + `.json` 上传 + 解析预览；解析成功 `setGeneratedConfig` → 复用现成看板预览 → 「确认并开始冒险」。
+
+**过 Round 44 前端门**：这不是给冻结的 SettingsBoard/工坊加作者便利新功能，而是**给玩家核心循环加一条创建入口**——让玩家直接得到契合自己想法的可玩游戏（"读剧情→做选择→看后果"的前置）。触点是 `games/new` 创建流，非冻结看板。
+
+**安全验证**：TDD（6 个新测试，含空剧本拒绝走 RED→GREEN）；容器内 `ruff` 干净 + **pytest 255 passed**；前端 `eslint`/`tsc`/`vitest 52` 全过；重建 api/worker/web 后**真实端点冒烟**：范例→200、垃圾→400、极简真实剧本→200。
+
+**部署**：api/worker/web 镜像已重建重启（无迁移）。
+
 ### Round 49 (2026-06-19) — T2 外科拆 state_applier Phase A：删锚点文本推断 backstop
 
 承接架构审计"state_applier 是全项目最烂巨石"的客观结论（2150 行、184 行脆弱中文子串匹配、Round 16/26/27/28/29/30/33/34 八轮返工同一病灶）。本轮做 Phase A——**外科式删掉锚点文本推断 backstop**（最易误判、最该砍的一层）。
