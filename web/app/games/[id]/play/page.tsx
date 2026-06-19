@@ -1116,6 +1116,25 @@ function StoryPanel({
 function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) {
   return (
     <article className="turn-settlement-card">
+      {settlement.outcome ? (
+        <div className={`turn-outcome turn-outcome--${settlement.outcome.tone}`}>
+          <span className="turn-outcome-label">行动结果 · {settlement.outcome.label}</span>
+          {settlement.outcome.action ? (
+            <span className="turn-outcome-action">{settlement.outcome.action}</span>
+          ) : null}
+          {settlement.outcome.roll !== null ? (
+            <span className="turn-outcome-roll">
+              掷骰 {settlement.outcome.roll}
+              {settlement.outcome.modifier
+                ? settlement.outcome.modifier > 0
+                  ? `+${settlement.outcome.modifier}`
+                  : settlement.outcome.modifier
+                : ""}
+              {settlement.outcome.dc !== null ? ` vs ${settlement.outcome.dc}` : ""}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="story-label">本回合变化</div>
@@ -1186,10 +1205,7 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
   const flags = obs?.flags ?? [];
   const hitRate =
     data?.cache_hit_rate != null ? `${Math.round(data.cache_hit_rate * 100)}%` : "—";
-  const check = data?.action_outcome as
-    | { outcome_label?: string; action?: string; roll?: number; modifier?: number; dc?: number }
-    | null
-    | undefined;
+  // 行动判定后果已提进阅读流的「行动结果卡」（见 TurnSettlementCard），此处不再重复展示。
 
   return (
     <details className="generation-detail-panel" onToggle={handleToggle}>
@@ -1217,8 +1233,7 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
             <div>
               <dt>篇幅</dt>
               <dd>
-                {gen.narrative_chars} 字 · {gen.meets_min_chars ? "达标" : "未达硬下限"} ·{" "}
-                {gen.paragraph_count} 段
+                {gen.narrative_chars} 字 · {gen.paragraph_count} 段
               </dd>
             </div>
           ) : null}
@@ -1227,18 +1242,6 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
               <dt>canon 使用</dt>
               <dd>
                 {obs.canon.used ?? 0}/{obs.canon.total ?? 0} 个专名
-              </dd>
-            </div>
-          ) : null}
-          {check?.outcome_label ? (
-            <div>
-              <dt>行动判定</dt>
-              <dd>
-                {check.action ? `${check.action} · ` : ""}
-                {check.outcome_label}
-                {typeof check.roll === "number"
-                  ? `（掷骰 ${check.roll}+${check.modifier ?? 0} vs ${check.dc ?? "?"}）`
-                  : ""}
               </dd>
             </div>
           ) : null}
@@ -1327,7 +1330,7 @@ function GenerationDetails({
 
 function TurnStageProgress({ process }: { process: StoryProcessJob }) {
   const [now, setNow] = useState(() => Date.now());
-  const stageTotal = Math.max(process.stage_total || 7, 1);
+  const stageTotal = Math.max(process.stage_total || 6, 1);
   const stageIndex = Math.min(Math.max(process.stage_index || 1, 1), stageTotal);
   const stagePercent = Math.min(100, Math.max(6, (stageIndex / stageTotal) * 100));
   const stageLabel = process.stage_label || "准备上下文";

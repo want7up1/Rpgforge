@@ -14,7 +14,6 @@ from app.schemas.turn import GMRuntimeOutput, TurnCreate
 from app.services.action_resolver import build_outcome_instruction, resolve_action_check
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
-from app.services.drift_validator import DriftValidator
 from app.services.game_activity import touch_game
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
@@ -47,7 +46,6 @@ STAGE_PREPARE_CONTEXT = "prepare_context"
 STAGE_RETRIEVE_MEMORY = "retrieve_memory"
 STAGE_STORY_DIRECTOR = "story_director"
 STAGE_GM_RUNTIME = "gm_runtime"
-STAGE_DRIFT_VALIDATION = "drift_validation"
 STAGE_PERSIST_TURN = "persist_turn"
 STAGE_COMPLETED = "completed"
 
@@ -111,14 +109,12 @@ class GameplayService:
         state_extractor: StateExtractor | None = None,
         context_compressor: ContextCompressor | None = None,
         story_director: StoryDirector | None = None,
-        drift_validator: DriftValidator | None = None,
     ) -> None:
         self.router = router or ModelRouter()
         self.prompt_builder = prompt_builder or PromptBuilder()
         self.state_extractor = state_extractor or StateExtractor(router=self.router)
         self.context_compressor = context_compressor or ContextCompressor(router=self.router)
         self.story_director = story_director or StoryDirector(router=self.router)
-        self.drift_validator = drift_validator or DriftValidator(router=self.router)
 
     async def run_turn(self, db: Session, game: Game, payload: TurnCreate) -> Turn:
         context = await self.load_turn_runtime_context(db, game, payload)
@@ -267,30 +263,18 @@ class GameplayService:
                 self._collect_runtime_output_stream(messages, on_update=on_update),
                 timeout=GM_RUNTIME_TIMEOUT_SECONDS,
             )
-        if not self._should_run_drift_validation(
-            game=context.game,
-            recent_turns=context.recent_turns,
-            director_decision=director_decision,
-            runtime_output=runtime_output,
-            runtime_story=context.runtime_story_bare,
-        ):
-            if on_progress:
-                await on_progress("偏离风险较低，跳过深度校验。")
-            self._record_output_observation(context, runtime_output)
-            return runtime_output, model_used
-        await _emit_stage(on_stage, STAGE_DRIFT_VALIDATION)
-        if on_progress:
-            await on_progress("正在校验剧情是否偏离剧本锚点。")
-        runtime_output, model_used = await self._validate_and_maybe_rewrite(
+        # 偏离校验已改异步事后审计（见 turn_maintenance_jobs._audit_drift）：玩家路径不再做同步
+        # drift 校验/重写，去掉延迟尖峰、也不再把玩家发散探索拽回主线。仅保留一个极窄的确定性
+        # 剧透兜底——当前幕 forbidden_reveals 整串命中（高精度/低召回/零额外 LLM）才做一次定向修订。
+        self._record_output_observation(context, runtime_output)
+        runtime_output, model_used = await self._redact_forbidden_reveals_if_hit(
             context=context,
             director_decision=director_decision,
             runtime_output=runtime_output,
             model_used=model_used,
             on_update=on_update,
             on_progress=on_progress,
-            on_stage=on_stage,
         )
-        self._record_output_observation(context, runtime_output)
         return runtime_output, model_used
 
     @staticmethod
@@ -321,65 +305,8 @@ class GameplayService:
                 )
         except Exception as exc:  # 观测失败绝不影响主回合
             logger.warning("GM 输出观测失败（game %s）：%s", context.game.id, exc)
-
-    def _should_run_drift_validation(
-        self,
-        *,
-        game: Game,
-        recent_turns: list[Turn],
-        director_decision: StoryDirectorDecision,
-        runtime_output: GMRuntimeOutput,
-        runtime_story: dict[str, Any] | None = None,
-    ) -> bool:
-        next_turn_number = (recent_turns[-1].turn_number + 1) if recent_turns else 1
-        if next_turn_number == 1 or next_turn_number % 3 == 0:
-            return True
-
-        output_text = "\n".join(
-            [
-                runtime_output.narrative,
-                "\n".join(runtime_output.visible_clues),
-                "\n".join(option.label for option in runtime_output.action_options),
-            ]
-        )
-        normalized_output = output_text.lower()
-        high_risk_terms = (
-            "终局",
-            "最终真相",
-            "全部真相",
-            "幕后黑手",
-            "幕后组织",
-            "真正身份",
-            "新组织",
-            "新势力",
-            "boss",
-            "新 boss",
-            "世界级危机",
-            "秘密基地",
-            "核心秘密",
-            "神明",
-            "灭世",
-        )
-        if any(term in normalized_output for term in high_risk_terms):
-            return True
-
-        for reveal in director_decision.forbidden_reveals:
-            reveal_text = reveal.strip()
-            if len(reveal_text) >= 4 and reveal_text in output_text:
-                return True
-
-        if runtime_story is None:
-            state_json = game.state.state_json if game.state else {}
-            runtime_story = build_runtime_story(game.config, state_json)
-        core = runtime_story.get("story_core") if isinstance(runtime_story, dict) else {}
-        if not isinstance(core, dict):
-            core = {}
-        for forbidden in core.get("forbidden_drift") or []:
-            forbidden_text = str(forbidden).strip()
-            if len(forbidden_text) >= 4 and forbidden_text in output_text:
-                return True
-
-        return False
+            # 标记观测失败：让剧透兜底/看板能区分"确认无命中"与"未检查"，避免防线静默塌陷。
+            context.telemetry.output_observation = {"observe_error": True}
 
     def persist_runtime_turn(
         self,
@@ -616,7 +543,7 @@ class GameplayService:
         # Director 可能漏掉关键素材或挑错标题；空集时退回全集，避免 GM 失盲。
         return filtered or materials
 
-    async def _validate_and_maybe_rewrite(
+    async def _redact_forbidden_reveals_if_hit(
         self,
         *,
         context: TurnRuntimeContext,
@@ -625,36 +552,33 @@ class GameplayService:
         model_used: str,
         on_update: GameplayStreamUpdateCallback | None = None,
         on_progress: GameplayProgressCallback | None = None,
-        on_stage: GameplayStageCallback | None = None,
     ) -> tuple[GMRuntimeOutput, str]:
-        validation = await self.drift_validator.validate(
-            game=context.game,
-            player_input=context.player_input,
-            recent_turns=context.recent_turns,
-            director_decision=director_decision,
-            runtime_output=runtime_output,
-            runtime_story=context.runtime_story_bare,
-            state_v2=context.state_v2,
-        )
-        context.telemetry.drift_severity = validation.severity
-        context.telemetry.drift_validation = validation.model_dump()
-        if not self.drift_validator.should_rewrite(validation):
+        """删掉同步 drift 后唯一的事后剧透兜底：当前幕 forbidden_reveals 整串命中（output_observer
+        已算好、高精度低召回、零额外 LLM）时，做一次定向局部修订仅删除提前揭露的内容。
+
+        命中极罕见，绝大多数回合在此零成本返回。重写失败/超时则保留原稿，不阻断回合。
+        """
+        observation = context.telemetry.output_observation or {}
+        hits = observation.get("forbidden_reveal_hits") or []
+        if not hits:
             return runtime_output, model_used
 
         context.telemetry.rewrite_triggered = True
-        rewrite_instruction = self.drift_validator.rewrite_instruction(validation)
-        await _emit_stage(on_stage, STAGE_GM_RUNTIME)
+        instruction = (
+            "上一稿提前揭露了本幕禁止揭露的内容：" + "、".join(str(h) for h in hits[:5]) + "。"
+            "请在保留其余全部剧情、线索、行动选项与场景推进的前提下，仅删除或改写这些提前揭露的"
+            "部分，不要剧透、不要从零重写。"
+        )
         if on_progress:
-            await on_progress("偏离校验要求局部修订剧情，正在重写。")
-        # 把上一次 GM 输出连同 drift 指令一起喂回 GM，让其做局部修订而非从零重写。
+            await on_progress("检测到提前揭露禁止内容，正在做最小化修订。")
         rewrite_messages = self._build_contextual_runtime_messages(
             context=context,
             director_decision=director_decision,
-            drift_rewrite_instruction=rewrite_instruction,
+            drift_rewrite_instruction=instruction,
             previous_runtime_output=runtime_output,
         )
-        if on_update is None:
-            try:
+        try:
+            if on_update is None:
                 result = await asyncio.wait_for(
                     self.router.use_pro(
                         "gm_runtime_rewrite",
@@ -664,20 +588,32 @@ class GameplayService:
                     ),
                     timeout=GM_RUNTIME_TIMEOUT_SECONDS,
                 )
-            except TimeoutError as exc:
-                raise GameplayValidationError(
-                    f"GM 重写超过 {int(GM_RUNTIME_TIMEOUT_SECONDS)} 秒。"
-                ) from exc
-            return self._parse_runtime_output(result.content), result.model
-
-        return await asyncio.wait_for(
-            self._collect_runtime_output_stream(
-                rewrite_messages,
-                on_update=on_update,
-                max_tokens=GM_REWRITE_MAX_TOKENS,
-            ),
-            timeout=GM_RUNTIME_TIMEOUT_SECONDS,
-        )
+                rewritten, model = self._parse_runtime_output(result.content), result.model
+            else:
+                rewritten, model = await asyncio.wait_for(
+                    self._collect_runtime_output_stream(
+                        rewrite_messages,
+                        on_update=on_update,
+                        max_tokens=GM_REWRITE_MAX_TOKENS,
+                    ),
+                    timeout=GM_RUNTIME_TIMEOUT_SECONDS,
+                )
+        except (GameplayValidationError, TimeoutError) as exc:
+            logger.warning(
+                "剧透兜底重写失败（game %s），保留原稿：%s", context.game.id, exc
+            )
+            return runtime_output, model_used
+        # 重写后重新观测；若仍命中禁止揭露说明定向修订没清干净——告警供看板监控，但仍返回重写稿
+        # （不再二次重写以免叠加延迟；"重写后仍命中率"本身就是该监控的信号）。
+        self._record_output_observation(context, rewritten)
+        residual = (context.telemetry.output_observation or {}).get("forbidden_reveal_hits") or []
+        if residual:
+            logger.warning(
+                "剧透兜底重写后仍命中禁止揭露（game %s）：%s",
+                context.game.id,
+                "、".join(str(h) for h in residual[:5]),
+            )
+        return rewritten, model
 
     async def _update_context_after_turn(
         self,

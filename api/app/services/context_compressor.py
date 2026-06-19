@@ -33,6 +33,8 @@ class ContextCompressionOutput(BaseModel):
     turn_hidden_summary: str | None = None
     chapter_summary: str | None = None
     long_term_summary: str | None = None
+    # 叙事连续性轨：给下一回合 GM 的「前情提要」，有承接语气、不是干瘪状态摘要。
+    narrative_recap: str | None = None
     important_facts: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -43,6 +45,7 @@ class ContextCompressor:
     def load_prompt_summaries(self, db: Session, game_id: UUID) -> dict[str, Any]:
         long_term = self._latest_summary(db, game_id, "long_term")
         chapter = self._latest_summary(db, game_id, "chapter")
+        narrative = self._latest_summary(db, game_id, "narrative")
         recent_turns = list(
             db.scalars(
                 select(Summary)
@@ -54,6 +57,8 @@ class ContextCompressor:
         return {
             "long_term": self._summary_payload(long_term),
             "chapter": self._summary_payload(chapter),
+            # 前情提要（叙事承接，供 GM 接语气/关系/情绪；非复述清单，见 gm_runtime 规则 35）。
+            "narrative_recap": narrative.content if narrative else None,
             "recent_turn_summaries": [
                 self._summary_payload(summary) for summary in reversed(recent_turns)
             ],
@@ -261,6 +266,17 @@ class ContextCompressor:
             if game.state is not None:
                 game.state.summary = output.long_term_summary
                 db.add(game.state)
+        # 叙事连续性轨：单行 narrative 摘要，随回合滚动更新；空则不动旧值（永不空白）。
+        if output.narrative_recap:
+            self._upsert_summary(
+                db,
+                game_id=game.id,
+                summary_type="narrative",
+                range_start_turn=1,
+                range_end_turn=turn.turn_number,
+                content=_trim_text(output.narrative_recap, 1000),
+                important_facts={},
+            )
 
         db.add(turn)
         touch_game(db, game.id)
@@ -400,6 +416,19 @@ class ContextCompressor:
             or visible_summary,
             3200,
         )
+        # 前情提要 fallback：append（旧前情提要 + 本回合可见摘要），超长时丢**最旧**的行、
+        # 保留最近节拍（_trim_text 截前缀会丢最新→长局停更，故这里按行做尾部滚动），永不空白。
+        previous_recap = str(existing_summaries.get("narrative_recap") or "")
+        recap_lines = [
+            part
+            for part in [previous_recap, f"第 {turn.turn_number} 回：{visible_summary}"]
+            if part
+        ]
+        narrative_recap = "\n".join(recap_lines)
+        while len(narrative_recap) > 1000 and len(recap_lines) > 1:
+            recap_lines.pop(0)
+            narrative_recap = "\n".join(recap_lines)
+        narrative_recap = _trim_text(narrative_recap, 1000)
         return ContextCompressionOutput(
             turn_visible_summary=visible_summary,
             turn_hidden_summary=(
@@ -407,6 +436,7 @@ class ContextCompressor:
             ),
             chapter_summary=chapter_summary,
             long_term_summary=long_term_summary,
+            narrative_recap=narrative_recap,
             important_facts=important_facts,
         )
 

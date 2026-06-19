@@ -12,10 +12,22 @@ export type TurnSettlementSection = {
   items: string[];
 };
 
+export type ActionOutcomeTone = "great" | "good" | "partial" | "fail" | "neutral";
+
+export type ActionOutcomeView = {
+  label: string;
+  tone: ActionOutcomeTone;
+  action: string;
+  roll: number | null;
+  modifier: number;
+  dc: number | null;
+};
+
 export type TurnSettlementView = {
   hasChanges: boolean;
   summary: string[];
   sections: TurnSettlementSection[];
+  outcome: ActionOutcomeView | null;
 };
 
 export type ContractSectionView = {
@@ -211,7 +223,33 @@ export function buildTurnSettlement(turn: TurnRead): TurnSettlementView {
   return {
     hasChanges: sections.length > 0,
     summary: summary.slice(0, 4),
-    sections
+    sections,
+    outcome: extractActionOutcome(delta.action_outcome)
+  };
+}
+
+const OUTCOME_TONE: Record<string, ActionOutcomeTone> = {
+  critical: "great",
+  success: "good",
+  partial: "partial",
+  failure: "fail"
+};
+
+// 从 state_delta_json.action_outcome 取本回合判定结果（仅掷骰回合有；无判定返回 null，不伪造）。
+function extractActionOutcome(value: unknown): ActionOutcomeView | null {
+  const record = asRecord(value);
+  const outcomeKey = pickString(record, ["outcome"]);
+  const label = pickString(record, ["outcome_label"]) || outcomeKey;
+  if (!label) {
+    return null;
+  }
+  return {
+    label,
+    tone: OUTCOME_TONE[outcomeKey] ?? "neutral",
+    action: pickString(record, ["action"]),
+    roll: typeof record.roll === "number" ? record.roll : null,
+    modifier: typeof record.modifier === "number" ? record.modifier : 0,
+    dc: typeof record.dc === "number" ? record.dc : null
   };
 }
 

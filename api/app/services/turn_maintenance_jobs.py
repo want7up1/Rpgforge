@@ -5,15 +5,18 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
+from app.schemas.turn import GMRuntimeOutput
 from app.services.agent_traces import set_trace_context
 from app.services.characters import sync_characters_from_game
 from app.services.context_compressor import ContextCompressor
 from app.services.deepseek_client import DeepSeekError
+from app.services.drift_validator import DriftValidator
 from app.services.epilogue_generator import EpilogueGenerator
 from app.services.game_activity import touch_game
 from app.services.gameplay import gameplay_game_query
@@ -21,6 +24,7 @@ from app.services.state_extractor import StateExtractor, StateExtractorValidatio
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
 from app.services.state_settlement import record_failed_turn_state_delta
 from app.services.state_v2 import state_v2_view
+from app.services.story_director import StoryDirectorDecision
 from app.services.story_settings import build_runtime_story
 from app.services.turn_jobs import publish_turn_job_snapshot
 
@@ -28,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 TURN_MAINTENANCE_TIMEOUT_SECONDS = 10 * 60
 MEMORY_SUMMARY_INTERVAL_TURNS = 4
+# 偏离审计稀疏采样：只为趋势监控（剧透安全已由同步整串门负责），不必每回合烧一次 Flash。
+DRIFT_AUDIT_INTERVAL_TURNS = 3
 
 
 async def run_turn_maintenance_job(job_id: UUID) -> None:
@@ -73,6 +79,11 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
             job_id,
         )
         return
+
+    # 偏离校验改异步事后审计（Round 46）：在 _apply_delta 之前跑，用 pre-turn state 审计本回合
+    # 输出（与旧同步链一致，避免幕转换回合用已推进的新幕 state 误判）；observe-only、稀疏采样、
+    # 失败只记日志、不影响维护。回填 drift_severity 供 admin 看板监控"去同步控制后跑偏趋势"。
+    await _audit_drift(job_id)
 
     _apply_delta(job_id, delta_json)
 
@@ -291,6 +302,98 @@ def _with_epilogue(state_json: Any, epilogue: str) -> dict[str, Any]:
     progress["epilogue"] = epilogue
     progress["campaign_complete"] = True
     return base
+
+
+async def _audit_drift(job_id: UUID) -> None:
+    """异步事后偏离审计（observe-only）：回填 drift_severity，不触发任何重写。
+
+    专门用来监控"去掉同步 drift 控制后跑偏有没有变严重"。LLM 调用在 session 之外（game/config/
+    state 经 selectinload eager-load，detach 后访问已加载列安全）。任何失败只记日志、不影响维护。
+    """
+    try:
+        context = _load_drift_audit_context(job_id)
+        if context is None:
+            return
+        result = await DriftValidator().validate(
+            game=context["game"],
+            player_input=context["player_input"],
+            recent_turns=context["recent_turns"],
+            director_decision=context["director_decision"],
+            runtime_output=context["runtime_output"],
+        )
+        _persist_drift_audit(job_id, result.severity, result.model_dump())
+    except Exception:
+        logger.exception("Async drift audit failed for job %s", job_id)
+
+
+def _load_drift_audit_context(job_id: UUID) -> dict[str, Any] | None:
+    with SessionLocal() as db:
+        job = db.get(TurnJob, job_id)
+        if job is None or job.turn_id is None:
+            return None
+        turn = db.get(Turn, job.turn_id)
+        if turn is None:
+            return None
+        # 稀疏采样：只取首回合与每 DRIFT_AUDIT_INTERVAL_TURNS 回合做趋势监控，省 Flash 成本。
+        if not (turn.turn_number == 1 or turn.turn_number % DRIFT_AUDIT_INTERVAL_TURNS == 0):
+            return None
+        game = db.scalars(gameplay_game_query(job.game_id)).first()
+        if game is None or game.state is None:
+            return None
+        # GMRuntimeOutput 需正好 4 个 A/B/C/D 选项；重建失败说明数据异常，跳过审计。
+        try:
+            runtime_output = GMRuntimeOutput.model_validate(
+                {
+                    "narrative": turn.gm_output,
+                    "visible_clues": [
+                        line for line in (turn.visible_summary or "").split("\n") if line.strip()
+                    ],
+                    "action_options": turn.action_options_json or [],
+                }
+            )
+        except (ValidationError, ValueError):
+            return None
+        runtime_inputs = (
+            job.turn_runtime_inputs if isinstance(job.turn_runtime_inputs, dict) else {}
+        )
+        director_raw = runtime_inputs.get("director_decision")
+        try:
+            director_decision = (
+                StoryDirectorDecision.model_validate(director_raw)
+                if isinstance(director_raw, dict)
+                else StoryDirectorDecision()
+            )
+        except ValidationError:
+            director_decision = StoryDirectorDecision()
+        recent = db.scalars(
+            select(Turn)
+            .where(Turn.game_id == game.id, Turn.turn_number < turn.turn_number)
+            .order_by(Turn.turn_number.desc())
+            .limit(6)
+        ).all()
+        return {
+            "game": game,
+            "player_input": turn.player_input,
+            "recent_turns": list(reversed(recent)),
+            "director_decision": director_decision,
+            "runtime_output": runtime_output,
+        }
+
+
+def _persist_drift_audit(job_id: UUID, severity: str, validation: dict[str, Any]) -> None:
+    with SessionLocal() as db:
+        job = db.get(TurnJob, job_id)
+        if job is None:
+            return
+        job.drift_severity = severity
+        runtime_inputs = (
+            dict(job.turn_runtime_inputs) if isinstance(job.turn_runtime_inputs, dict) else {}
+        )
+        runtime_inputs["drift_validation"] = validation
+        job.turn_runtime_inputs = runtime_inputs
+        db.add(job)
+        db.commit()
+    publish_turn_job_snapshot(job_id)
 
 
 def _mark_extractor_failed(job_id: UUID) -> None:

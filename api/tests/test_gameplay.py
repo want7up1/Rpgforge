@@ -69,7 +69,9 @@ def test_prompt_injects_story_settings_runtime_view_and_materials(db_session) ->
     assert runtime_payload["selected_action_style"]["id"] == "investigation"
     assert [item["title"] for item in runtime_payload["related_story_materials"]][0] == "雁回镇义庄"
     assert runtime_payload["generation_parameters"]["recent_turn_excerpt_chars"] == 420
-    assert runtime_payload["recent_turns"][0]["gm_output_excerpt"].endswith("...")
+    # Round 45：最近回合改附完整正文（gm_output）供 GM 承接，不再下发冗余的 gm_output_excerpt 前缀。
+    assert runtime_payload["recent_turns"][0]["gm_output"].startswith("门槛内侧有新鲜泥痕。")
+    assert "gm_output_excerpt" not in runtime_payload["recent_turns"][0]
 
 
 def test_gm_prompt_redacts_future_act_spoilers(db_session) -> None:
@@ -139,10 +141,33 @@ def test_gm_system_prompt_elevates_hard_constraints(db_session) -> None:
     assert "不要修仙" in system_content
     # 当前幕 forbidden_reveals
     assert "账册真凶" in system_content
-    # Round 21：generation_parameters 篇幅指引提进 system（下限硬、上限软且让位于剧本）
+    # Round 44：篇幅指引改为软目标（去硬下限/去 emphasis 配额，防注水/假加粗）
     assert "本回合输出篇幅指引" in system_content
-    assert "不少于 700 字" in system_content  # 硬下限保留
-    assert "让位于剧本" in system_content  # 上限让位于详细描写要求
+    assert "按信息量自然成文" in system_content  # 篇幅按事件量自然成文
+    assert "让位于剧本" in system_content  # 详细描写场景仍优先写完整
+
+    # Round 45：叙事工艺层提进 system，且排在「当前幕简报」（唯一缓存断裂点）之前 → 稳定前缀。
+    assert "本剧本叙事工艺" in system_content
+    assert "叙事文风" in system_content
+    assert system_content.index("本剧本叙事工艺") < system_content.index("当前幕简报")
+    # 工艺字段已在 system，不在 user payload 的 story_core 重复下发（去重省 token）。
+    user_story_core = json.loads(messages[1]["content"])["runtime_story"]["story_core"]
+    assert "narrative_style" not in user_story_core
+    assert user_story_core["main_goal"]  # 非工艺字段仍保留
+
+
+def test_narrative_craft_directives_render_and_noop() -> None:
+    """工艺层：有字段时渲染、全空时 no-op（不污染 system / prefix cache）。"""
+    from app.services.prompt_builder import _narrative_craft_directives
+
+    rendered = _narrative_craft_directives(
+        {"story_core": {"narrative_style": "冷峻克制", "tone_do": ["留白", "克制"]}}
+    )
+    assert "本剧本叙事工艺" in rendered
+    assert "冷峻克制" in rendered
+    assert "留白" in rendered
+    assert _narrative_craft_directives({"story_core": {}}) == ""
+    assert _narrative_craft_directives({}) == ""
 
 
 def test_state_ops_projection_keeps_minimal_drops_writing_fields() -> None:
@@ -2330,3 +2355,54 @@ def test_state_extractor_backfills_location_from_common_npc_location(
         "角色F",
         "主角",
     }
+
+
+def test_turn_job_stages_exclude_drift_validation() -> None:
+    """Round 46：偏离校验移出玩家路径——stage_total=6、不含 drift。"""
+    from app.services.turn_jobs import TURN_JOB_STAGE_TOTAL, TURN_JOB_STAGES
+
+    stages = [stage for stage, _label in TURN_JOB_STAGES]
+    assert TURN_JOB_STAGE_TOTAL == 6
+    assert "drift_validation" not in stages
+    assert stages.index("gm_runtime") + 1 == stages.index("persist_turn")
+
+
+def test_redact_forbidden_reveals_no_hit_is_zero_cost() -> None:
+    """剧透兜底（唯一防线）：无整串命中时零 LLM、原稿返回、不置 rewrite_triggered。"""
+    from types import SimpleNamespace
+
+    class _NoCallRouter:
+        async def use_pro(self, *args, **kwargs):
+            raise AssertionError("无命中时不应调用 GM 重写。")
+
+        async def use_flash(self, *args, **kwargs):
+            raise AssertionError("无命中时不应调用任何 LLM。")
+
+    service = GameplayService(router=_NoCallRouter())
+    telemetry = SimpleNamespace(
+        output_observation={"forbidden_reveal_hits": []}, rewrite_triggered=False
+    )
+    context = SimpleNamespace(telemetry=telemetry, game=SimpleNamespace(id="g"))
+    runtime_output = object()
+
+    async def _run():
+        return await service._redact_forbidden_reveals_if_hit(
+            context=context,
+            director_decision=None,
+            runtime_output=runtime_output,
+            model_used="deepseek-v4-pro-test",
+        )
+
+    result, model = anyio.run(_run)
+    assert result is runtime_output
+    assert model == "deepseek-v4-pro-test"
+    assert telemetry.rewrite_triggered is False
+
+
+def test_audit_drift_no_throw_on_missing_job(db_session) -> None:
+    """异步偏离审计绝不拖垮维护：job 不存在时优雅跳过、不抛异常。"""
+    from uuid import uuid4
+
+    from app.services.turn_maintenance_jobs import _audit_drift
+
+    anyio.run(_audit_drift, uuid4())  # 不抛即通过

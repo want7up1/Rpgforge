@@ -15,7 +15,6 @@ from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekError
 from app.services.gameplay import (
     STAGE_COMPLETED,
-    STAGE_DRIFT_VALIDATION,
     STAGE_GM_RUNTIME,
     STAGE_PERSIST_TURN,
     STAGE_PREPARE_CONTEXT,
@@ -27,20 +26,20 @@ from app.services.gameplay import (
 )
 from app.services.turn_stream_events import turn_stream_event_broker
 
-# 单回合最坏情况：Director(90s) + GM 首次(360s) + Validator(90s) + GM 重写(360s) = 900s。
-# 加上 prepare/retrieve/persist 的 IO 开销，整体 18 min 留余量。
+# 单回合最坏情况：Director(90s) + GM 首次(360s)（+ 罕见的剧透兜底重写 360s）。偏离校验已
+# 改异步事后审计，不再在玩家路径上。加上 IO 开销，整体 18 min 留余量。
 TURN_JOB_TIMEOUT_SECONDS = 18 * 60
 STREAM_WRITE_INTERVAL_SECONDS = 0.8
 STREAM_WRITE_MIN_CHARS = 512
 logger = logging.getLogger(__name__)
 # stage id 单一来源在 gameplay.py（STAGE_* 常量）；这里只补中文展示 label。
 # 顺序即进度条顺序，新增/调整 stage 时改这一处即可（gameplay 那边加常量）。
+# 偏离校验（drift）已移出玩家路径到异步维护，故不在此列；stage_total 随之为 6。
 TURN_JOB_STAGES: tuple[tuple[str, str], ...] = (
     (STAGE_PREPARE_CONTEXT, "准备上下文"),
     (STAGE_RETRIEVE_MEMORY, "检索资料"),
     (STAGE_STORY_DIRECTOR, "剧情导演"),
     (STAGE_GM_RUNTIME, "剧情生成"),
-    (STAGE_DRIFT_VALIDATION, "偏离校验"),
     (STAGE_PERSIST_TURN, "写入回合"),
     (STAGE_COMPLETED, "完成"),
 )

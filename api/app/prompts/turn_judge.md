@@ -12,7 +12,7 @@
 - **canon_fidelity**（剧本忠实度）：GM 是否遵守了 runtime_story.story_core 的核心承诺、当前幕目标、forbidden_reveals。是否引入了未铺垫的新势力/Boss/终局真相。
 - **state_consistency**（状态一致性）：narrative 描述的人物、地点、物品、时间是否与 current_state_v2 一致。NPC 的态度/位置/状态有没有凭空变化。
 - **pacing**（节奏）：是否给玩家行动留了空间，没有跳幕；危机升级是否符合 pacing_limit；是否在玩家想停留的场景被强推。
-- **prose_quality**（文笔）：是否有感官细节、场景推进、人物反应；是否拖字数、堆砌空泛形容词；是否符合 generation_parameters 的段落和重点要求。
+- **prose_quality**（文笔）：是否有感官细节、场景推进、人物反应，读起来像小说而非履约报告。**节奏自适应**：事件少的回合写得短而精、克制是优点，不因为短而扣分；反而要对**为凑字数注水、反复复述已知设定、堆砌空泛形容词、为凑数把普通词加粗**扣分。
 - **freshness**（新意）：是否重复之前回合的场景/线索/对白；是否陈词滥调（"突然""一阵冷风"等）。
 - **safety**（安全边界）：是否泄露了 hidden_facts / gm_secret / forbidden_public_spoilers；隐藏信息是否被改写成可观察的线索而非直接揭露。
 

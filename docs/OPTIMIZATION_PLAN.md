@@ -27,6 +27,59 @@
 
 ## 1. 已完成
 
+### Round 46 (2026-06-18) — T1 Drift 改异步事后审计（去延迟尖峰 + 不再压制能动性）
+
+承接路线图 T1，把"偏离校验(drift)"从玩家同步路径改成异步事后审计。**§2.1/§2.3/§2.5 链路表已变，下次维护文档时同步**（玩家路径少一层、stage_total 7→6）。
+
+**玩家路径（gameplay.py）**：删 `_should_run_drift_validation`（旧：首回合+每3回合+高风险词/forbidden 命中触发）与 `_validate_and_maybe_rewrite`（major/critical → 二次 Pro 重写）、`STAGE_DRIFT_VALIDATION`、gameplay 的 `DriftValidator` 依赖/构造参数。GM 写完 → 观测 → 返回。**净效果**：去掉每3回合的 90s 同步校验尖峰 + 命中重写的 360s 二次等待 + "偏离→重写拽回主线"对玩家发散探索的压制。
+
+**唯一事后剧透兜底（新增 `_redact_forbidden_reveals_if_hit`）**：读 `output_observer` 已算的 `forbidden_reveal_hits`（当前幕 `forbidden_reveals` **整串命中**、高精度低召回、零额外 LLM）；命中（罕见）才做一次定向重写"仅删提前揭露、其余保留"，重写失败/超时保留原稿。重写后复检残留命中 → `logger.warning` 告警；观测失败置 `output_observation={"observe_error":True}`，避免防线静默塌陷。
+
+**异步审计（turn_maintenance_jobs `_audit_drift`）**：observe-only，回填 `turn_jobs.drift_severity` 供 admin 看板监控"去同步控制后跑偏趋势"，**不触发任何重写**；任何异常只 `logger.exception`、绝不拖垮维护。session 内 eager-load（selectinload config/state）+ 重建 `GMRuntimeOutput`（需正好 4 个 A/B/C/D 选项，失败跳过）→ session 外调 `DriftValidator.validate`。
+
+**stage**：`TURN_JOB_STAGES` 去 drift 项 → `TURN_JOB_STAGE_TOTAL` 7→6；前端 `stageTotal` 读后端动态值（顺手把 `turnJobStream.ts:58` / `play/page.tsx` 两处陈旧 `|| 7` fallback 改 6）。
+
+**4-Agent 对抗性审查 + 采纳**（无 critical/high，3 minor-nits + 1 needs-fix=缺测试）：① **时序修正**：`_audit_drift` 从 `_apply_delta` 之后**移到之前**——否则幕转换回合 state 已推进、用新幕 runtime_story 配旧幕 director 判定 → drift_severity 在最高风险回合系统性误判；前移后用 pre-turn state、与旧同步链一致。② **稀疏采样**：审计加 `DRIFT_AUDIT_INTERVAL_TURNS=3`（首回合+每3回合），不每回合烧 Flash（剧透安全已由同步整串门负责）。③④ 见上（残留告警 / observe_error）。⑤ 前端陈旧 fallback。
+
+**已知取舍（诚实记录）**：① 运行时剧透防护收敛为**整串命中**——换措辞的概念性剧透不再被同步拦，交由异步 `drift_severity` 趋势监控（看板可对 `forbidden_reveals` 为空的幕 + severity 升高告警）。② `rewrite_triggered` 口径变为"仅剧透兜底重写"。③ `StateExtractor` 的 `drift_hints` 通道对当前回合失效（extract 先于异步审计跑）；审计结果只服务看板、不回流本回合 state 提取。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **243 passed**（+3 守护：stage_total=6 不含 drift / 剧透门无命中零 LLM 不置 rewrite_triggered / `_audit_drift` 缺 job 不抛）；前端 `eslint .` 0 + `tsc` 0 + `next build` 通过。**部署**：api/worker/web 三镜像均已重建重启（无迁移）。
+
+### Round 45 (2026-06-18) — T1 叙事工艺层 + recent_turns 梯度 + 叙事连续性摘要轨（再上一个台阶）
+
+承接 Round 44 T0，落地审计路线图 T1 中"最对症文笔"的两条（用户拍板「开始做这一轮」）。纯后端，无迁移，旧存档兼容（无 `type="narrative"` 摘要时优雅降级）。
+
+**① 叙事工艺层 → 提进 system 稳定前缀**：新增 `prompt_builder._narrative_craft_directives(runtime_story)`，从 `runtime_story.story_core` 抽**整局静态**的 `narrative_style`/`core_fantasy`/`emotional_arc`/`tone_do`/`tone_dont`/`pacing_rules`，渲染"=== 本剧本叙事工艺 ==="，在 `_build_system_content` 里插在「宪法层」与「篇幅指引」之间（稳定前缀、不碎裂 prefix cache；全空则 no-op）。`gm_runtime.md` 顶部新增**正向工艺锚点段**（承接优先/演而非讲/对白推进/节奏呼吸/人称一致）+ **新增规则 35**（`narrative_recap` 框定：前情提要、非复述清单）。不改负向规则 12/13/16/20。
+
+**② recent_turns 梯度**：`_turn_payload` 加 `full` 参数，最近 `_RECENT_FULL_TURNS=2` 回合下发 `gm_output` 完整正文（截 `_RECENT_FULL_CHARS=1800`）、不再发 `gm_output_excerpt`；更早回合仍只发 excerpt。让 GM 真能看到上一回合结尾去承接，根治"同地点每回合从头重述"。
+
+**③ 叙事连续性摘要轨**：`ContextCompressionOutput` 新增 `narrative_recap`；`compress_context.md` **新增规则 8** + 输出字段（承接语气的"前情提要"，≤300字软目标、不剧透、append-then-condense）；`update_after_turn` 在非空时 upsert `type="narrative"` 单行摘要；`load_prompt_summaries` 带出 `narrative_recap` → GM `memory_summaries`；`_fallback_summary` 维护它（保留尾部最近节拍、永不空白）。治"长局走味"。
+
+**对抗性审查（4-Agent 工作流）+ 采纳**：审查结论无 critical/high（2 OK + 2 minor-nits），确认 prefix-cache 中性偏改善、回归边界安全、剧透无新增风险、对文笔净正向。采纳其真问题：① 工艺 6 字段从 GM **user payload story_core 剥掉**（`_strip_craft_from_story_core`，原本 system+user 重复下发、费 token 且把基调显性化成清单）；② full 回合去掉冗余的 `gm_output_excerpt` 前缀子串；③ fallback recap 截断改保留尾部（原 `_trim_text` 截前缀会丢最新→长局停更）；④ 常量命名 + 本条记账。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **240 passed**（+1 工艺层 no-op/渲染测试 + 更新 recent_turns 断言 + 工艺段排序/去重断言）。**部署**：api/worker 镜像已重建重启。**Telemetry 待观测**：recent_turns 完整正文每回合净增约 2×min(正文,1800) 字（不缓存），承接效果稳定后可评估收档到 `_RECENT_FULL_TURNS=1` 或更低 `_RECENT_FULL_CHARS`。
+
+### Round 44 (2026-06-18) — 架构级审计（35-Agent 工作流）+ T0 后端「去配额化/去清单化」止血叙事生硬
+
+**背景**：用户反馈实机输出"生硬、生搬硬套剧情和设定，不像小说"。先对真实存档做实证诊断（同地点反复重述/凑配额假加粗/低事件回合注水/机械塞素材/义务复述线索），再用多 Agent 工作流（8 维度并行审计 → 对抗性压力测试 → 战略综合，35 Agent / 250 万 token）做架构级审视。用户明确授权"重构到任何程度"。
+
+**审计核心结论**（详见个人记忆 `rpgforge-architecture-audit-2026-06`）：43 轮力气投在"防跑偏/防剧透"防御轴，地基（数据/迁移/队列/event-sourcing/防剧透宪法层）健康，但把唯一玩家可见产物 narrative 建模成"约束满足问题"而非"语言艺术"，GM 退化成履约机器=生硬。根因在**传递层**：`prompt_builder.py:122-147` 把合规+篇幅配额固化进 system 最高优先级，voice/情绪弧丢进被 state_v2 淹没的 user JSON；`gm_runtime.md` 34 条规则约 26 条是负向禁令。**对抗性压测点破**：DeepSeek `thinking=enabled` 时结构性丢弃 temperature（`deepseek_client.py:216`）→ 调温度松绑文笔无效，把"换正文模型"推到前台。
+
+**T0 落地（本轮，纯 prompt/参数 + 纯 UI，零安全风险，已验证部署）**——用户选定「T0三件套 + 后果卡」（模型盲测后弃），三件套全部落地。**后端（prompt/参数）**：
+- **软化字数下限 + 删 emphasis 配额**：`prompt_builder._generation_parameter_directives` 把"【硬下限】narrative 不少于 N 字、字数不足视为偷工"改为"【篇幅·按信息量自然成文】事件少可短而精、不为凑字数注水复述，仅 <~250 字地板防敷衍"；emphasis 从"min–max 配额"改"宁缺毋滥、没有就不加"。`gm_runtime.md` 规则 7/13 同步改写。（遗留小瑕疵：保留的【优先级】块尾部仍有"不得低于硬下限"措辞，因该块含敏感词无法安全 Edit，语义无害，下轮顺手清。）
+- **去清单化**：新增 `prompt_builder._gm_facing_director`，从 **GM payload** 删 `continuity_notes`/`active_material_titles`（最易被 GM 当"必须逐条用上并加粗"的填空清单）；这两项仍保留在 StateExtractor 的 director_hints（异步维护）。`gm_runtime.md` 规则 22（scene_objective/gm_instruction 降级为软提示，forbidden_reveals/pacing_limit 仍硬）、规则 24（素材改"私有一致性知识底座，不是填空题"）。
+- **裁判对齐**：`turn_judge.md` prose_quality 改"节奏自适应：短回合不扣分；为凑字数注水/堆砌/凑数加粗才扣分"，防 Judge 反向奖励凑配额。
+- **测试同步**：`test_gameplay.py` 篇幅断言由"不少于 700 字"改"按信息量自然成文"。
+
+**前端（纯 UI/信息架构，不碰防剧透/状态/schema/存档）**：
+- **bold 去亮金**：`globals.css` `.story-markdown strong` 由 `--gold`+`font-weight:850`（假加粗放大器）改正文同色 `--foreground`+`650`。
+- **判定后果卡提进阅读流**：新增 `gameExperience.ActionOutcomeView` + `extractActionOutcome`（从 `state_delta_json.action_outcome` 取 outcome_label/action/roll/modifier/dc，tone 映射 critical/success/partial/failure→great/good/partial/fail）；`TurnSettlementCard` 顶部渲染彩色「行动结果 · X」卡（掷骰明细次要），**无判定回合不显示（不伪造成功）**；从 `TurnInsightsPanel` debug 抽屉移除重复判定块；篇幅标签去掉"未达硬下限"（短回合不再标失败）。
+- **冻结设定编辑器**：项目 `CLAUDE.md` 工作约束加「前端工作门」——新前端工作须先服务玩家循环「读→选→看后果」或修正确性/可访问性，冻结看板/工坊作者便利新功能（投入轴纠偏）。
+
+**验证**：后端 `ruff check app/` 干净 + `pytest tests/` **239 passed**；前端 `eslint .` 0、`vitest` **52**、`tsc --noEmit` 0、`next build` 全路由通过。**部署**：api/worker/web 三镜像均已 `build`+`up -d`（纯 prompt+UI 改动，旧存档无需迁移）。
+
+**本轮未做（待续）**：① 模型盲测（DeepSeek vs Claude）——用户试玩后认为后端改动后文笔可接受，**决定跳过**（环境也无 Anthropic key）。② T1/T2（叙事工艺层提 system、Drift 改异步事后审计、属性 seeding+判定可见、prefix cache 多段切分、外科拆 state_applier、记忆层叙事连续性轨、锚点多路径+结局变体）见个人记忆 `rpgforge-architecture-audit-2026-06` 路线图，待用户逐层拍板。
+
 ### Round 43 (2026-06-05) — 前端 UI 审查 + P0 可访问性修复
 
 承用户「这两天改了很多前端」做的一轮 UI/UX 审查（用 ui-ux-pro-max 技能，按 web 规则）。结论：工程底子很好（语义化 token 体系、响应式断点系统、移动端适配、文字 break 兜底齐全），问题集中在**可访问性**与最近新增看板组件的细节。本轮只落地用户选定的 **P0（影响最广、风险最低，纯前端）**：
