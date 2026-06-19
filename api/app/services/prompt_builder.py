@@ -36,7 +36,7 @@ _CONSTITUTION_LABELS: list[tuple[str, str, str]] = [
 
 # 幕级简报（随幕推进变化）：放 system 末尾，cache 前缀在此之前已稳定命中。
 _ACT_BRIEF_LABELS: list[tuple[str, str]] = [
-    ("current_act", "当前幕目标与未完成锚点（本回合必须围绕推进）"),
+    ("current_act", "当前幕目标（本回合围绕推进；未完成锚点见 current_state_v2 与 runtime_story）"),
     ("current_act_forbidden_reveals", "当前幕禁止提前揭露（forbidden_reveals）"),
 ]
 
@@ -76,8 +76,12 @@ class PromptBuilder:
         # GM 不应看到完整的未来幕剧情（next_act 细节 / 未来幕主线节点），从源头裁掉。
         # 同时把已提进 system 工艺层的 story_core 工艺字段从 user payload 剥掉（不重复下发）。
         gm_runtime_story = _strip_craft_from_story_core(redact_runtime_story_for_gm(runtime_story))
+        # 多段切分（Round 48）：把 runtime_story 的逐回合部分抽到 payload 尾段，让「静态剧本设定」
+        # 进 prefix cache 可缓存前缀。GM 信息不丢、只换位置（见 gm_runtime 规则 21/30）。
+        static_story, open_anchors = _split_runtime_story_for_cache(gm_runtime_story)
 
         runtime_payload = {
+            # —— 稳定段（整局/幕内不变，进可缓存前缀）——
             "game": {
                 "id": str(game.id),
                 "title": game.title,
@@ -85,13 +89,15 @@ class PromptBuilder:
                 "description": game.description,
             },
             "generation_parameters": generation_parameters,
-            "runtime_story": gm_runtime_story,
+            "runtime_story": static_story,
+            # —— 逐回合快变段（DeepSeek prefix cache 在此之后断裂）——
+            "current_act_open_anchors": open_anchors,
+            # GM 只需当前场景相关状态，用场景投影砍掉历史/非在场噪声（省 token）。
+            "current_state_v2": project_state_for_scene(state_v2),
             "selected_action_style": selected_action_style or {},
             "related_story_materials": [
                 self._retrieval_payload(result) for result in (related_materials or [])
             ],
-            # GM 只需当前场景相关状态，用场景投影砍掉历史/非在场噪声（省 token）。
-            "current_state_v2": project_state_for_scene(state_v2),
             "memory_summaries": summaries or {},
             "story_director": _gm_facing_director(story_director),
             "drift_rewrite_instruction": drift_rewrite_instruction or "",
@@ -305,6 +311,37 @@ def _strip_craft_from_story_core(runtime_story: dict[str, Any] | None) -> dict[s
         return runtime_story
     stripped = {k: v for k, v in core.items() if k not in _CRAFT_STORY_CORE_KEYS}
     return {**runtime_story, "story_core": stripped}
+
+
+# runtime_story 里逐回合变化、必须移出可缓存前缀的键（GM 从 payload 尾段 / current_state_v2
+# 读到同样信息）：story_progress（state_v2 已带）、行动风格 / 召回素材（尾段已单列）。
+_RUNTIME_STORY_VOLATILE_KEYS = (
+    "story_progress",
+    "selected_action_style",
+    "related_story_materials",
+)
+
+
+def _split_runtime_story_for_cache(
+    runtime_story: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, list[Any]]:
+    """把 GM runtime_story 拆成「静态（幕内不变，进可缓存前缀）」+「当前幕未完成锚点（逐回合）」。
+
+    抽走逐回合内容：上面的 volatile keys + current_act.completion_anchors（随完成逐回合缩短）。
+    返回 (static_runtime_story, open_anchors)。GM 信息不丢，只是换到 payload 尾段（见规则 21/30）。
+    """
+    if not isinstance(runtime_story, dict):
+        return runtime_story, []
+    static = {k: v for k, v in runtime_story.items() if k not in _RUNTIME_STORY_VOLATILE_KEYS}
+    open_anchors: list[Any] = []
+    current_act = static.get("current_act")
+    if isinstance(current_act, dict):
+        anchors = current_act.get("completion_anchors")
+        open_anchors = list(anchors) if isinstance(anchors, list) else []
+        static["current_act"] = {
+            k: v for k, v in current_act.items() if k != "completion_anchors"
+        }
+    return static, open_anchors
 
 
 def _generation_parameter_directives(generation_parameters: dict[str, int] | None) -> str:

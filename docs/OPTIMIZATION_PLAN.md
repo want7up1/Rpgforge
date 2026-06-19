@@ -27,6 +27,24 @@
 
 ## 1. 已完成
 
+### Round 48 (2026-06-19) — T1 prefix cache 多段切分（可缓存前缀 33%→84%）
+
+承接 Round 22c 的"宪法层字节固化"。审计指出 GM 上下文 prefix cache 命中率仅 ~4.5%——逐回合变化的内容混进了稳定前缀。本轮做真正的"多段切分"：把逐回合内容移出可缓存前缀。纯 GM payload 改动，drift/state-ops 各自 `build_runtime_story` 不受影响。
+
+**根因**：`build_runtime_story` 把 `current_act.completion_anchors` 过滤为"未完成项"（随完成逐回合缩短），它同时进了 ① system 幕级简报（断裂点）② user 的 `runtime_story`。且 `runtime_story` 还含逐回合的 `story_progress`、`selected_action_style`、`related_story_materials`——这一大块（含整局静态的 story_core/worldview/角色/机制/主线）因此被钉在断裂点之后、永不缓存。
+
+**改动**：
+- **system 幕内稳定**（`gm_hard_constraints`）：从幕级简报移除逐回合的未完成锚点，只留 objective/dramatic_question（幕内静态）。
+- **runtime_story 拆分**（`prompt_builder._split_runtime_story_for_cache`）：把 GM 的 runtime_story 拆成「静态」+「`current_act_open_anchors`」；抽走 `story_progress`（GM 从 current_state_v2 读）/`selected_action_style`/`related_story_materials`（尾段已单列）/`current_act.completion_anchors`。
+- **user payload 重排**：`game → generation_parameters → runtime_story(静态)` 进可缓存前缀；`current_act_open_anchors → current_state_v2 → 风格/素材/记忆/导演/recent_turns/player_input` 放逐回合尾段。
+- **`gm_runtime.md`**：规则 21（runtime_story 现为「静态设定视图」）、23（priority_order 是逻辑阅读序、非字面键路径）、30（锚点引用改指 `current_act_open_anchors`）。
+
+**实测**（真实存档）：可缓存稳定前缀 = system(9111) + game/gen + 静态 runtime_story(13500) = **84.0%** 总输入（改前仅 system ~33%；更早还断在锚点处）。按 ~1/10 缓存计价，命中时 input 成本约降 76%。缓存幕内有效、随幕推进（每~10回合）断一次。**注**：GM 流式调用不回 usage，无法直接测 live 命中；字节稳定前缀长度是命中的决定性代理指标（已用字节级测试钉死）。
+
+**3-Agent 对抗性审查 + 采纳**（1 OK + 2 minor-nits，无 critical/high）：确认无悬空引用（story_director/extractor/drift 仍引用 runtime_story.current_act.completion_anchors 是对的——它们各自 build 完整未拆分版）、稳定前缀纯净、无别处消费方。采纳 LOW：规则30 删掉对 GM 不可见的"静态定义"措辞、`_split` 加 `isinstance(list)` 守卫、payload 测试升级为**字节前缀相等**、规则23 澄清 priority_order。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **250 passed**（+3：拆分纯函数 / 静态前缀字节稳定 / system 字节稳定）。**部署**：api/worker 镜像已重建重启（无 web 改动、无迁移）。
+
 ### Round 47 (2026-06-19) — T1 属性 seeding：让 d20 判定真实生效（角色 build 影响成败）
 
 承接 T0 的「行动后果卡」——审计发现开局 `protagonist.attributes` 多为空 → `_compute_modifier` 的 attribute 加成恒 0 → 前中期判定纯靠运气、角色 build 不影响成败、后果卡的 `+modifier` 永远是 0。本轮让属性真正进入判定。纯后端，无迁移。

@@ -4,7 +4,7 @@ from app.services.prompt_loader import load_prompt_template
 def test_gm_runtime_prompt_uses_story_settings_v2_runtime_contract() -> None:
     prompt = load_prompt_template("gm_runtime.md")
 
-    assert "runtime_story 是唯一剧本设定运行视图" in prompt
+    assert "runtime_story 是剧本" in prompt  # Round 48：改为「剧本静态设定运行视图」
     assert "story_settings v2" in prompt
     assert "A、B、C、D 四个具体行动选项" in prompt
     assert "generation_parameters" in prompt

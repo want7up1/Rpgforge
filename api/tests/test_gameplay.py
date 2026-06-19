@@ -2406,3 +2406,78 @@ def test_audit_drift_no_throw_on_missing_job(db_session) -> None:
     from app.services.turn_maintenance_jobs import _audit_drift
 
     anyio.run(_audit_drift, uuid4())  # 不抛即通过
+
+
+def test_system_content_byte_stable_across_anchor_completion(db_session) -> None:
+    """Round 48 prefix cache：同一幕内锚点完成进度不同时，system 消息必须字节一致——
+    逐回合变化的未完成锚点不得混进 system 稳定前缀，否则碎裂 DeepSeek prefix cache。"""
+    from app.services.prompt_builder import PromptBuilder
+    from app.services.story_settings import build_runtime_story, generation_parameters_from_config
+
+    game = create_game_from_config(db_session, build_generated_config())
+    gp = generation_parameters_from_config(game.config)
+    state_a = {"story_progress": {"current_act": "act_1", "completed_anchors": []}}
+    state_b = {
+        "story_progress": {"current_act": "act_1", "completed_anchors": ["act_1_find_mud"]}
+    }
+    sys_a = PromptBuilder._build_system_content(build_runtime_story(game.config, state_a), gp)
+    sys_b = PromptBuilder._build_system_content(build_runtime_story(game.config, state_b), gp)
+    assert sys_a == sys_b  # 稳定前缀不随锚点完成而变
+    assert "本幕目标：" in sys_a  # 幕目标（幕内静态）仍在 system
+    assert "找到门槛泥痕" not in sys_a  # 逐回合的锚点不再进 system
+
+
+def test_split_runtime_story_extracts_volatile_and_anchors() -> None:
+    """Round 48：runtime_story 拆分——逐回合键与未完成锚点被抽出，静态部分保留。"""
+    from app.services.prompt_builder import _split_runtime_story_for_cache
+
+    rs = {
+        "story_core": {"main_goal": "查案"},
+        "story_progress": {"completed_anchors": ["a"]},
+        "selected_action_style": {"id": "s"},
+        "related_story_materials": [{"title": "m"}],
+        "current_act": {"objective": "目标", "completion_anchors": [{"id": "a1"}, {"id": "a2"}]},
+    }
+    static, open_anchors = _split_runtime_story_for_cache(rs)
+    assert "story_progress" not in static
+    assert "selected_action_style" not in static
+    assert "related_story_materials" not in static
+    assert "completion_anchors" not in static["current_act"]
+    assert static["current_act"]["objective"] == "目标"
+    assert static["story_core"]["main_goal"] == "查案"
+    assert open_anchors == [{"id": "a1"}, {"id": "a2"}]
+
+
+def test_runtime_story_static_prefix_stable_across_anchor_completion(db_session) -> None:
+    """Round 48 多段切分：静态 runtime_story 幕内字节稳定；未完成锚点单列且逐回合变。"""
+    import json
+
+    from app.services.story_settings import build_runtime_story
+
+    game = create_game_from_config(db_session, build_generated_config())
+    state_a = {"story_progress": {"current_act": "act_1", "completed_anchors": []}}
+    state_b = {
+        "story_progress": {"current_act": "act_1", "completed_anchors": ["act_1_find_mud"]}
+    }
+
+    def _content(state: dict) -> str:
+        messages = PromptBuilder().build_runtime_messages(
+            game=game,
+            player_input="我观察四周。",
+            selected_action_style=None,
+            recent_turns=[],
+            runtime_story=build_runtime_story(game.config, state),
+            state_v2={},
+        )
+        return messages[1]["content"]
+
+    ca, cb = _content(state_a), _content(state_b)
+    pa, pb = json.loads(ca), json.loads(cb)
+    assert pa["runtime_story"] == pb["runtime_story"]  # 静态 runtime_story 不随锚点完成而变
+    assert "completion_anchors" not in pa["runtime_story"]["current_act"]  # 锚点已抽出
+    assert "story_progress" not in pa["runtime_story"]  # 逐回合 story_progress 已抽出
+    # 字节级：序列化前缀（到第一个逐回合键之前）完全一致 → DeepSeek prefix cache 可命中。
+    marker = '"current_act_open_anchors"'
+    assert ca[: ca.index(marker)] == cb[: cb.index(marker)]
+    # 未完成锚点单列在尾段、且逐回合变化（完成一个后变少）。
+    assert len(pa["current_act_open_anchors"]) > len(pb["current_act_open_anchors"])

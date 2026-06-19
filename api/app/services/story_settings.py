@@ -382,7 +382,10 @@ def gm_hard_constraints(runtime_story: dict[str, Any]) -> dict[str, list[str]]:
     story_core = _record(runtime_story.get("story_core"))
     current_act = _record(runtime_story.get("current_act"))
 
-    # 当前幕目标 + 未完成必需锚点（build_runtime_story 已把 completion_anchors 过滤为未完成项）。
+    # 当前幕目标（幕内静态）。未完成锚点随完成逐回合变化——不放进 system 幕级简报，否则会碎裂
+    # DeepSeek prefix cache 的稳定前缀（Round 48 多段切分）。锚点仍在 user 的
+    # runtime_story.current_act.completion_anchors / current_state_v2.story_progress 里，
+    # GM 据此推进（gm_runtime 规则 30–32）。
     act_lines: list[str] = []
     objective = _text(current_act.get("objective"))
     if objective:
@@ -390,11 +393,6 @@ def gm_hard_constraints(runtime_story: dict[str, Any]) -> dict[str, list[str]]:
     dramatic_question = _text(current_act.get("dramatic_question"))
     if dramatic_question:
         act_lines.append(f"核心戏剧问题：{dramatic_question}")
-    for anchor in _records(current_act.get("completion_anchors")):
-        required = "必需" if _bool(anchor.get("required"), True) else "可选"
-        label = _text(anchor.get("title")) or _text(anchor.get("completion_signal"))
-        if label and label != "未命名锚点":
-            act_lines.append(f"[{required}锚点] {label}")
 
     # 核心机制规则（rule 文本，去掉纯展示用字段）。
     mechanic_lines: list[str] = []
