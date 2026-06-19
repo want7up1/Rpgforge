@@ -27,6 +27,26 @@
 
 ## 1. 已完成
 
+### Round 49 (2026-06-19) — T2 外科拆 state_applier Phase A：删锚点文本推断 backstop
+
+承接架构审计"state_applier 是全项目最烂巨石"的客观结论（2150 行、184 行脆弱中文子串匹配、Round 16/26/27/28/29/30/33/34 八轮返工同一病灶）。本轮做 Phase A——**外科式删掉锚点文本推断 backstop**（最易误判、最该砍的一层）。
+
+**删除**：`_inferred_completed_anchors`（原在 `_sync_story_progress_and_quests` 调用，用 narrative 证据整串/整短语匹配反推锚点完成）+ `_anchor_completion_reason`，共 **-67 行**（2150→2083）。共享 helper（`_completion_anchor_records_for_act`/`_meaningful_phrases`/`_evidence_units`）保留（任务推断等仍用）。
+
+**新契约**：锚点完成**只剩 LLM 显式 `completed_anchors`**（`extract_state_delta` 规则 10，经 `_apply_story_progress` 白名单校验入库）。转幕（`_computed_ready_for_next_act`）/通关（`campaign_complete`）本就只读 `completed_anchors` 列表、从不调被删函数 → 链路自洽。
+
+**安全验证**：① 容器内 `ruff` 干净 + `pytest tests/` **250 passed**（2 个断言推断的测试改成新契约：一个显式上报两锚点→转幕+派生；一个空 delta+证据→锚点不完成）；② **3 个真实存档 rebuild 零回退**（act/anchors/campaign_complete 完全不变）；③ **全存档扫描 0 条"推断来源锚点"**（`anchor_history.reason` 无"根据当前状态证据补全"）→ 删推断对所有现有数据零回退、**无需迁移**。
+
+**2-Agent 对抗性审查 + 采纳**（无 critical/high，2 minor-nits）：确认 `game.status=completed` 仅由 `campaign_complete`（末幕锚点）驱动、与 main_quest 零耦合 → **不会假通关**。采纳：① 修正注释（原写"确定性转幕兜底"代码里不存在，已改为明示"无文本兜底、漏报即卡幕"）；② `does_not_infer` 测试补回 `main_quest_10==completed` 断言，钉死"任务-锚点解耦"契约。
+
+**已知中间态 / 取舍（诚实记录）**：
+- **任务-锚点解耦**：`_quest_completion_evident`（任务文本推断）属 Phase B 未删 → main_quest 可经文本推断 `completed`，但其锚点不进 `completed_anchors`（玩家可能看到"主线任务已完成、剧情却不前进"）。Phase B 删任务推断后消解。
+- **转幕单点依赖**：删 backstop 后，有 required 锚点的幕转幕 **100% 依赖 LLM 显式上报**，无文本兜底——LLM 漏报锚点即卡幕。这是审计认可的取舍（"别用代码猜中文语义"），但属高敏感单点。**已做第一道缓解**：`extract_state_delta.md` **规则 10** 从被动（"只有…才…"）改为**主动逐条核对**——对当前幕每个未完成锚点判断 GM 本回合是否达成其 completion_signal，并明示"这是唯一来源、漏报即卡幕"（非脆弱、纯 LLM 语义判断，正是审计认可的层）。**仍待**：上线后监控漏报率（如"narrative 含某锚点整串 completion_signal 但 N 回合未上报"占比）；若偏高，再设计**确定性**转幕兜底（如停留超 M 回合无锚点进展→给 Director 软提示，是提示不是自动完成）。
+
+**Phase B（未做，更险）**：删任务/线索文本推断（`_quest_completion_evident`/`_activity_text_matches`/`_completed_topic_in_thread`，184 行里的大头）——synthesis 要求"先加 LLM 显式 resolve 路径，否则 un-fix Round 26 的线索 bug"。
+
+**部署**：api 镜像已重建重启（无 web 改动、无迁移）。
+
 ### Round 48 (2026-06-19) — T1 prefix cache 多段切分（可缓存前缀 33%→84%）
 
 承接 Round 22c 的"宪法层字节固化"。审计指出 GM 上下文 prefix cache 命中率仅 ~4.5%——逐回合变化的内容混进了稳定前缀。本轮做真正的"多段切分"：把逐回合内容移出可缓存前缀。纯 GM payload 改动，drift/state-ops 各自 `build_runtime_story` 不受影响。

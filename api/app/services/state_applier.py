@@ -901,24 +901,10 @@ def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: A
     evidence_units = _state_evidence_units(state)
     evidence = "\n".join(evidence_units)
     activity_evidence = _state_activity_text(state)
-    inferred = _inferred_completed_anchors(config, current_act, anchor_target, evidence_units)
-    if inferred:
-        progress["last_anchor_update_turn"] = turn.turn_number
-        anchor_history = progress.setdefault("anchor_history", [])
-        if not isinstance(anchor_history, list):
-            anchor_history = []
-            progress["anchor_history"] = anchor_history
-        for anchor_id, reason in inferred:
-            anchor_target.append(anchor_id)
-            anchor_history.append(
-                {
-                    "turn": turn.turn_number,
-                    "act": current_act,
-                    "anchor_id": anchor_id,
-                    "reason": reason,
-                }
-            )
-        del anchor_history[:-30]
+    # Round 49 外科拆 Phase A：锚点完成只信 LLM 显式 completed_anchors（extract_state_delta
+    # 规则 10，经 _apply_story_progress 白名单校验入库）；删脆弱文本推断（止八轮返工）。
+    # **注意**：删推断后有 required 锚点的幕转幕 100% 依赖 LLM 显式上报，无文本兜底——
+    # 漏报即卡幕（确定性兜底待 Phase B/C 评估）。
 
     computed_ready = _computed_ready_for_next_act(config, current_act, anchor_target)
     if computed_ready is not None:
@@ -1074,27 +1060,6 @@ def _sync_current_act_from_completed_anchors(
     return target_act
 
 
-def _inferred_completed_anchors(
-    config: Any,
-    current_act: str,
-    completed_anchors: list[Any],
-    evidence: Any,
-) -> list[tuple[str, str]]:
-    if not current_act:
-        return []
-    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    inferred: list[tuple[str, str]] = []
-    for anchor in _completion_anchor_records_for_act(config, current_act, required_only=True):
-        anchor_id = _text(anchor.get("id"))
-        if not anchor_id or anchor_id in completed:
-            continue
-        reason = _anchor_completion_reason(anchor, evidence)
-        if reason:
-            inferred.append((anchor_id, reason))
-            completed.add(anchor_id)
-    return inferred
-
-
 def _completion_anchor_records_for_act(
     config: Any,
     act_id: str,
@@ -1113,37 +1078,6 @@ def _completion_anchor_records_for_act(
             anchors.append(anchor)
         return anchors
     return []
-
-
-def _anchor_completion_reason(anchor: dict[str, Any], evidence: Any) -> str:
-    evidence_units = _evidence_units(evidence)
-    if not evidence_units:
-        return ""
-
-    anchor_text = "\n".join(
-        _text(anchor.get(key))
-        for key in ("id", "title", "description", "completion_signal")
-    )
-    exact_matches = [
-        _text(anchor.get("completion_signal")),
-        _text(anchor.get("title")),
-        _text(anchor.get("description")),
-    ]
-    for unit in evidence_units:
-        for phrase in exact_matches:
-            if len(phrase) >= 6 and phrase != "未命名锚点" and phrase in unit:
-                return f"根据当前状态证据补全：{phrase}"
-
-    phrases = _meaningful_phrases(anchor_text)
-    for unit in evidence_units:
-        matched = [phrase for phrase in phrases if phrase in unit]
-        if len(matched) >= 2 and len(matched) >= max(2, len(phrases) // 2):
-            return f"根据当前状态证据补全：{'；'.join(matched[:3])}"
-
-    # Round 16 教训：不再用滑窗碎片/字符级模糊反推锚点完成（误判率高、会被当前角色名与
-    # 通用词触发）。锚点自动完成只信整串 completion_signal/title/description（≥6 字）+ 整短语
-    # 高精度命中；其余靠 LLM 显式 completed_anchors（extract_state_delta 规则 10）。
-    return ""
 
 
 def _compact_text(value: Any) -> str:

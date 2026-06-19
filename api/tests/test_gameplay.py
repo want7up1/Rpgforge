@@ -308,7 +308,7 @@ def test_state_delta_advances_act_only_after_required_anchors(db_session) -> Non
     assert second_state["story_progress"]["last_advance_turn"] == 2
 
 
-def test_state_delta_backfills_required_anchor_and_derives_main_quests(db_session) -> None:
+def test_state_delta_completes_required_anchors_and_derives_main_quests(db_session) -> None:
     config = build_generated_config()
     config.story_settings["act_plan"] = [
         {
@@ -390,9 +390,10 @@ def test_state_delta_backfills_required_anchor_and_derives_main_quests(db_sessio
         state,
         Turn(game_id=game.id, turn_number=3, player_input="", gm_output=""),
         {
+            # Round 49：锚点完成只走 LLM 显式上报（删推断后两个 required 锚点都需显式报）。
             "story_progress_update": {
-                "completed_anchor": "act_1_supply_secured",
-                "reason": "基地三月食物储备达成。",
+                "completed_anchors": ["act_1_base_secured", "act_1_supply_secured"],
+                "reason": "清剿完成 + 物资储备达成。",
             }
         },
     )
@@ -610,9 +611,10 @@ def test_state_delta_uses_configured_anchor_evidence_across_genres(
     assert next_state["story_progress"]["ready_for_next_act"] is False
 
 
-def test_state_delta_infers_anchor_from_completion_signal_phrase(
+def test_state_delta_does_not_infer_anchor_without_explicit_report(
     db_session,
 ) -> None:
+    """Round 49 外科拆 Phase A：narrative 证据不再自动完成锚点，只信 LLM 显式 completed_anchors。"""
     config = build_generated_config()
     config.story_settings["act_plan"] = [
         {
@@ -705,12 +707,16 @@ def test_state_delta_infers_anchor_from_completion_signal_phrase(
     )
 
     completed_anchors = next_state["story_progress"]["completed_anchors"]
-    assert "act_4_ye_found" in completed_anchors
+    # 删锚点推断后：即使 narrative 含 completion_signal，空 delta（无显式上报）也不完成锚点。
+    assert "act_4_ye_found" not in completed_anchors
     assert "act_4_ye_awakening" not in completed_anchors
     assert next_state["story_progress"]["current_act"] == "act_4"
     assert next_state["story_progress"]["ready_for_next_act"] is False
 
     quests = {quest["id"]: quest for quest in next_state["quests"] if isinstance(quest, dict)}
+    # 任务-锚点解耦（Round 49 Phase A 中间态）：main_quest_10 仍可经任务文本推断
+    # （_quest_completion_evident，Phase B 未删）完成，但其锚点不进 completed_anchors。
+    # 钉死该契约，防 Phase B 改动后无人察觉。
     assert quests["main_quest_10"]["status"] == "completed"
     assert quests["main_quest_11"]["status"] == "active"
 
