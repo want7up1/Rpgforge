@@ -4,6 +4,7 @@ from typing import Any
 from app.models.game import Game
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput
+from app.services.act_pacing import compute_act_pacing
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import project_state_for_scene, state_v2_view
 from app.services.story_settings import (
@@ -92,6 +93,9 @@ class PromptBuilder:
             "runtime_story": static_story,
             # —— 逐回合快变段（DeepSeek prefix cache 在此之后断裂）——
             "current_act_open_anchors": open_anchors,
+            # 本幕节奏压力（确定性，逐回合变）：rising/high 时要求 A/B/C/D 至少留一条推向
+            # next_required_anchor 的前进选项，禁止四个全是休整/原地重复（见 gm_runtime 规则 36）。
+            "act_pacing": compute_act_pacing(state_v2, runtime_story),
             # GM 只需当前场景相关状态，用场景投影砍掉历史/非在场噪声（省 token）。
             "current_state_v2": project_state_for_scene(state_v2),
             "selected_action_style": selected_action_style or {},

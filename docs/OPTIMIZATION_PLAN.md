@@ -27,6 +27,24 @@
 
 ## 1. 已完成
 
+### Round 51 (2026-06-20) — 锚点驱动节奏压力：治"不跟剧本 / 推不动 / 选项全是原地打转"
+
+**实证诊断（用户反馈"剧本遵循性差 + 剧情推进有问题"）**：查真实存档 agent_traces（某真实存档一局约 28 回合，剧本内容脱敏不复述），铁证——第一幕 4 个 required 锚点**只完成 1 个**，`ready_for_next_act` 始终 false、**从未转幕**；导演 scene_objective 连续十几回合反复设"准备型 / 训练型 / 加固型"小目标，**从不真正触发当幕的关键锚点戏**（甚至出现"避免提前触发"的目标）；crisis 全程满血 100（危险从未兑现）。排除两个误区：剧本内容**完整进了 GM payload**（Round 48 重构没丢）、抽查 GM **严格跟了导演指令**。根因落在**导演层缺节奏压力**——它每回合只反应式服务玩家当下行动、无"本幕停留多久 / 距上次锚点进展多久"信号，于是在玩家不断选择停留型行动时被"再准备一次"无限拖住。**且 GM 给的 A/B/C/D 也全落在"准备"框里**（连续 5 回合实测，无一可推进），死循环自我强化。
+
+**为什么"修改之后"才明显（钟摆过度矫正）**：Round 44/46/49 为治"生硬/像规则报告"集中松绑了所有向前驱动——Round 44 把 gm_instruction/scene_objective 降成软提示+删素材清单、Round 46 删同步"拽回主线"、Round 49 删锚点文本兜底（转幕 100% 靠 LLM 显式上报）。一个旁证：更早一局（Round 44 前）能逐幕推进、触发过转幕；本轮诊断的那局（Round 44 后）28 回合困在第一幕。**Round 49 §"已知中间态"里早埋的 TODO**（"停留超 M 回合无锚点进展→给 Director 软提示"）本轮兑现。
+
+**改动（纯导演 + GM 选项层，确定性信号、零新增 state、rebuild 安全、无迁移）**：
+- **新增 `app/services/act_pacing.py`**：`compute_act_pacing(state_v2, runtime_story)` 纯函数。用现成字段算 `turns_since_anchor`（`current_turn − last_anchor_update_turn`，缺省回退 `last_advance_turn`/0）→ `pressure`：无未完成 required→`ready`；`≥ANCHOR_PACING_HIGH_TURNS(8)`→`high`；`≥ANCHOR_PACING_RISING_TURNS(4)`→`rising`；否则`low`。`next_required_anchor` = 当幕第一条未完成 required 锚点 `{id,title,completion_signal}`（`required` 默认 True，与 story_settings/state_applier 对齐）。回合号读 `state_v2_view` 的 `active_scene.turn`（兼容裸 state 的 `current_turn`）。
+- **注入两处 payload**：`story_director._payload` 顶层加 `act_pacing`；`prompt_builder.build_runtime_messages` 在**尾段**（`current_act_open_anchors` 旁、缓存断裂点之后）加 `act_pacing`——**不破 Round 48 的 prefix cache**（字节前缀测试仍过）。
+- **`story_director.md` 新增规则 13**：按 pressure 调 scene_objective——`high` 时**必须**把戏推到 `next_required_anchor.completion_signal` 兑现的临界点（锚点本回合就发生/启动，不再"准备一次"），仍承接玩家行动；`ready` 不硬推。
+- **`gm_runtime.md` 新增规则 36**：pressure 为 rising/high 时，A/B/C/D **至少一条**是推向 `next_required_anchor` 的前进选项，**禁止四个全是休整/加固/原地重复**；其余仍可谨慎/探索/关系向（不与规则 5/6 冲突、仍是建议非强制）。
+
+**明确不做（避免把"生硬"请回来）**：不改 GM 文笔/字数、不重启同步 drift。pacing 只走导演决策与"选项至少留一条出路"，HOW 写仍由 GM 自主。
+
+**已知局限（诚实记录）**：① Round 44 把 gm_instruction 降为软提示——若上线后监控到 high 压力下 GM 仍拖延（导演已要求收束、GM 仍只回应玩家小动作），下一轮再给 GM 加一条呼应规则。② `turns_since_anchor` 在完成任一锚点时重置——多 required 锚点的幕里，完成一个会给喘息再爬升，属预期设计。③ 阈值 8/4 为 observation-driven 初值，待上线看真实 pressure 分布再调。
+
+**验证（TDD：RED→GREEN）**：容器内 `ruff check` 干净 + `pytest tests/` **264 passed**（+8：`test_act_pacing` 6 个纯函数 low/rising/high/ready/开局边界/required默认 + `test_act_pacing_wiring` 2 个导演&GM payload 注入）。**部署**：api/worker 镜像已重建重启（无 web、无迁移）。**行为效果待真实游玩验证**（LLM 是否在 high 压力下真把戏推向锚点、是否真给出前进选项）——纯函数与信号注入已测，规则遵守度只能实机观察。
+
 ### Round 50 (2026-06-19) — 导入自定义剧本（外部 AI 写 → 粘贴 JSON → 看板预览 → 建游戏）
 
 新功能：玩家在外部 AI（Claude/ChatGPT）里按 RPGForge 结构写好剧本，粘贴 JSON 即可新建一个"契合自己想法"的可玩游戏。设计 spec 见 `docs/superpowers/specs/2026-06-19-import-custom-script-design.md`。

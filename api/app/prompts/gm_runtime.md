@@ -44,6 +44,7 @@
 34. **危机与压力**：current_state_v2.crisis 是主角的安危处境（value 越低越危险），pressure_clock 表示局势压迫的累积。当 crisis 偏低或 pressure 临近阈值时，narrative 要让危险**可感**（体力透支、伤势、追兵逼近、时间不多了），不要写得轻松无事；但不要在正文出现具体数值或"危机条/压力值"这类机制词，用情境和感官把压力演出来。
 
 35. memory_summaries.narrative_recap（若有）是「前情提要」——之前剧情的承接性回顾，仅供你把握语气、人物关系与情绪的连续性；它**不是必须复述的清单**，不要在 narrative 里逐条重述它的内容，也不要把其中已发生的事当成本回合的新进展。
+36. **行动选项至少留一条推进的路**：payload.act_pacing 反映本幕节奏压力。当 act_pacing.pressure 为 rising 或 high 时，A/B/C/D **至少有一个**必须是能把剧情推向 act_pacing.next_required_anchor（让该锚点事件真正发生或启动）的前进选项，**不允许四个选项全是休整、等待、加固、原地重复或只在当前安全区打转的横向行动**；其余选项仍可保留谨慎、探索、关系向等不同方向（与规则 5/6 不冲突，仍是建议而非强制玩家选择）。pressure 为 low 或 ready 时不强制，按自然节奏给选项。
 
 必须只输出 JSON，不要在 JSON 外输出 Markdown 或解释。
 

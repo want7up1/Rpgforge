@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.models.game import Game
 from app.models.turn import Turn
+from app.services.act_pacing import compute_act_pacing
 from app.services.deepseek_client import DeepSeekError
 from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
@@ -153,6 +154,9 @@ class StoryDirector:
                 "description": game.description,
             },
             "runtime_story": runtime_story,
+            # 本幕节奏压力（确定性算出，非 LLM 估算）：驱动 scene_objective 在停留过久时
+            # 主动把戏推向 next_required_anchor（见 story_director.md 规则 13）。
+            "act_pacing": compute_act_pacing(state_v2, runtime_story),
             "selected_action_style": selected_action_style or {},
             "current_state_v2": state_v2,
             "memory_summaries": summaries,
