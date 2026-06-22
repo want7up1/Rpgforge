@@ -630,11 +630,34 @@ def validate_story_settings(settings: Any) -> dict[str, Any]:
             "story_settings 校验：act_plan 为空，运行时转幕/锚点判定将完全依赖 Director LLM。"
         )
     elif acts_without_required_anchor:
-        logger.warning(
-            "story_settings 校验：以下幕缺少 required 完成锚点，自动转幕兜底对其失效：%s",
-            "、".join(acts_without_required_anchor),
-        )
+        for warning in _required_anchor_warnings(acts_without_required_anchor):
+            logger.warning("story_settings 校验：%s", warning)
     return story
+
+
+def story_settings_warnings(settings: Any) -> list[str]:
+    """返回可展示给作者/导入者的结构护栏警告。
+
+    不 raise、不修改剧本；用于把原本只进日志的弱剧本风险透出到导入/生成响应。
+    """
+    story = normalize_story_settings(settings)
+    acts_without_required_anchor: list[str] = []
+    for act in _records(story.get("act_plan")):
+        act_id = _act_identity(act) or "未命名幕"
+        has_required_anchor = any(
+            _bool(anchor.get("required"), True)
+            for anchor in _records(act.get("completion_anchors"))
+        )
+        if not has_required_anchor:
+            acts_without_required_anchor.append(act_id)
+    return _required_anchor_warnings(acts_without_required_anchor)
+
+
+def _required_anchor_warnings(act_ids: list[str]) -> list[str]:
+    return [
+        "以下幕缺少 required 完成锚点，act_pacing 和自动转幕护栏会变弱："
+        + "、".join(act_ids)
+    ] if act_ids else []
 
 
 def _runtime_current_act_id(story: dict[str, Any], progress: dict[str, Any]) -> str:

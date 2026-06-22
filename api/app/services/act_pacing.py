@@ -18,6 +18,8 @@ ANCHOR_PACING_RISING_TURNS = 4
 # 距上次锚点进展达到此回合数 → high（导演必须把戏推到锚点 completion_signal 兑现的临界点）。
 # observation-driven：真实存档实测某锚点完成后约 18 回合无新锚点进展仍原地打转。
 ANCHOR_PACING_HIGH_TURNS = 8
+# high 压力已持续多少回合仍无锚点进展 → 记录监控告警；不干预剧情、不自动补锚点。
+ANCHOR_PACING_STALL_TURNS_AFTER_HIGH = 3
 
 
 def compute_act_pacing(
@@ -85,6 +87,40 @@ def compute_act_pacing(
         "open_required_count": len(open_required),
         "pressure": pressure,
         "next_required_anchor": next_required_anchor,
+    }
+
+
+def observe_act_pacing_stall(
+    state_v2: dict[str, Any] | None,
+    runtime_story: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """返回高压锚点停滞观测结果，供 telemetry 使用。
+
+    只在 pressure=high 且 high 已持续 ANCHOR_PACING_STALL_TURNS_AFTER_HIGH 回合后报警。
+    该函数不判断正文语义、不写状态，避免重新引入脆弱文本推断。
+    """
+    pacing = compute_act_pacing(state_v2, runtime_story)
+    turns_since_high = max(0, pacing["turns_since_anchor"] - ANCHOR_PACING_HIGH_TURNS)
+    stalled = (
+        pacing["pressure"] == "high"
+        and pacing["open_required_count"] > 0
+        and turns_since_high >= ANCHOR_PACING_STALL_TURNS_AFTER_HIGH
+    )
+    next_anchor = pacing.get("next_required_anchor") if isinstance(pacing, dict) else None
+    anchor_id = _text(next_anchor.get("id")) if isinstance(next_anchor, dict) else ""
+    anchor_title = _text(next_anchor.get("title")) if isinstance(next_anchor, dict) else ""
+    target = anchor_title or anchor_id or "未知锚点"
+    flag = (
+        "act_pacing_stalled：本幕已处于 high 压力 "
+        f"{turns_since_high} 回合仍无 required 锚点进展；下一锚点={target}。"
+        if stalled
+        else ""
+    )
+    return {
+        **pacing,
+        "stalled": stalled,
+        "turns_since_high": turns_since_high,
+        "flag": flag,
     }
 
 

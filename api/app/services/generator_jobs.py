@@ -17,6 +17,7 @@ from app.services.agent_traces import set_trace_context
 from app.services.deepseek_client import DeepSeekError
 from app.services.game_generator import GameGeneratorService, ModelOutputValidationError
 from app.services.generator_stream_events import generator_stream_event_broker
+from app.services.story_settings import story_settings_warnings
 
 FINALIZE_JOB_TIMEOUT_SECONDS = 14 * 60
 STREAM_WRITE_INTERVAL_SECONDS = 0.8
@@ -189,6 +190,7 @@ def _publish_finalize_snapshot(
         id=job.id,
         status=job.status,
         config=config,
+        warnings=story_settings_warnings(config.story_settings) if config else [],
         model_used=job.model_used,
         error_message=job.error_message,
         reasoning_content=job.reasoning_content,

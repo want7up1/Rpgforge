@@ -12,6 +12,7 @@ from app.db.session import SessionLocal
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput
+from app.services.act_pacing import observe_act_pacing_stall
 from app.services.agent_traces import set_trace_context
 from app.services.characters import sync_characters_from_game
 from app.services.context_compressor import ContextCompressor
@@ -181,12 +182,40 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
                 delta_json=delta_json,
                 approved_at=datetime.now(UTC),
             )
-            rebuild_game_state(db, game)
+            rebuilt_state = rebuild_game_state(db, game)
             sync_characters_from_game(db, game, commit=False)
+            if rebuilt_state is not None:
+                _record_act_pacing_stall_observation(job, game, rebuilt_state.state_json)
         db.add(job)
         db.add(turn)
         touch_game(db, game.id)
         db.commit()
+
+
+def _record_act_pacing_stall_observation(
+    job: TurnJob,
+    game: Any,
+    state_json: dict[str, Any],
+) -> None:
+    """把 post-state 锚点停滞观测合并进 output_observation.flags。"""
+    observation = observe_act_pacing_stall(
+        state_v2_view(state_json),
+        build_runtime_story(game.config, state_json),
+    )
+    runtime_inputs = (
+        dict(job.turn_runtime_inputs) if isinstance(job.turn_runtime_inputs, dict) else {}
+    )
+    raw_output = runtime_inputs.get("output_observation")
+    output_observation = dict(raw_output) if isinstance(raw_output, dict) else {}
+    raw_flags = output_observation.get("flags")
+    flags = list(raw_flags) if isinstance(raw_flags, list) else []
+    flag = observation.get("flag")
+    if flag and flag not in flags:
+        flags.append(flag)
+    output_observation["flags"] = flags
+    output_observation["act_pacing"] = observation
+    runtime_inputs["output_observation"] = output_observation
+    job.turn_runtime_inputs = runtime_inputs
 
 
 # B1 胜利 / A3 失败 两种结局对应的终态 game.status。

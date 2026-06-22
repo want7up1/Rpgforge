@@ -4,6 +4,10 @@ import anyio
 
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
+from app.services.act_pacing import (
+    ANCHOR_PACING_HIGH_TURNS,
+    ANCHOR_PACING_STALL_TURNS_AFTER_HIGH,
+)
 from app.services.deepseek_client import ChatCompletionResult
 from app.services.game_creator import create_game_from_config
 from app.services.gameplay import GameplayService
@@ -2055,6 +2059,48 @@ def test_turn_maintenance_success_clears_previous_extractor_failed_flag(db_sessi
     assert saved_turn is not None
     assert saved_job.extractor_failed is False
     assert saved_turn.state_delta_json["new_known_facts"] == ["门槛内侧有新鲜泥痕。"]
+
+
+def test_turn_maintenance_records_act_pacing_stall_flag(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    turn_number = ANCHOR_PACING_HIGH_TURNS + ANCHOR_PACING_STALL_TURNS_AFTER_HIGH
+    turn = Turn(
+        game_id=game.id,
+        turn_number=turn_number,
+        player_input="我继续在原地休整。",
+        gm_output="主角继续整理装备，但没有推进当前幕关键锚点。",
+        visible_summary="继续休整。",
+        hidden_summary=None,
+        state_delta_json={},
+        action_options_json=[],
+        model_used="deepseek-v4-pro-test",
+    )
+    db_session.add(turn)
+    db_session.flush()
+    job = TurnJob(
+        game_id=game.id,
+        status="completed",
+        request_json={"player_input": turn.player_input},
+        turn_id=turn.id,
+        turn_runtime_inputs={
+            "output_observation": {
+                "flags": ["既有观测"],
+                "forbidden_reveal_hits": [],
+            }
+        },
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    _apply_delta(job.id, {})
+
+    db_session.expire_all()
+    saved_job = db_session.get(TurnJob, job.id)
+    assert saved_job is not None
+    observation = saved_job.turn_runtime_inputs["output_observation"]
+    assert "既有观测" in observation["flags"]
+    assert any("act_pacing_stalled" in flag for flag in observation["flags"])
+    assert observation["act_pacing"]["stalled"] is True
 
 
 def test_story_director_fallback_reads_runtime_story_current_act(db_session) -> None:

@@ -72,6 +72,7 @@ export default function NewGamePage() {
   // 创建方式：ai = AI 访谈生成；import = 导入外部 AI 写的剧本 JSON。
   const [mode, setMode] = useState<"ai" | "import">("ai");
   const [scriptText, setScriptText] = useState("");
+  const [scriptWarnings, setScriptWarnings] = useState<string[]>([]);
 
   // 解锁时恢复 AI 原值用：最近一次 AI 产出的快照。
   const aiConfirmedRef = useRef<Record<string, unknown>>({});
@@ -103,6 +104,7 @@ export default function NewGamePage() {
           if (cancelled || !done.config) return;
           aiSettingsRef.current = done.config.story_settings;
           setGeneratedConfig(done.config);
+          setScriptWarnings(done.warnings ?? []);
           setPendingAction(null);
           return;
         }
@@ -131,6 +133,7 @@ export default function NewGamePage() {
   async function handleChat() {
     if (!chatInput.trim()) return;
     setError(null);
+    setScriptWarnings([]);
     baselineRef.current = model;
     setPendingAction("chat");
     const lockedConfirmed = lockedIds.filter((id) => CONFIRMED_FIELD_IDS.includes(id));
@@ -171,6 +174,7 @@ export default function NewGamePage() {
 
   async function handleFinalize() {
     setError(null);
+    setScriptWarnings([]);
     baselineRef.current = model;
     setPendingAction("finalize");
     try {
@@ -185,6 +189,7 @@ export default function NewGamePage() {
       aiSettingsRef.current = done.config.story_settings;
       setLockedIds([]); // 进入 settings 阶段，confirmed 阶段的锁定 id 不再适用
       setGeneratedConfig(done.config);
+      setScriptWarnings(done.warnings ?? []);
       const next = buildBoardModel({ source: "settings", settings: done.config.story_settings });
       setLastDiff(diffBoard(baselineRef.current, next));
     } catch (caught) {
@@ -272,6 +277,7 @@ export default function NewGamePage() {
 
   async function handleImportScript() {
     setError(null);
+    setScriptWarnings([]);
     let parsed: unknown;
     try {
       parsed = JSON.parse(scriptText);
@@ -286,11 +292,12 @@ export default function NewGamePage() {
     baselineRef.current = model;
     setPendingAction("import");
     try {
-      const { config } = await importScript(parsed);
+      const { config, warnings } = await importScript(parsed);
       aiSettingsRef.current = config.story_settings;
       setLockedIds([]);
       setConfirmed({});
       setGeneratedConfig(config);
+      setScriptWarnings(warnings ?? []);
       const next = buildBoardModel({ source: "settings", settings: config.story_settings });
       setLastDiff(diffBoard(baselineRef.current, next));
     } catch (caught) {
@@ -422,6 +429,16 @@ export default function NewGamePage() {
       ) : null}
 
       {error ? <section className="app-alert">{error}</section> : null}
+      {scriptWarnings.length ? (
+        <section className="app-status border-[color:var(--warning)] text-[color:var(--warning)]">
+          <p className="font-semibold">剧本结构提示</p>
+          <ul className="mt-2 list-disc pl-5">
+            {scriptWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {pendingAction === "finalize" || (generatedConfig && content) ? (
         <GenerationProgress items={progressItems} reasoning={reasoning} content={content} />

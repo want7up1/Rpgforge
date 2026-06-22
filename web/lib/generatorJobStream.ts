@@ -55,6 +55,7 @@ export function createInitialFinalizeProcess(
     id,
     status,
     config: null,
+    warnings: [],
     model_used: null,
     error_message: null,
     reasoning_content: "",

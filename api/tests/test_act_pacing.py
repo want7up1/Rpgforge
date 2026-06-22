@@ -10,7 +10,9 @@ from __future__ import annotations
 from app.services.act_pacing import (
     ANCHOR_PACING_HIGH_TURNS,
     ANCHOR_PACING_RISING_TURNS,
+    ANCHOR_PACING_STALL_TURNS_AFTER_HIGH,
     compute_act_pacing,
+    observe_act_pacing_stall,
 )
 
 ANCHOR_REQ = {
@@ -104,3 +106,22 @@ def test_required_defaults_true_when_field_missing() -> None:
     assert pacing["open_required_count"] == 1
     assert pacing["pressure"] == "high"
     assert pacing["next_required_anchor"]["id"] == "act_1_x"
+
+
+def test_stall_observation_flags_after_high_pressure_grace_window() -> None:
+    # high 从 ANCHOR_PACING_HIGH_TURNS 开始；再持续 N 回合仍无锚点进展才报警。
+    current_turn = ANCHOR_PACING_HIGH_TURNS + ANCHOR_PACING_STALL_TURNS_AFTER_HIGH
+    observation = observe_act_pacing_stall(_state(current_turn), _runtime([ANCHOR_REQ]))
+
+    assert observation["stalled"] is True
+    assert observation["turns_since_high"] == ANCHOR_PACING_STALL_TURNS_AFTER_HIGH
+    assert observation["next_required_anchor"]["id"] == "act_1_boss"
+    assert "act_pacing_stalled" in observation["flag"]
+
+
+def test_stall_observation_stays_quiet_before_grace_window() -> None:
+    current_turn = ANCHOR_PACING_HIGH_TURNS + ANCHOR_PACING_STALL_TURNS_AFTER_HIGH - 1
+    observation = observe_act_pacing_stall(_state(current_turn), _runtime([ANCHOR_REQ]))
+
+    assert observation["stalled"] is False
+    assert observation["flag"] == ""

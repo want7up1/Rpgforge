@@ -36,7 +36,7 @@ from app.services.generator_stream_events import generator_stream_event_broker
 from app.services.job_queue import enqueue_chat_job, enqueue_finalize_job
 from app.services.opening_scene_generator import OpeningSceneGenerator
 from app.services.state_v2 import state_v2_view
-from app.services.story_settings import build_runtime_story
+from app.services.story_settings import build_runtime_story, story_settings_warnings
 from app.services.turn_stream_events import TurnStreamEvent, format_sse_event
 
 router = APIRouter(prefix="/api/generator", tags=["generator"])
@@ -296,7 +296,11 @@ def generator_import_script(payload: dict[str, Any]) -> GeneratorFinalizeRespons
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-    return GeneratorFinalizeResponse(config=config, model_used="import")
+    return GeneratorFinalizeResponse(
+        config=config,
+        model_used="import",
+        warnings=story_settings_warnings(config.story_settings),
+    )
 
 
 async def _generate_opening_scene(db: Session, game: Game) -> None:
@@ -363,6 +367,7 @@ def _finalize_job_read(job: GeneratorFinalizeJob) -> GeneratorFinalizeJobRead:
         id=job.id,
         status=job.status,
         config=config,
+        warnings=story_settings_warnings(config.story_settings) if config else [],
         model_used=job.model_used,
         error_message=job.error_message,
         reasoning_content=job.reasoning_content,

@@ -19,6 +19,7 @@ from app.services.prompt_loader import load_prompt_template
 from app.services.story_settings import (
     STORY_SETTINGS_FORMAT_VERSION,
     normalize_story_settings,
+    story_settings_warnings,
     validate_story_settings,
 )
 
@@ -236,7 +237,11 @@ class GameGeneratorService:
             content=final_json,
             model=model_used,
         )
-        return GeneratorFinalizeResponse(config=config, model_used=model_used or "unknown")
+        return GeneratorFinalizeResponse(
+            config=config,
+            model_used=model_used or "unknown",
+            warnings=story_settings_warnings(config.story_settings),
+        )
 
     async def _generate_finalize_outline(
         self,

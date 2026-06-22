@@ -27,6 +27,24 @@
 
 ## 1. 已完成
 
+### Round 52 (2026-06-22) — 剧本遵循护栏：高压锚点停滞监控 + 导入剧本 required 锚点警告
+
+承接 Round 51 的 `act_pacing`：本轮不新增 LLM、不自动补锚点、不恢复同步 drift，只做两条确定性监控/护栏，防止"信号已经进 Director/GM，但真实运行仍看不到推进"和"弱剧本导入后天然缺转幕抓手"静默发生。
+
+**① 高压锚点停滞监控（post-state，低误报）**：
+- `act_pacing.py` 新增 `ANCHOR_PACING_STALL_TURNS_AFTER_HIGH = 3` 与 `observe_act_pacing_stall()`。当 `pressure=high` 后再持续 3 回合仍无 required 锚点进展，返回 `act_pacing_stalled` flag；只读 state/runtime_story，不做文本语义判断、不写状态。
+- `turn_maintenance_jobs._apply_delta` 在状态提取、应用、rebuild 之后计算停滞观测，并合并进 `turn_runtime_inputs.output_observation.flags` 与 `output_observation.act_pacing`。选择 post-state 是为了避免误报"本回合其实完成锚点但 extractor 尚未入库"。
+- 前端本回合详情已展示 `observation.flags`，无需新增 UI 即可看到停滞告警。
+
+**② 导入/生成剧本结构警告（不阻断旧兼容）**：
+- `story_settings.py` 新增 `story_settings_warnings()`：当 `act_plan` 中某幕没有任何 `required=true` 完成锚点时，返回作者可见 warning；`validate_story_settings` 仍保持只 log 不 raise，避免破坏旧存档/手动空剧本兼容。
+- `GeneratorFinalizeResponse` / `GeneratorFinalizeJobRead` 增加 `warnings`。`/api/generator/import-script`、同步 finalize、异步 finalize job snapshot/read 都透出 warnings。
+- `games/new` 页面新增 `scriptWarnings` 展示区，导入或生成完成后在看板上方显示结构提示；不阻止继续编辑或创建。
+
+**验证中顺手修复**：`web/Dockerfile` 给 Next 运行时 `.next/cache` 预建并授权给 `node`，避免 web 容器在页面资源缓存时出现 `EACCES` 日志。
+
+**验证**：TDD RED→GREEN；容器内目标后端测试 **19 passed**（`test_act_pacing`、`test_act_pacing_wiring`、`test_import_script`、维护集成用例）；全量后端 `pytest tests/` **268 passed**；`ruff check app tests` 干净。前端 `eslint .`、`tsc --noEmit`、`vitest` **52 passed**、`next build` 通过。Docker 已重建并重启 api/worker/web，api/web/worker 状态与日志正常；浏览器验证 `/games/new` 导入弱剧本会显示 `剧本结构提示`。
+
 ### Round 51 (2026-06-20) — 锚点驱动节奏压力：治"不跟剧本 / 推不动 / 选项全是原地打转"
 
 **实证诊断（用户反馈"剧本遵循性差 + 剧情推进有问题"）**：查真实存档 agent_traces（某真实存档一局约 28 回合，剧本内容脱敏不复述），铁证——第一幕 4 个 required 锚点**只完成 1 个**，`ready_for_next_act` 始终 false、**从未转幕**；导演 scene_objective 连续十几回合反复设"准备型 / 训练型 / 加固型"小目标，**从不真正触发当幕的关键锚点戏**（甚至出现"避免提前触发"的目标）；crisis 全程满血 100（危险从未兑现）。排除两个误区：剧本内容**完整进了 GM payload**（Round 48 重构没丢）、抽查 GM **严格跟了导演指令**。根因落在**导演层缺节奏压力**——它每回合只反应式服务玩家当下行动、无"本幕停留多久 / 距上次锚点进展多久"信号，于是在玩家不断选择停留型行动时被"再准备一次"无限拖住。**且 GM 给的 A/B/C/D 也全落在"准备"框里**（连续 5 回合实测，无一可推进），死循环自我强化。

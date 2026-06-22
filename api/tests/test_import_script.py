@@ -54,6 +54,24 @@ def test_import_script_accepts_settings_export_wrapper() -> None:
     assert response.json()["config"]["title"] == "雁回镇旧案"
 
 
+def test_import_script_warns_when_act_lacks_required_anchor() -> None:
+    payload = story_settings_payload()
+    payload["act_plan"][0]["completion_anchors"] = [
+        {
+            "id": "act_1_optional_only",
+            "title": "可选支线",
+            "required": False,
+            "completion_signal": "完成可选支线。",
+        }
+    ]
+
+    response = TestClient(app).post("/api/generator/import-script", json=payload)
+
+    assert response.status_code == 200
+    warnings = response.json()["warnings"]
+    assert any("act_1" in warning and "required" in warning for warning in warnings)
+
+
 def test_authoring_kit_returns_markdown() -> None:
     response = TestClient(app).get("/api/generator/authoring-kit")
 

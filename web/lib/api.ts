@@ -17,6 +17,7 @@ import type {
   GeneratorChatJobRead,
   GeneratorFinalizeJobCreateResponse,
   GeneratorFinalizeJobRead,
+  GeneratorFinalizeResponse,
   GameProgressSaveCreate,
   GameProgressSaveRead,
   GameProgressSaveUpdate,
@@ -465,8 +466,8 @@ export async function generatorFinalize(payload: {
   concept: string;
   history: GeneratorMessage[];
   confirmed_requirements: Record<string, unknown>;
-}): Promise<{ config: GeneratedGameConfig; model_used: string }> {
-  return requestJson<{ config: GeneratedGameConfig; model_used: string }>(
+}): Promise<GeneratorFinalizeResponse> {
+  return requestJson<GeneratorFinalizeResponse>(
     "/api/generator/finalize",
     {
       method: "POST",
@@ -518,8 +519,8 @@ export async function createGeneratedGame(
 // 导入外部 AI 写的 story_settings JSON：校验+归一化后返回可预览的 config（不建游戏）。
 export async function importScript(
   payload: unknown
-): Promise<{ config: GeneratedGameConfig; model_used: string }> {
-  return requestJson<{ config: GeneratedGameConfig; model_used: string }>(
+): Promise<GeneratorFinalizeResponse> {
+  return requestJson<GeneratorFinalizeResponse>(
     "/api/generator/import-script",
     {
       method: "POST",
