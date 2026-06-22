@@ -121,6 +121,11 @@ def build_imported_game_config(payload: Any) -> GeneratedGameConfig:
             "（标题、世界观、角色、幕、故事核心都为空）。"
             "请确认粘贴的是完整的 story_settings JSON。"
         )
+    if not story_settings.get("act_plan"):
+        raise ValueError(
+            "导入剧本至少需要 1 幕 act_plan，且建议每幕包含 required 完成锚点。"
+            "只有标题或简介不足以创建可运行冒险。"
+        )
     profile = game_profile(story_settings)
     return GeneratedGameConfig(
         title=profile["title"],

@@ -44,6 +44,16 @@ def test_import_script_rejects_empty_or_garbage_payload() -> None:
     assert "空" in response.json()["detail"]
 
 
+def test_import_script_rejects_title_only_shell() -> None:
+    response = TestClient(app).post(
+        "/api/generator/import-script",
+        json={"game_profile": {"title": "只有标题"}},
+    )
+
+    assert response.status_code == 400
+    assert "至少" in response.json()["detail"]
+
+
 def test_import_script_accepts_settings_export_wrapper() -> None:
     # 兼容 settings-export 形态：外层包裹 + 内层 story_settings
     payload = {"title": "x", "story_settings": story_settings_payload()}

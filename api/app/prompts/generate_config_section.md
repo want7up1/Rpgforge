@@ -96,7 +96,7 @@ target_section = "core_mechanics"
       "id": "mechanic_1",
       "name": "机制名称",
       "rule": "必须长期遵守的玩法规则",
-      "progression": "阶段、数值或触发方式",
+      "progression": "阶段、触发方式或叙事代价",
       "visibility": "public|mixed|gm_only"
     }
   ]
@@ -182,18 +182,8 @@ target_section = "initial_state"
       "name": "",
       "identity": "",
       "appearance": "",
-      "portrait_prompt": "",
-      "attributes": {"力量": 10, "敏捷": 12, "体质": 11, "智力": 13, "感知": 10, "魅力": 9}
+      "portrait_prompt": ""
     },
-    "progression": {
-      "level": 1,
-      "xp": 0,
-      "next_level_xp": 100,
-      "total_xp": 0,
-      "xp_log": []
-    },
-    "skills": [],
-    "abilities": [],
     "conditions": [],
     "relationships": [],
     "inventory": [],
@@ -206,4 +196,4 @@ target_section = "initial_state"
     "open_threads": []
   }
 }
-限制：只写开局此刻已经成立的状态，不写完整世界背景或未来剧情计划。relationships 只包含玩家初始可见关系，数值 0-100。known_facts 只写玩家已知信息；hidden_facts 只写系统当前必须记住但玩家未知的事实。attributes 必须给出主角六维（力量/敏捷/体质/智力/感知/魅力），数值 8–16、10 为常人均值；依主角设定分配出明显强弱（强项 13–16、弱项 8–9），让角色特长能真正影响后续行动判定，不要全部填 10 或留空。
+限制：只写开局此刻已经成立的状态，不写完整世界背景或未来剧情计划。不要输出等级、经验、属性、技能、能力、关系分数或其他数值机制。relationships 只包含玩家初始可见关系，用 status/note 等文字描述，不要用 trust/好感/冲突等分数。known_facts 只写玩家已知信息；hidden_facts 只写系统当前必须记住但玩家未知的事实。

@@ -85,7 +85,7 @@
     {
       "name": "机制名称",
       "rule": "必须长期遵守的规则",
-      "progression": "阶段、数值或触发方式",
+      "progression": "阶段、触发方式或叙事代价",
       "visibility": "public|mixed|gm_only"
     }
   ],

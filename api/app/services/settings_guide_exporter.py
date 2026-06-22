@@ -229,7 +229,7 @@ def _append_field_reference(lines: list[str]) -> None:
         ("core_mechanics[].id", "机制 id", "稳定唯一。", "导入生效", "investigation"),
         ("core_mechanics[].name", "机制名", "简短说明机制。", "导入生效", "[机制名]"),
         ("core_mechanics[].rule", "机制规则", "写 GM 必须长期遵守的可执行规则。", "导入生效", "[GM 长期遵守的规则]"),
-        ("core_mechanics[].progression", "推进方式", "数值、阶段、触发方式或代价。", "导入生效", "[推进方式]"),
+        ("core_mechanics[].progression", "推进方式", "阶段、触发方式或叙事代价。", "导入生效", "[推进方式]"),
         ("core_mechanics[].visibility", "可见性", "public、mixed、gm_only。", "导入生效", "mixed"),
     ])
     _append_table_section(lines, "action_style_rules[]", [

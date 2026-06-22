@@ -873,10 +873,15 @@ def _initial_state(
     initial_state["current_turn"] = _int(initial_state.get("current_turn"), 0)
     initial_state["time"] = _mapping(initial_state.get("time"))
     initial_state["location"] = _mapping(initial_state.get("location"))
+    protagonist.pop("attributes", None)
     initial_state["protagonist"] = protagonist
-    # 纯叙事化：不再种 progression/skills/abilities 数值结构。
+    # 纯叙事化：不再种 progression/skills/abilities 等数值结构；模型残留也丢弃。
+    for key in ("progression", "skills", "abilities"):
+        initial_state.pop(key, None)
     initial_state["conditions"] = _list(initial_state.get("conditions"))
-    initial_state["relationships"] = _list(initial_state.get("relationships"))
+    initial_state["relationships"] = _clean_narrative_relationships(
+        initial_state.get("relationships")
+    )
     initial_state["inventory"] = _list(initial_state.get("inventory"))
     initial_state["quests"] = _list(initial_state.get("quests"))
     initial_state["npcs"] = _list(initial_state.get("npcs"))
@@ -888,3 +893,31 @@ def _initial_state(
     initial_state["hidden_facts"] = _list(initial_state.get("hidden_facts"))
     initial_state["open_threads"] = _list(initial_state.get("open_threads"))
     return initial_state
+
+
+_REMOVED_RELATIONSHIP_NUMERIC_KEYS = {
+    "trust",
+    "affection",
+    "respect",
+    "fear",
+    "loyalty",
+    "conflict",
+    "score",
+    "value",
+}
+
+
+def _clean_narrative_relationships(value: Any) -> list[Any]:
+    relationships: list[Any] = []
+    for item in _list(value):
+        if not isinstance(item, dict):
+            relationships.append(item)
+            continue
+        relationships.append(
+            {
+                key: val
+                for key, val in item.items()
+                if key not in _REMOVED_RELATIONSHIP_NUMERIC_KEYS
+            }
+        )
+    return relationships

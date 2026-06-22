@@ -641,8 +641,11 @@ def story_settings_warnings(settings: Any) -> list[str]:
     不 raise、不修改剧本；用于把原本只进日志的弱剧本风险透出到导入/生成响应。
     """
     story = normalize_story_settings(settings)
+    acts = _records(story.get("act_plan"))
+    if not acts:
+        return ["act_plan 为空：运行时没有幕计划、完成锚点和自动转幕护栏。"]
     acts_without_required_anchor: list[str] = []
-    for act in _records(story.get("act_plan")):
+    for act in acts:
         act_id = _act_identity(act) or "未命名幕"
         has_required_anchor = any(
             _bool(anchor.get("required"), True)
