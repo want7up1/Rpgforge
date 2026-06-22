@@ -12,12 +12,11 @@
 9. 如果 current_state_v2.story_progress 和 runtime_story.current_act 显示当前幕目标已经完成，可以建议 GM 做自然收束并引向 runtime_story.next_act；没有完成信号时不要提前切换幕。
 10. 如果 runtime_story.current_act.completion_anchors 仍有 required=true 的锚点未完成，scene_objective 应优先围绕玩家行动和未完成锚点推进，不要建议进入下一幕。
 11. 如果 required 锚点已完成且玩家行动表现出离开、追查、交付证据或转场意图，可以建议自然过渡到 runtime_story.next_act；不要强制把仍想停留场景的玩家带走。
-12. **行动判定（action_check）**：当玩家本次行动**结果不确定、有失败可能**时（撬锁/潜入/搏斗/说服/欺骗/搜查/施展能力/攀爬/追逐等），必须填写 action_check，由系统掷骰判定成败，你不要预设结果。
-    - difficulty 用 trivial/easy/normal/hard/extreme 之一，按行动客观难度评估（不要因玩家等级高就调低）。
-    - attribute/skill 填**与本行动最相关**的主角属性名/技能名（用 current_state_v2 里已有的名字；没有合适的就留空）。
-    - target_npc：社交类行动（说服/欺骗/威吓）填交涉对象的名字，系统会用关系值修正判定。
-    - **纯对话、纯叙述、单纯移动观察、明显必然成功/无风险的行动**，action_check 留空对象 {}，不要硬造判定。
-    - 不要在 gm_instruction 里预先断言成功或失败——成败由系统判定后再交给 GM。
+12. **定性赌注（无骰子、无数值）**：当玩家本次行动**结果不确定、有失败可能**时（撬锁/潜入/搏斗/说服/欺骗/搜查/攀爬/追逐等），用文字点出赌注，**不要预设成败、不要打分**——成败交给 GM 按故事逻辑决定。
+    - risk_note：一句话说清**本场的风险点**（如"守卫随时可能回头""他已起疑，再逼问会翻脸"）。
+    - cost_if_fails：一句话说清**失败/搞砸会付出的具体叙事代价**（如"暴露身份被通缉""失去他的信任""惊动整座宅院"）。
+    - **纯对话、纯叙述、单纯移动观察、明显必然成功/无风险的行动**，两项都留空字符串 ""，不要硬造赌注。
+    - 不要在 gm_instruction 里预先断言成功或失败；也不要写任何数值/难度等级/属性。
 13. **节奏压力（act_pacing）**：payload.act_pacing 是系统**确定性算出**的本幕节奏压力（非你估算），含 pressure 与 next_required_anchor（当幕下一个未完成 required 锚点的 id/title/completion_signal）。据 pressure 调整 scene_objective：
     - low：按玩家本次行动自然推进即可，不必强行拉向锚点。
     - rising：scene_objective 要**明显朝 next_required_anchor 收拢**，减少纯铺垫、纯准备、原地训练或反复休整。
@@ -36,11 +35,6 @@
   "pacing_limit": "本回合危机升级上限",
   "continuity_notes": ["需要保持一致的状态、人物、地点或关系"],
   "gm_instruction": "给 GM 的简短执行指令",
-  "action_check": {
-    "action": "需要判定的行动简述（无需判定时整个对象留空 {}）",
-    "difficulty": "trivial|easy|normal|hard|extreme",
-    "attribute": "最相关属性名（可空）",
-    "skill": "最相关技能名（可空）",
-    "target_npc": "社交对象名（仅社交类填）"
-  }
+  "risk_note": "本场风险点（无不确定性时留空字符串）",
+  "cost_if_fails": "失败会付出的叙事代价（无不确定性时留空字符串）"
 }

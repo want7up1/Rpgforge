@@ -874,15 +874,7 @@ def _initial_state(
     initial_state["time"] = _mapping(initial_state.get("time"))
     initial_state["location"] = _mapping(initial_state.get("location"))
     initial_state["protagonist"] = protagonist
-    progression = _mapping(initial_state.get("progression"))
-    progression.setdefault("level", 1)
-    progression.setdefault("xp", 0)
-    progression.setdefault("next_level_xp", 100)
-    progression.setdefault("total_xp", 0)
-    progression.setdefault("xp_log", [])
-    initial_state["progression"] = progression
-    initial_state["skills"] = _list(initial_state.get("skills"))
-    initial_state["abilities"] = _list(initial_state.get("abilities"))
+    # 纯叙事化：不再种 progression/skills/abilities 数值结构。
     initial_state["conditions"] = _list(initial_state.get("conditions"))
     initial_state["relationships"] = _list(initial_state.get("relationships"))
     initial_state["inventory"] = _list(initial_state.get("inventory"))

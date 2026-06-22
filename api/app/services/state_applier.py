@@ -11,7 +11,6 @@ from app.services.story_settings import (
     story_settings_from_config,
     transition_target_for_act,
 )
-from app.services.survival_clock import apply_survival_clocks
 
 PLACEHOLDER_TEXTS = {"", "未定", "未知", "无名", "待定", "未命名角色", "未命名锚点"}
 ACTIVITY_MARKER_STOPWORDS = {
@@ -95,8 +94,6 @@ def apply_state_delta(
     _merge_relationship_aliases(state)
     apply_quantified_state_events(state, delta)
     _merge_relationship_aliases(state)
-    # B3+A3：压力时钟推进 + 危机条侵蚀（conditions 已应用、action_outcome 已并入 delta）。
-    apply_survival_clocks(state, delta)
     return normalize_state_v2(state, turn.turn_number)
 
 
@@ -679,33 +676,13 @@ def _preserve_name_aliases(existing: dict[str, Any], update: dict[str, Any]) -> 
 
 
 def _merge_relationship_record(target: dict[str, Any], incoming: dict[str, Any]) -> None:
-    for key in ("trust", "affection", "respect", "fear", "loyalty", "conflict"):
-        incoming_value = _numeric(incoming.get(key))
-        if incoming_value is None:
-            continue
-        # 取较新值（incoming 是 relationships 列表中较后、即较新回合添加的同人记录）而非 max；
-        # 否则别名合并后关系只升不降——和解后降低的 conflict 会被旧的高值覆盖（P2-11）。
-        target[key] = int(incoming_value)
-
+    # 纯叙事化：关系只有文字字段（status/note…）。别名合并取较新的非空值覆盖，
+    # 让"关系变化"（含降温）被保留，而不是旧值粘住。
     for key, value in incoming.items():
-        if key in {"trust", "affection", "respect", "fear", "loyalty", "conflict"}:
+        if key == "npc":
             continue
-        if key == "recent_events":
-            target[key] = _merge_recent_events(target.get(key), value)
-            continue
-        if _has_value(value) and not _has_value(target.get(key)):
+        if _has_value(value):
             target[key] = value
-
-
-def _merge_recent_events(left: Any, right: Any) -> list[Any]:
-    merged: list[Any] = []
-    for source in (left, right):
-        if not isinstance(source, list):
-            continue
-        for item in source:
-            if item not in merged:
-                merged.append(item)
-    return merged[-8:]
 
 
 def _configured_protagonist(config: Any) -> dict[str, Any]:
@@ -765,11 +742,15 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
     if completed_anchor:
         completed_anchors.append(completed_anchor)
     has_ready_update = "ready_for_next_act" in update
+    # 纯叙事化：失败结局不再靠危机条归零，由 extractor 语义判定终局失败时显式上报
+    # story_progress_update.defeat=true（布尔信号，镜像 campaign_complete）。
+    defeat_signal = update.get("defeat") is True or _text(update.get("defeat")).lower() == "true"
     if (
         not next_act
         and not pending_completed_acts
         and not completed_anchors
         and not has_ready_update
+        and not defeat_signal
     ):
         return
 
@@ -777,6 +758,10 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
     if not isinstance(progress, dict):
         progress = {}
         state["story_progress"] = progress
+
+    # 胜利优先于失败：已通关则不再标记 defeat。
+    if defeat_signal and not progress.get("campaign_complete"):
+        progress["defeat"] = True
 
     previous_act = _text(progress.get("current_act") or progress.get("act")) or (
         _configured_current_act(config)

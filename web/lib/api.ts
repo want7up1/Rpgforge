@@ -563,7 +563,6 @@ export type TurnAgentCost = {
 export type TurnInsights = {
   turn_id: string;
   observation: Record<string, unknown> | null;
-  action_outcome: Record<string, unknown> | null;
   agents: TurnAgentCost[];
   total_tokens_input: number;
   total_tokens_output: number;

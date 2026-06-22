@@ -7,12 +7,9 @@ _STATE = {
     "active_scene": {"location": "厨房", "present_npcs": ["角色D"]},
     "party": ["角色D"],
     "protagonist_sheet": {"name": "主角"},
-    "abilities": [{"name": "[异能]"}],
     "conditions": [],
-    "skills": [{"name": "调查"}],
     "open_threads": [{"id": "t1"}],
     "story_progress": {"current_act": "act_1"},
-    "progression": {"level": 2, "xp": 75, "xp_log": [{"amount": 20, "reason": "..."}]},
     "quest_log": {
         "active": [{"id": "q3", "title": "觉醒星域", "status": "active"}],
         "completed": [
@@ -25,16 +22,10 @@ _STATE = {
         {"name": "路人甲", "status": "已死亡"},
     ],
     "relationship_tracks": [
-        {"npc": "角色D", "trust": 46, "recent_events": [{"r": "a"}, {"r": "b"}, {"r": "c"}]},
-        {"npc": "角色F", "trust": 10, "recent_events": [{"r": "x"}]},
+        {"npc": "角色D", "status": "信任你"},
+        {"npc": "角色F", "status": "保持距离"},
     ],
 }
-
-
-def test_projection_drops_xp_log_keeps_progression_summary() -> None:
-    p = project_state_for_scene(_STATE)
-    assert "xp_log" not in p["progression"]
-    assert p["progression"]["level"] == 2 and p["progression"]["xp"] == 75
 
 
 def test_projection_compacts_completed_quests_to_titles() -> None:
@@ -49,13 +40,13 @@ def test_projection_keeps_only_onstage_npcs_and_relationships() -> None:
     # 只保留在场（角色D在 present/party；路人甲、角色F不在场）。
     assert [n["name"] for n in p["npc_registry"]] == ["角色D"]
     assert [r["npc"] for r in p["relationship_tracks"]] == ["角色D"]
-    # recent_events 只留最近 1 条。
-    assert p["relationship_tracks"][0]["recent_events"] == [{"r": "c"}]
+    # 关系是文字 status，无数字。
+    assert p["relationship_tracks"][0]["status"] == "信任你"
 
 
 def test_projection_keeps_scene_essentials_intact() -> None:
     p = project_state_for_scene(_STATE)
-    for key in ("active_scene", "protagonist_sheet", "abilities", "skills",
+    for key in ("active_scene", "protagonist_sheet",
                 "conditions", "open_threads", "story_progress", "party"):
         assert p[key] == _STATE[key]
 

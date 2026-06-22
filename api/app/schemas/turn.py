@@ -80,8 +80,6 @@ class TurnInsights(BaseModel):
 
     turn_id: UUID
     observation: dict[str, Any] | None = None
-    # A1 判定层：本回合行动判定结果（outcome/roll/dc/modifier/breakdown），无判定时为 None。
-    action_outcome: dict[str, Any] | None = None
     agents: list[TurnAgentCost] = Field(default_factory=list)
     total_tokens_input: int = 0
     total_tokens_output: int = 0

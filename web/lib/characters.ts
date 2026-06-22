@@ -32,23 +32,12 @@ export type CharacterMatch = {
   character: CharacterRead;
 };
 
+// 纯叙事：角色运行时视图只剩文字字段——位置/状态/关系叙述/补充，无关系数值轴。
 export type CharacterRuntimeView = {
   location: string;
   status: string;
   relationship: string;
-  attitude: string;
-  stage: string;
-  axes: { key: string; label: string; value: number }[];
-  recent: string;
-};
-
-const relationshipAxisLabels: Record<string, string> = {
-  trust: "信任",
-  affection: "亲密",
-  respect: "尊重",
-  fear: "畏惧",
-  loyalty: "忠诚",
-  conflict: "冲突"
+  note: string;
 };
 
 export function normalizeStoryProfile(
@@ -169,26 +158,14 @@ export function buildCharacterRuntimeView(
   return {
     location: npc?.location ?? "",
     status: npc?.status ?? "",
-    relationship: relation?.relationship || npc?.relationship || "",
-    attitude: relation?.attitude || npc?.attitude || "",
-    stage: relation?.stage ?? "",
-    axes: relation ? relationshipAxesFromTrack(relation) : [],
-    recent: relation?.recent_interaction ?? ""
+    relationship: relation?.status || npc?.relationship || npc?.attitude || "",
+    note: relation?.note ?? ""
   };
 }
 
 function findRelationshipTrack(character: CharacterRead, tracks: RelationshipTrack[]) {
   const names = [character.name, ...character.aliases].map(normalizeCharacterName);
   return tracks.find((track) => names.includes(normalizeCharacterName(track.npc)));
-}
-
-function relationshipAxesFromTrack(track: RelationshipTrack) {
-  return Object.entries(relationshipAxisLabels)
-    .map(([key, label]) => {
-      const value = track[key as keyof RelationshipTrack];
-      return typeof value === "number" ? { key, label, value } : null;
-    })
-    .filter((item): item is { key: string; label: string; value: number } => item !== null);
 }
 
 function hasAsciiBoundary(text: string, index: number, length: number): boolean {

@@ -1107,54 +1107,6 @@ textarea.app-input {
   color: var(--accent);
 }
 
-/* A3 危机条 */
-.crisis-bar {
-  margin-bottom: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  background: rgba(25, 29, 27, 0.5);
-  padding: 0.55rem 0.75rem;
-}
-
-.crisis-bar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.crisis-bar-value {
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-
-.crisis-bar-track {
-  margin-top: 0.4rem;
-  height: 0.45rem;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--soft-panel);
-}
-
-.crisis-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 0.4s ease;
-  background: #4ade80;
-}
-
-.crisis-bar-warn .crisis-bar-fill {
-  background: #fbbf24;
-}
-
-.crisis-bar-danger .crisis-bar-fill {
-  background: #f87171;
-}
-
-.crisis-bar-danger {
-  border-color: rgba(248, 113, 113, 0.55);
-}
-
 /* B1 剧终卡片 */
 .campaign-ending-card {
   margin-bottom: 1.25rem;
@@ -1526,52 +1478,6 @@ textarea.app-input {
   border-radius: 8px;
   background: linear-gradient(180deg, rgba(47, 122, 96, 0.12), rgba(25, 29, 27, 0.72));
   padding: 0.9rem;
-}
-
-/* 行动结果卡：把判定后果从折叠的遥测抽屉提进阅读流。无判定回合不显示（不伪造成功）。 */
-.turn-outcome {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.4rem 0.8rem;
-  margin-bottom: 0.85rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 8px;
-  border-left: 3px solid var(--outcome-color, var(--accent-strong));
-  background: color-mix(in srgb, var(--outcome-color, var(--accent-strong)) 13%, transparent);
-}
-
-.turn-outcome-label {
-  font-weight: 700;
-  color: var(--outcome-color, var(--foreground));
-}
-
-.turn-outcome-action {
-  color: var(--foreground);
-  font-size: 0.92em;
-}
-
-.turn-outcome-roll {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 0.82em;
-  font-variant-numeric: tabular-nums;
-}
-
-.turn-outcome--great {
-  --outcome-color: #d9b36f;
-}
-.turn-outcome--good {
-  --outcome-color: #52a47f;
-}
-.turn-outcome--partial {
-  --outcome-color: #e0a23d;
-}
-.turn-outcome--fail {
-  --outcome-color: #e0533d;
-}
-.turn-outcome--neutral {
-  --outcome-color: var(--muted);
 }
 
 .turn-settlement-summary {

@@ -2,22 +2,17 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { GamePageHeader } from "@/components/GamePageHeader";
 import { getGame } from "@/lib/api";
 import {
-  formatLogEntry,
   getStateV2FromGame,
-  ratioPercent,
-  relationshipAxes,
   threadStatusLabel,
-  type AbilityState,
   type ConditionState,
   type QuestItem,
   type RelationshipTrack,
-  type SkillState,
   type StateV2
 } from "@/lib/stateV2";
 import type { GameDetail } from "@/lib/types";
@@ -72,9 +67,15 @@ export default function GameStatusPage() {
 
 function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
   const protagonist = stateV2.protagonist_sheet;
-  const xpPercent = ratioPercent(protagonist.xp, protagonist.next_level_xp);
+  const progress = stateV2.story_progress;
   const activeQuestCount = stateV2.quest_log.active.length;
   const activeThreadCount = stateV2.open_threads.active.length;
+  // 结局标记：通关或失败时在状态页顶部提示（与 play 页结局视图呼应）。
+  const endingLabel = progress.defeat
+    ? "失败结局"
+    : progress.campaign_complete
+      ? "已通关"
+      : "";
 
   return (
     <div className="grid gap-4 sm:gap-5">
@@ -82,6 +83,7 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
         active="status"
         eyebrow="状态"
         gameId={game.id}
+        meta={endingLabel ? <span className="app-pill">{endingLabel}</span> : undefined}
         primaryAction={
           <Link className="app-button app-button-primary w-full sm:w-fit" href={`/games/${game.id}/play`}>
             继续冒险
@@ -92,27 +94,18 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
       />
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-        <Metric label="等级" value={`Lv.${protagonist.level}`} />
-        <Metric label="总经验" value={protagonist.total_xp} />
+        <Metric label="状态" value={stateV2.conditions.length} />
+        <Metric label="关系" value={stateV2.relationship_tracks.length} />
         <Metric label="任务" value={activeQuestCount} />
         <Metric label="线索" value={activeThreadCount} />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <CharacterPanel stateV2={stateV2} xpPercent={xpPercent} />
+        <CharacterPanel stateV2={stateV2} />
         <ScenePanel stateV2={stateV2} />
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <SkillsPanel skills={stateV2.skills} />
-        <div className="grid gap-4">
-          <ConditionsPanel conditions={stateV2.conditions} />
-          {stateV2.abilities.length > 0 ? (
-            <AbilitiesPanel abilities={stateV2.abilities} />
-          ) : null}
-        </div>
-      </section>
-
+      <ConditionsPanel conditions={stateV2.conditions} />
       <RelationshipsPanel relationships={stateV2.relationship_tracks} />
       <QuestThreadPanel stateV2={stateV2} />
       <NpcPanel stateV2={stateV2} />
@@ -120,43 +113,18 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
   );
 }
 
-function CharacterPanel({ stateV2, xpPercent }: { stateV2: StateV2; xpPercent: number }) {
+function CharacterPanel({ stateV2 }: { stateV2: StateV2 }) {
   const protagonist = stateV2.protagonist_sheet;
-  const attributeEntries = useMemo(
-    () =>
-      Object.entries(protagonist.attributes).filter(([, value]) => formatValue(value).length > 0),
-    [protagonist.attributes]
-  );
 
   return (
     <section className="surface-panel surface-panel-strong">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="surface-title">主角</h2>
-        <span className="app-pill">Lv.{protagonist.level}</span>
-      </div>
-      <div className="mt-4">
-        <div className="flex items-center justify-between gap-3 text-sm">
-          <span className="font-medium">经验</span>
-          <span className="text-[color:var(--muted)]">
-            {protagonist.xp}/{protagonist.next_level_xp}
-          </span>
-        </div>
-        <ProgressBar value={xpPercent} className="mt-2" />
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <CompactField label="姓名" value={protagonist.name || "未记录"} />
         <CompactField label="身份" value={protagonist.identity || "未记录"} />
       </div>
-      {attributeEntries.length > 0 ? (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold">属性</h3>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {attributeEntries.map(([key, value]) => (
-              <CompactField key={key} label={key} value={formatValue(value)} />
-            ))}
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -210,41 +178,6 @@ function formatAnchorProgress(progress: StateV2["story_progress"]): string {
   return `${countLabel} · ${readyLabel}`;
 }
 
-function SkillsPanel({ skills }: { skills: SkillState[] }) {
-  return (
-    <section className="surface-panel">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">技能熟练度</h2>
-        <span className="app-pill">{skills.length} 项</span>
-      </div>
-      <div className="mt-4 grid gap-3">
-        {skills.length === 0 ? (
-          <EmptyText>尚未记录技能。技能会在剧情中实际使用后出现。</EmptyText>
-        ) : (
-          skills.map((skill) => (
-            <article className="archive-card archive-card-green" key={skill.name}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="break-words text-sm font-semibold">{skill.name}</h3>
-                  <p className="mt-1 text-xs text-[color:var(--muted)]">Lv.{skill.level}</p>
-                </div>
-                <span className="text-sm font-medium">{skill.mastery}%</span>
-              </div>
-              <ProgressBar value={skill.mastery} className="mt-3" />
-              <p className="mt-2 text-xs text-[color:var(--muted)]">
-                {skill.xp}/{skill.next_level_xp} 熟练经验
-              </p>
-              {skill.recent_events.length > 0 ? (
-                <RecentLog entries={skill.recent_events} />
-              ) : null}
-            </article>
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
-
 function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
   return (
     <section className="surface-panel">
@@ -256,49 +189,22 @@ function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
         {conditions.length === 0 ? (
           <EmptyText>没有持续状态。</EmptyText>
         ) : (
-          conditions.map((condition) => (
-            <article className="archive-card" key={condition.name}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
+          conditions.map((condition) => {
+            // 纯文字处境：状态一句话 + 可选补充/来源，无 severity/duration 数字。
+            const detail = [condition.status, condition.note].filter(Boolean).join(" · ");
+            return (
+              <article className="archive-card" key={condition.name}>
                 <h3 className="font-semibold">{condition.name}</h3>
-                <span className="app-pill">{condition.severity}</span>
-              </div>
-              <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
-                {condition.status}
-                {condition.duration ? ` · ${condition.duration}` : ""}
-                {condition.source ? ` · 来源：${condition.source}` : ""}
-              </p>
-            </article>
-          ))
+                {detail || condition.source ? (
+                  <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                    {detail}
+                    {condition.source ? `${detail ? " · " : ""}来源：${condition.source}` : ""}
+                  </p>
+                ) : null}
+              </article>
+            );
+          })
         )}
-      </div>
-    </section>
-  );
-}
-
-function AbilitiesPanel({ abilities }: { abilities: AbilityState[] }) {
-  return (
-    <section className="surface-panel">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">能力</h2>
-        <span className="app-pill">{abilities.length} 项</span>
-      </div>
-      <div className="mt-4 grid gap-3">
-        {abilities.map((ability) => (
-          <article className="archive-card archive-card-accent" key={ability.name}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-semibold">{ability.name}</h3>
-              <span className="app-pill">Lv.{ability.level}</span>
-            </div>
-            <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
-              {ability.description || ability.status}
-            </p>
-            <div className="app-wrap-text mt-3 grid gap-2 text-xs text-[color:var(--muted)] sm:grid-cols-2">
-              {ability.resource_cost ? <span>消耗：{ability.resource_cost}</span> : null}
-              {ability.cooldown ? <span>冷却：{ability.cooldown}</span> : null}
-              {ability.usage_note ? <span className="sm:col-span-2">{ability.usage_note}</span> : null}
-            </div>
-          </article>
-        ))}
       </div>
     </section>
   );
@@ -325,33 +231,17 @@ function RelationshipsPanel({ relationships }: { relationships: RelationshipTrac
 }
 
 function RelationshipCard({ relationship }: { relationship: RelationshipTrack }) {
-  const hasQuantifiedAxis = relationshipAxes.some(({ key }) => relationship[key] !== null);
-
+  // 纯叙事：status 是一句关系叙述，note 是可选补充，皆为文字、无数值轴。
   return (
     <article className="archive-card archive-card-green">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold">{relationship.npc}</h3>
-        {relationship.stage ? <span className="app-pill">{relationship.stage}</span> : null}
-      </div>
-      {hasQuantifiedAxis ? (
-        <div className="mt-4 grid gap-3">
-          {relationshipAxes.map(({ key, label }) => (
-            <AxisBar key={key} label={label} value={relationship[key] ?? 0} />
-          ))}
-        </div>
-      ) : (
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <CompactField label="关系" value={relationship.relationship || "未记录"} />
-          <CompactField label="态度" value={relationship.attitude || "未记录"} />
-        </div>
-      )}
-      {relationship.recent_interaction ? (
-        <p className="app-wrap-text mt-3 text-sm leading-6 text-[color:var(--muted)]">
-          {relationship.recent_interaction}
+      <h3 className="font-semibold">{relationship.npc}</h3>
+      <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+        {relationship.status || "尚无明确的关系描述。"}
+      </p>
+      {relationship.note ? (
+        <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+          {relationship.note}
         </p>
-      ) : null}
-      {relationship.recent_events.length > 0 ? (
-        <RecentLog entries={relationship.recent_events} />
       ) : null}
     </article>
   );
@@ -489,51 +379,6 @@ function CompactField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function AxisBar({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="font-medium">{label}</span>
-        <span className="text-[color:var(--muted)]">{value}</span>
-      </div>
-      <ProgressBar value={value} className="mt-1.5" />
-    </div>
-  );
-}
-
-function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
-  return (
-    <div
-      aria-label={`进度 ${value}%`}
-      className={`h-2 overflow-hidden rounded-full bg-[color:var(--soft-panel)] ${className}`}
-      role="progressbar"
-      aria-valuenow={value}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <div
-        className="h-full rounded-full bg-[color:var(--accent)] transition-[width]"
-        style={{ width: `${value}%` }}
-      />
-    </div>
-  );
-}
-
-function RecentLog({ entries }: { entries: Record<string, unknown>[] }) {
-  return (
-    <details className="mt-3 rounded border border-[color:var(--border)] bg-[color:var(--input)]">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">最近变化</summary>
-      <div className="grid gap-2 border-t border-[color:var(--border)] p-3">
-        {entries.map((entry, index) => (
-          <p className="app-wrap-text text-xs leading-5 text-[color:var(--muted)]" key={index}>
-            {formatLogEntry(entry)}
-          </p>
-        ))}
-      </div>
-    </details>
-  );
-}
-
 function PillList({ values }: { values: string[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
@@ -552,17 +397,4 @@ function EmptyText({ children }: { children: string }) {
       {children}
     </p>
   );
-}
-
-function formatValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value.trim();
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return value.map(formatValue).filter(Boolean).join("、");
-  }
-  return "";
 }

@@ -27,7 +27,7 @@ import {
   rewindTurns,
   type TurnInsights
 } from "@/lib/api";
-import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
+import { getStateV2FromGame, type StateV2 } from "@/lib/stateV2";
 import {
   createInitialTurnProcess,
   formatMaintenanceStage,
@@ -405,7 +405,6 @@ export default function PlayPage() {
                       stateV2={stateV2}
                     />
                   ) : null}
-                  {!isEnded && stateV2 ? <CrisisBar stateV2={stateV2} /> : null}
                   {!isEnded && stateV2 ? <ObjectivePanel stateV2={stateV2} /> : null}
                   {stateV2 ? (
                     <PresentCharactersStrip
@@ -529,7 +528,6 @@ function AdventureSidebar({
       <section className="app-status text-xs">
         <strong className="block text-[color:var(--foreground)]">当前存档</strong>
         <span className="mt-1 block">
-          Lv.{stateV2?.protagonist_sheet.level ?? 1} ·{" "}
           {stateV2?.conditions.length ? `${stateV2.conditions.length} 个状态` : "状态稳定"}
         </span>
       </section>
@@ -609,7 +607,6 @@ function AdventureInspector({
 function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 }) {
   const protagonist = stateV2.protagonist_sheet;
   const scene = stateV2.active_scene;
-  const xpPercent = ratioPercent(protagonist.xp, protagonist.next_level_xp);
   const conditionLabel =
     stateV2.conditions.length > 0 ? `${stateV2.conditions.length} 个状态` : "状态稳定";
 
@@ -617,50 +614,24 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
     <section className="app-card app-card-pad">
       <div className="grid gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span className="font-semibold">Lv.{protagonist.level}</span>
-            <span className="text-[color:var(--muted)]">
-              {protagonist.xp}/{protagonist.next_level_xp}
-            </span>
+          <div className="text-sm font-semibold">
+            {protagonist.name || "主角"}
           </div>
+          {protagonist.identity ? (
+            <p className="mt-1 text-xs leading-5 text-[color:var(--muted)]">
+              {protagonist.identity}
+            </p>
+          ) : null}
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
             <span className="text-[color:var(--muted)]">
               {scene.location || "未知地点"}
             </span>
             <span className="text-[color:var(--muted)]">· {conditionLabel}</span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[color:var(--soft-panel)]">
-            <div
-              className="h-full rounded-full bg-[color:var(--accent)]"
-              style={{ width: `${xpPercent}%` }}
-            />
-          </div>
         </div>
         <Link className="app-button w-full sm:w-fit" href={`/games/${gameId}/status`}>
           查看状态
         </Link>
-      </div>
-    </section>
-  );
-}
-
-// A3 危机条：游玩主界面展示主角安危处境（value 越低越危险），让「输」的风险可感。
-function CrisisBar({ stateV2 }: { stateV2: StateV2 }) {
-  const { value, max } = stateV2.crisis;
-  if (max <= 0) {
-    return null;
-  }
-  const percent = ratioPercent(value, max);
-  const level = percent <= 25 ? "danger" : percent <= 55 ? "warn" : "ok";
-  const label = level === "danger" ? "危急" : level === "warn" ? "受创" : "稳健";
-  return (
-    <section className={`crisis-bar crisis-bar-${level}`} aria-label="主角状态">
-      <div className="crisis-bar-head">
-        <span className="story-label">主角状态 · {label}</span>
-        <span className="crisis-bar-value">{value}/{max}</span>
-      </div>
-      <div className="crisis-bar-track">
-        <div className="crisis-bar-fill" style={{ width: `${percent}%` }} />
       </div>
     </section>
   );
@@ -1116,25 +1087,6 @@ function StoryPanel({
 function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) {
   return (
     <article className="turn-settlement-card">
-      {settlement.outcome ? (
-        <div className={`turn-outcome turn-outcome--${settlement.outcome.tone}`}>
-          <span className="turn-outcome-label">行动结果 · {settlement.outcome.label}</span>
-          {settlement.outcome.action ? (
-            <span className="turn-outcome-action">{settlement.outcome.action}</span>
-          ) : null}
-          {settlement.outcome.roll !== null ? (
-            <span className="turn-outcome-roll">
-              掷骰 {settlement.outcome.roll}
-              {settlement.outcome.modifier
-                ? settlement.outcome.modifier > 0
-                  ? `+${settlement.outcome.modifier}`
-                  : settlement.outcome.modifier
-                : ""}
-              {settlement.outcome.dc !== null ? ` vs ${settlement.outcome.dc}` : ""}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="story-label">本回合变化</div>
@@ -1205,7 +1157,6 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
   const flags = obs?.flags ?? [];
   const hitRate =
     data?.cache_hit_rate != null ? `${Math.round(data.cache_hit_rate * 100)}%` : "—";
-  // 行动判定后果已提进阅读流的「行动结果卡」（见 TurnSettlementCard），此处不再重复展示。
 
   return (
     <details className="generation-detail-panel" onToggle={handleToggle}>

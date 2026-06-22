@@ -7,7 +7,7 @@ from app.models.character import Character
 from app.models.game import Game, GameConfig
 from app.models.state import GameState
 from app.schemas.generator import GeneratedGameConfig
-from app.services.state_v2 import DEFAULT_PROTAGONIST_ATTRIBUTES, normalize_state_v2
+from app.services.state_v2 import normalize_state_v2
 from app.services.story_settings import (
     default_story_settings,
     game_profile,
@@ -24,23 +24,11 @@ def build_default_initial_state(title: str, description: str | None = None) -> d
         "protagonist": {
             "name": "未定",
             "identity": "未定",
-            "attributes": {},
             "body": "正常",
             "mind": "平静",
             "weaknesses": [],
         },
-        "progression": {
-            "level": 1,
-            "xp": 0,
-            "next_level_xp": 100,
-            "total_xp": 0,
-            "xp_log": [],
-        },
-        # A3 危机条 + B3 压力时钟（survival_clock 每回合推进）。
-        "crisis": {"value": 100, "max": 100},
-        "pressure_clock": {"value": 0, "threshold": 10, "triggers": 0},
-        "skills": [],
-        "abilities": [],
+        # 纯叙事化：不再有等级/经验/危机条/压力时钟/技能/能力等数值结构。
         "conditions": [],
         "relationships": [],
         "inventory": [],
@@ -192,11 +180,7 @@ def _fill_protagonist_from_story_settings(
     if not isinstance(protagonist, dict):
         protagonist = {}
         initial_state["protagonist"] = protagonist
-    # 属性兜底（总执行，在下方 configured 早返回之前）：AI 未生成或手动建档时填中性默认六维，
-    # 让角色 build / 行动判定从开局就有依托，而不是空属性→判定纯靠运气。
-    existing_attrs = protagonist.get("attributes")
-    if not isinstance(existing_attrs, dict) or not existing_attrs:
-        protagonist["attributes"] = dict(DEFAULT_PROTAGONIST_ATTRIBUTES)
+    # 纯叙事化：不再种六维属性，主角只补名字/身份等文字字段。
     configured = next(
         (
             character

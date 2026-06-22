@@ -27,6 +27,30 @@
 
 ## 1. 已完成
 
+### Round 53 (2026-06-22) — 纯叙事化改造：删除全部量化数值，转小说向 RPG
+
+**用户决策（方向性大改）**：删掉游戏内**所有玩家可见数值**（等级/经验/六维属性/技能及熟练度/NPC 关系分数），连带删 d20 判定层、行动后果卡、危机条 crisis、压力时钟 pressure_clock，把状态完全用**文字**维持，做成彻底的叙事向 RPG。设计 spec 见 [`docs/superpowers/specs/2026-06-22-pure-narrative-rpg-design.md`](superpowers/specs/2026-06-22-pure-narrative-rpg-design.md)。核心心法：**不是"删数字"，是"把每个数字原来在干的活改写成一条叙事机制"**——删了不补=退化，补对了=升级（方案 B）。
+
+**删除（后端）**：`action_resolver.py`（d20 判定层）、`survival_clock.py`（crisis+pressure_clock+crisis→defeat）整文件删；`quantified_state.py` 删 xp/skill/ability/升级/熟练度/关系打分（391→125 行），只留 conditions/relationships 两个**文字化**结构；`gameplay.py` 删 `_resolve_action_outcome`+action_outcome 全链路；`state_v2.py` 删 progression/skills/abilities/crisis/pressure 投影、`protagonist_sheet` 收敛为 name/identity/conditions、conditions 去 severity、relationship_tracks 去全部数值改文字 status；`game_creator`/`game_generator` 删数值种子；`schemas/turn.py`+`routers/gameplay.py` 删 action_outcome。
+
+**保留并去数字化**：conditions=`{name,status,note,source,visibility}`、relationships=`{npc,status,note}`（结构化存**文字**，保长局一致性、玩家侧零数字）；`act_pacing` 幕后节奏信号保留（D4，防 Round 51 "推不动"复发）；`active_scene.pressure` 是文字非数字，保留。
+
+**失败出口改叙事驱动（D5）**：crisis→0 的 defeat 没了 → extractor 语义判定终局失败上报 `story_progress_update.defeat=true`（布尔信号，镜像 campaign_complete，经 `_apply_story_progress` 白名单入库）；失败结局机器（epilogue）保留、只换触发源。
+
+**无数字版张力设计 + 文笔升级（prompt，规则编号变更）**：
+- `gm_runtime.md`：**规则 33** 从"判定结果是硬约束"改写为**「是，但…／否，但…」框架**（消费 Director 的定性赌注 risk_note/cost_if_fails，成功带代价、失败留转机，明令"别滑向有求必应"）；**规则 34** 去掉 crisis/pressure_clock 数值，改"危险靠情境演不靠数值"；顶部叙事工艺段新增正向锚点"代价与失败是好戏的一部分"。
+- `story_director.md`：**规则 12** 从 action_check（d20+属性/技能）改为**定性赌注**（risk_note + cost_if_fails，无骰子无数值）；输出结构去 action_check、加 risk_note/cost_if_fails。
+- `extract_state_delta.md`：**规则 7/8** 去数值化（关系/状态只产出文字）；**新增规则 23**（终局失败 defeat 语义上报）；输出结构删 xp_events/skill_events/ability_updates、condition/relationship 去数字、加 defeat。
+- `generate_epilogue.md`：defeat 描述去"危机条归零"，改叙事/锚点驱动。
+
+**迁移**：无破坏性迁移，旧存档数值字段（skills/xp/progression/crisis/relationship-score）自然休眠（同 Round 47/49）。诚实取舍：旧存档 rebuild 后无 crisis→危机驱动 defeat 不复现（改叙事 defeat，旧局默认不 defeat、更宽容、不崩）。
+
+**前端（子 Agent 执行，纯叙事化清理）**：`stateV2.ts` 删 ProgressionState/skills/abilities/crisis/pressure 类型、protagonist_sheet 收敛、relationship/condition 改文字；`gameExperience.ts` 删 ActionOutcomeView/extractActionOutcome + 经验/技能结算段、结算条改文字增量；play/status/[id]/characters 页删等级/经验/属性/危机条/技能/关系数值展示，改文字渲染，defeat/通关加结局 pill；`globals.css` 删 crisis-bar/turn-outcome 样式；`api.ts` 删 TurnInsights.action_outcome。
+
+**验证**：后端容器内 `ruff check .` 干净 + **pytest 245 passed**（268→245，删 action_resolver/survival_clock 两个测试文件共 23 用例；其余受影响测试改成文字契约：关系文字 status、defeat 链路、投影去数值）。前端 `eslint .` 0 + `tsc --noEmit` 0 + `vitest 52 passed` + `next build` 通过；残留数值字段引用扫描仅剩误命中（workshop 合并冲突 `e.conflict`）。Docker api/worker/web 三镜像均已重建重启、容器 healthy、worker 启动无异常。整体 diff：32 文件、+230/−1416（净删 ~1200 行）。
+
+**最大风险（须真实游玩验证）**：无骰子后 GM 可能滑向"有求必应、张力软掉"——靠 yes-but 框架 + Director 定性赌注 + gm_runtime 正向化压住，规则遵守度纯函数测不了，待实机观察。**后续选项（方案 C，本次不做）**：GM 正文换更强模型（天花板最高、有成本）。
+
 ### Round 52 (2026-06-22) — 剧本遵循护栏：高压锚点停滞监控 + 导入剧本 required 锚点警告
 
 承接 Round 51 的 `act_pacing`：本轮不新增 LLM、不自动补锚点、不恢复同步 drift，只做两条确定性监控/护栏，防止"信号已经进 Director/GM，但真实运行仍看不到推进"和"弱剧本导入后天然缺转幕抓手"静默发生。

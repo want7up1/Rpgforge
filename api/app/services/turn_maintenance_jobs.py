@@ -163,15 +163,6 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
         if game is None or turn is None:
             return
 
-        # A3：把本回合行动判定结果并入 delta 并持久化，让 survival_clock 据失败侵蚀危机条，
-        # 且 rebuild 重放时可复现（action_outcome 随 turn.state_delta_json / StateDelta 落库）。
-        runtime_inputs = job.turn_runtime_inputs or {}
-        action_outcome = (
-            runtime_inputs.get("action_outcome") if isinstance(runtime_inputs, dict) else None
-        )
-        if isinstance(action_outcome, dict) and action_outcome:
-            delta_json = {**delta_json, "action_outcome": action_outcome}
-
         turn.state_delta_json = delta_json
         job.extractor_failed = False
         if game.state is not None:
@@ -224,7 +215,7 @@ _ENDING_STATUS = {"victory": "completed", "defeat": "defeated"}
 
 
 async def _finalize_campaign_if_complete(job_id: UUID) -> None:
-    """打通末幕（胜利）或危机条归零（失败）则生成结局并置终态 game.status。
+    """打通末幕（胜利）或 extractor 上报终局失败（defeat）则生成结局并置终态 game.status。
 
     幂等：game.status 已是终态、或两种结局标记都未置时直接返回。
     结局生成失败/超时返回空串，此时仅置状态、不写结局正文（前端展示 fallback）。
@@ -254,7 +245,7 @@ def _load_campaign_ending_context(job_id: UUID) -> dict[str, Any] | None:
         progress = state_json.get("story_progress")
         if not isinstance(progress, dict):
             return None
-        # 胜利优先于失败（同回合既满足末幕完成又危机归零时，按通关处理）。
+        # 胜利优先于失败（同回合既满足末幕完成又上报 defeat 时，按通关处理）。
         if progress.get("campaign_complete"):
             ending_type = "victory"
         elif progress.get("defeat"):
@@ -282,12 +273,10 @@ def _load_campaign_ending_context(job_id: UUID) -> dict[str, Any] | None:
             "completed_acts": progress.get("completed_acts", []),
             "current_act": runtime_story.get("current_act"),
             "protagonist": view.get("protagonist_sheet"),
-            "crisis": state_json.get("crisis"),
             "key_relationships": [
                 {
                     "npc": rel.get("npc"),
-                    "stage": rel.get("stage"),
-                    "attitude": rel.get("attitude") or rel.get("relationship"),
+                    "attitude": rel.get("status") or rel.get("note"),
                 }
                 for rel in (view.get("relationship_tracks") or [])
             ][:8],

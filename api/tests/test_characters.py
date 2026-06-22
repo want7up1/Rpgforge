@@ -87,8 +87,7 @@ def test_sync_characters_creates_new_runtime_npc_by_real_name(db_session) -> Non
         "relationships": [
             {
                 "npc": "陈雨桐",
-                "stage": "陌生",
-                "trust": 6,
+                "status": "信任初建",
             }
         ],
     }

@@ -23,9 +23,6 @@ def normalize_state_v2(
 
     location_name = _first_text(location_state.get("current"), location_state.get("name"))
     present_npcs = _present_npc_names(npcs, location_name)
-    progression = _progression(state)
-    skills = _skill_view(state.get("skills"))
-    abilities = _ability_view(state.get("abilities"))
     conditions = _condition_view(state.get("conditions"))
     story_progress = _story_progress(state.get("story_progress"))
     state["story_progress"] = story_progress
@@ -36,6 +33,7 @@ def normalize_state_v2(
             "turn": int(state.get("current_turn") or 0),
             "time": _first_text(time_state.get("current"), time_state.get("last_delta")),
             "location": location_name,
+            # 文字化的"当下处境压力"（紧张/危急…），非数值时钟。
             "pressure": _first_text(
                 location_state.get("pressure"),
                 time_state.get("pressure"),
@@ -43,10 +41,7 @@ def normalize_state_v2(
             ),
             "present_npcs": present_npcs,
         },
-        "protagonist_sheet": _protagonist_sheet(state, progression, abilities, conditions),
-        "progression": progression,
-        "skills": skills,
-        "abilities": abilities,
+        "protagonist_sheet": _protagonist_sheet(state, conditions),
         "conditions": conditions,
         "party": _party_names(state, npcs, present_npcs),
         "npc_registry": _npc_registry(npcs),
@@ -54,29 +49,8 @@ def normalize_state_v2(
         "open_threads": _thread_log(state.get("open_threads")),
         "story_progress": story_progress,
         "relationship_tracks": _relationship_tracks(state.get("relationships"), npcs),
-        # A3 危机条 + B3 压力时钟，供 GM/Director 感知风险、前端展示。
-        "crisis": _crisis_view(state.get("crisis")),
-        "pressure_clock": _pressure_clock_view(state.get("pressure_clock")),
     }
     return state
-
-
-def _crisis_view(value: Any) -> dict[str, int]:
-    data = _mapping(value)
-    maximum = _positive_int(data.get("max"), 100)
-    raw = data.get("value")
-    current = _int(raw, maximum) if raw is not None else maximum
-    return {"value": _clamp(current, 0, maximum), "max": maximum}
-
-
-def _pressure_clock_view(value: Any) -> dict[str, int]:
-    data = _mapping(value)
-    threshold = _positive_int(data.get("threshold"), 10)
-    return {
-        "value": _clamp(_int(data.get("value"), 0), 0, threshold),
-        "threshold": threshold,
-        "triggers": max(0, _int(data.get("triggers"), 0)),
-    }
 
 
 def state_v2_view(state_json: dict[str, Any] | None) -> dict[str, Any]:
@@ -363,6 +337,8 @@ def _story_progress(value: Any) -> dict[str, Any]:
         "current_act_title": _first_text(progress.get("current_act_title")),
         "current_act_objective": _first_text(progress.get("current_act_objective")),
         "campaign_complete": _bool(progress.get("campaign_complete"), False),
+        # 纯叙事化：失败结局由 extractor 语义判定上报，镜像 campaign_complete。
+        "defeat": _bool(progress.get("defeat"), False),
         "epilogue": _first_text(progress.get("epilogue")),
     }
 
@@ -416,112 +392,18 @@ def _unique_texts(value: Any) -> list[str]:
     return texts
 
 
-def _progression(state: dict[str, Any]) -> dict[str, Any]:
-    progression = _mapping(state.get("progression"))
-    level = _positive_int(progression.get("level"), 1)
-    xp = max(0, _int(progression.get("xp"), 0))
-    next_level_xp = _positive_int(progression.get("next_level_xp"), 100 + (level - 1) * 75)
-    total_xp = max(xp, _int(progression.get("total_xp"), xp))
-    normalized = {
-        "level": level,
-        "xp": xp,
-        "next_level_xp": next_level_xp,
-        "total_xp": total_xp,
-        "xp_log": _list(progression.get("xp_log"))[-20:],
-    }
-    state["progression"] = normalized
-    return normalized
-
-
-# 默认六维属性（D&D 式：10=常人均值，判定加成=(值-10)//2）。
-# 用于老存档/未生成属性时的中性兜底，让属性判定系统对所有存档统一生效。
-DEFAULT_PROTAGONIST_ATTRIBUTES: dict[str, int] = {
-    "力量": 10,
-    "敏捷": 10,
-    "体质": 10,
-    "智力": 10,
-    "感知": 10,
-    "魅力": 10,
-}
-
-
 def _protagonist_sheet(
     state: dict[str, Any],
-    progression: dict[str, Any],
-    abilities: list[dict[str, Any]],
     conditions: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    # 纯叙事化：主角档案不再有等级/经验/六维属性/能力，只剩身份 + 当前处境。
+    # 角色人设由 runtime_story（story_settings）承载，不在 state 里建数值表。
     protagonist = _mapping(state.get("protagonist"))
-    attributes = _mapping(state.get("attributes"))
-    if not attributes:
-        attributes = _mapping(protagonist.get("attributes"))
-    if not attributes:
-        # 老存档/未生成属性：懒注入中性默认六维（不动存档、rebuild 可复现），
-        # 让 Director 有属性名可引用、判定层有数值可读。
-        attributes = dict(DEFAULT_PROTAGONIST_ATTRIBUTES)
     return {
         "name": _first_text(protagonist.get("name")),
         "identity": _first_text(protagonist.get("identity")),
-        "level": progression["level"],
-        "xp": progression["xp"],
-        "next_level_xp": progression["next_level_xp"],
-        "total_xp": progression["total_xp"],
-        "attributes": attributes,
-        "abilities": abilities,
         "conditions": conditions,
     }
-
-
-def _skill_view(value: Any) -> list[dict[str, Any]]:
-    skills: list[dict[str, Any]] = []
-    for item in _list(value):
-        if not isinstance(item, dict):
-            continue
-        name = _identity(item)
-        if not name:
-            continue
-        level = _positive_int(item.get("level"), 1)
-        xp = max(0, _int(item.get("xp"), 0))
-        next_level_xp = _positive_int(item.get("next_level_xp"), 80 + (level - 1) * 40)
-        skills.append(
-            {
-                "name": name,
-                "level": level,
-                "xp": xp,
-                "next_level_xp": next_level_xp,
-                "mastery": _clamp(
-                    _int(item.get("mastery"), round(xp / next_level_xp * 100)),
-                    0,
-                    100,
-                ),
-                "visibility": _first_text(item.get("visibility")) or "known",
-                "recent_events": _list(item.get("recent_events"))[-8:],
-            }
-        )
-    return skills
-
-
-def _ability_view(value: Any) -> list[dict[str, Any]]:
-    abilities: list[dict[str, Any]] = []
-    for item in _list(value):
-        if not isinstance(item, dict):
-            continue
-        name = _identity(item)
-        if not name:
-            continue
-        abilities.append(
-            {
-                "name": name,
-                "level": _positive_int(item.get("level"), 1),
-                "visibility": _first_text(item.get("visibility")) or "known",
-                "description": _first_text(item.get("description")),
-                "status": _first_text(item.get("status")) or "active",
-                "resource_cost": _first_text(item.get("resource_cost")),
-                "cooldown": _first_text(item.get("cooldown")),
-                "usage_note": _first_text(item.get("usage_note")),
-            }
-        )
-    return abilities
 
 
 def _condition_view(value: Any) -> list[dict[str, Any]]:
@@ -539,8 +421,8 @@ def _condition_view(value: Any) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "status": status,
-                "severity": _first_text(item.get("severity")) or "medium",
-                "duration": _first_text(item.get("duration")),
+                # 文字描述，无 severity/duration 数字。
+                "note": _first_text(item.get("note"), item.get("description")),
                 "source": _first_text(item.get("source")),
                 "visibility": _first_text(item.get("visibility")) or "known",
             }
@@ -549,6 +431,7 @@ def _condition_view(value: Any) -> list[dict[str, Any]]:
 
 
 def _relationship_tracks(relationships: Any, npcs: list[Any]) -> list[dict[str, Any]]:
+    # 纯叙事化：关系是一句文字 status（"从猜忌转为并肩"），无 trust/好感等分数与阶段。
     tracks: list[dict[str, Any]] = []
     seen: set[str] = set()
     for relation in _list(relationships):
@@ -561,15 +444,9 @@ def _relationship_tracks(relationships: Any, npcs: list[Any]) -> list[dict[str, 
         tracks.append(
             {
                 "npc": name,
-                "stage": _first_text(relation.get("stage")) or _relationship_stage(relation),
-                "trust": _clamp(_int(relation.get("trust"), 0), 0, 100),
-                "affection": _clamp(_int(relation.get("affection"), 0), 0, 100),
-                "respect": _clamp(_int(relation.get("respect"), 0), 0, 100),
-                "fear": _clamp(_int(relation.get("fear"), 0), 0, 100),
-                "loyalty": _clamp(_int(relation.get("loyalty"), 0), 0, 100),
-                "conflict": _clamp(_int(relation.get("conflict"), 0), 0, 100),
+                "status": _first_text(relation.get("status"), relation.get("stage")),
+                "note": _first_text(relation.get("note")),
                 "visibility": _first_text(relation.get("visibility")) or "known",
-                "recent_events": _list(relation.get("recent_events"))[-8:],
             }
         )
 
@@ -587,10 +464,9 @@ def _relationship_tracks(relationships: Any, npcs: list[Any]) -> list[dict[str, 
         tracks.append(
             {
                 "npc": name,
-                "stage": "",
-                "relationship": relationship,
-                "attitude": attitude,
-                "recent_interaction": _first_text(npc.get("recent_interaction"), npc.get("status")),
+                "status": relationship or attitude,
+                "note": _first_text(npc.get("recent_interaction"), npc.get("status")),
+                "visibility": "known",
             }
         )
     return tracks
@@ -599,28 +475,6 @@ def _relationship_tracks(relationships: Any, npcs: list[Any]) -> list[dict[str, 
 def _append_unique(values: list[str], value: str) -> None:
     if value and value not in values:
         values.append(value)
-
-
-def _relationship_stage(relation: dict[str, Any]) -> str:
-    if _int(relation.get("conflict"), 0) >= 70:
-        return "冲突"
-    if max(
-        _int(relation.get("trust"), 0),
-        _int(relation.get("affection"), 0),
-        _int(relation.get("loyalty"), 0),
-    ) >= 80:
-        return "羁绊"
-    if _int(relation.get("affection"), 0) >= 65:
-        return "亲密"
-    if _int(relation.get("trust"), 0) >= 50:
-        return "信任"
-    if max(
-        _int(relation.get("trust"), 0),
-        _int(relation.get("respect"), 0),
-        _int(relation.get("affection"), 0),
-    ) >= 25:
-        return "合作"
-    return "陌生"
 
 
 def _int(value: Any, default: int) -> int:
@@ -659,12 +513,11 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
 def project_state_for_scene(state_v2: dict[str, Any] | None) -> dict[str, Any]:
     """GM 场景投影（Round 23）：只给 GM 写作用，砍掉用不到的历史/非在场噪声。
 
-    保留当前场景写作所需（active_scene / protagonist_sheet / abilities / conditions /
-    party / story_progress / skills / open_threads 全保留）；精简：
-    - progression：砍 xp_log（XP 历史明细，GM 规则 20 不输出 XP）。
+    保留当前场景写作所需（active_scene / protagonist_sheet / conditions /
+    party / story_progress / open_threads 全保留）；精简：
     - quest_log：active 全留；completed 压成 completed_titles（只留标题，知道做过什么）。
     - npc_registry：只留在场（present_npcs ∪ party）。
-    - relationship_tracks：只留在场角色；recent_events 只留最近 1 条。
+    - relationship_tracks：只留在场角色。
 
     **兜底**：present 名单为空时不过滤 npc_registry / relationship_tracks（避免砍光）。
     仅 GM 用此投影；DriftValidator / StateExtractor 仍用全量 state（判状态冲突 / 算 delta 需要全）。
@@ -672,10 +525,6 @@ def project_state_for_scene(state_v2: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(state_v2, dict):
         return state_v2
     projected = dict(state_v2)
-
-    progression = state_v2.get("progression")
-    if isinstance(progression, dict) and "xp_log" in progression:
-        projected["progression"] = {k: v for k, v in progression.items() if k != "xp_log"}
 
     quest_log = state_v2.get("quest_log")
     if isinstance(quest_log, dict):
@@ -712,15 +561,10 @@ def project_state_for_scene(state_v2: dict[str, Any] | None) -> dict[str, Any]:
             ]
         rels = state_v2.get("relationship_tracks")
         if isinstance(rels, list):
-            slim: list[dict[str, Any]] = []
-            for relation in rels:
-                if not isinstance(relation, dict) or relation.get("npc") not in present:
-                    continue
-                trimmed = dict(relation)
-                events = trimmed.get("recent_events")
-                if isinstance(events, list) and len(events) > 1:
-                    trimmed["recent_events"] = events[-1:]
-                slim.append(trimmed)
-            projected["relationship_tracks"] = slim
+            projected["relationship_tracks"] = [
+                relation
+                for relation in rels
+                if isinstance(relation, dict) and relation.get("npc") in present
+            ]
 
     return projected

@@ -131,31 +131,22 @@ function RuntimeBlock({ runtimeView }: { runtimeView: CharacterRuntimeView }) {
   const facts = [
     runtimeView.location ? `位置：${runtimeView.location}` : "",
     runtimeView.status ? `状态：${runtimeView.status}` : "",
-    runtimeView.stage ? `关系阶段：${runtimeView.stage}` : "",
     runtimeView.relationship ? `关系：${runtimeView.relationship}` : "",
-    runtimeView.attitude ? `态度：${runtimeView.attitude}` : "",
-    runtimeView.recent ? `最近互动：${runtimeView.recent}` : ""
+    runtimeView.note ? `补充：${runtimeView.note}` : ""
   ].filter(Boolean);
+
+  if (facts.length === 0) {
+    return null;
+  }
 
   return (
     <section className="mt-4">
       <h3 className="text-sm font-semibold">当前关系状态</h3>
-      {facts.length > 0 ? (
-        <ul className="app-wrap-text mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
-          {facts.map((fact) => (
-            <li key={fact}>{fact}</li>
-          ))}
-        </ul>
-      ) : null}
-      {runtimeView.axes.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {runtimeView.axes.map((axis) => (
-            <span className="app-pill" key={axis.key}>
-              {axis.label} {axis.value}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <ul className="app-wrap-text mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
+        {facts.map((fact) => (
+          <li key={fact}>{fact}</li>
+        ))}
+      </ul>
     </section>
   );
 }

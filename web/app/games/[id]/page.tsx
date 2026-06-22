@@ -18,7 +18,7 @@ import {
   restartGameProgress
 } from "@/lib/api";
 import { downloadBlob } from "@/lib/downloads";
-import { getStateV2FromGame, ratioPercent, type StateV2 } from "@/lib/stateV2";
+import { getStateV2FromGame, type StateV2 } from "@/lib/stateV2";
 import type { GameDetail, GameProgressSaveRead } from "@/lib/types";
 
 type LoadState =
@@ -173,8 +173,8 @@ function GameDetailView({
       {exportError ? <p className="app-alert">{exportError}</p> : null}
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-4">
-        <MetricCard label="等级" value={stateV2.protagonist_sheet.level} />
         <MetricCard label="回合" value={game.state?.current_turn ?? 0} />
+        <MetricCard label="状态" value={stateV2.conditions.length} />
         <MetricCard label="剧本素材" value={asRecords(storySettings.story_material_library).length} />
         <MetricCard label="记忆摘要" value={game.summaries.length} />
       </section>
@@ -457,7 +457,13 @@ function ProgressSaveSection({
 function StatusSnapshot({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
   const protagonist = stateV2.protagonist_sheet;
   const scene = stateV2.active_scene;
-  const xpPercent = ratioPercent(protagonist.xp, protagonist.next_level_xp);
+  const progress = stateV2.story_progress;
+  // 结局标记：失败结局与通关都在此提示（与 play 页结局视图呼应）。
+  const endingLabel = progress.defeat
+    ? "失败结局"
+    : progress.campaign_complete
+      ? "已通关"
+      : "";
 
   return (
     <section className="surface-panel surface-panel-strong">
@@ -465,8 +471,12 @@ function StatusSnapshot({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="surface-title">当前局面</h2>
-            <span className="app-pill">Lv.{protagonist.level}</span>
+            {endingLabel ? <span className="app-pill">{endingLabel}</span> : null}
           </div>
+          <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
+            {protagonist.name || "主角"}
+            {protagonist.identity ? ` · ${protagonist.identity}` : ""}
+          </p>
           <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
             {scene.location || "未知地点"} · {scene.time || "未知时间"} ·{" "}
             {stateV2.conditions.length > 0 ? `${stateV2.conditions.length} 个持续状态` : "状态稳定"}
@@ -476,27 +486,11 @@ function StatusSnapshot({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 
           查看角色状态
         </Link>
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-        <div>
-          <div className="flex items-center justify-between gap-3 text-sm">
-            <span className="font-medium">经验进度</span>
-            <span className="text-[color:var(--muted)]">
-              {protagonist.xp}/{protagonist.next_level_xp}
-            </span>
-          </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-[color:var(--soft-panel)]">
-            <div
-              className="h-full rounded-full bg-[color:var(--accent)]"
-              style={{ width: `${xpPercent}%` }}
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <SnapshotMetric label="技能" value={stateV2.skills.length} />
-          <SnapshotMetric label="能力" value={stateV2.abilities.length} />
-          <SnapshotMetric label="关系" value={stateV2.relationship_tracks.length} />
-          <SnapshotMetric label="任务" value={stateV2.quest_log.active.length} />
-        </div>
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <SnapshotMetric label="状态" value={stateV2.conditions.length} />
+        <SnapshotMetric label="关系" value={stateV2.relationship_tracks.length} />
+        <SnapshotMetric label="任务" value={stateV2.quest_log.active.length} />
+        <SnapshotMetric label="线索" value={stateV2.open_threads.active.length} />
       </div>
     </section>
   );

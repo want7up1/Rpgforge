@@ -1532,8 +1532,7 @@ def test_state_delta_normalizes_runtime_character_state(db_session) -> None:
             {
                 "npc": "无名女性幸存者",
                 "name": "无名女性幸存者",
-                "trust": 3,
-                "recent_events": [{"reason": "初次安抚"}],
+                "status": "初次安抚后稍有缓和",
             }
         ],
         "inventory": [
@@ -1558,10 +1557,7 @@ def test_state_delta_normalizes_runtime_character_state(db_session) -> None:
             "relationship_events": [
                 {
                     "npc": "陈雨桐",
-                    "axis": "trust",
-                    "direction": "increase",
-                    "intensity": "minor",
-                    "reason": "自报姓名并接受庇护",
+                    "status": "自报姓名后信任初建",
                 }
             ],
             "inventory_add": [
@@ -1578,7 +1574,7 @@ def test_state_delta_normalizes_runtime_character_state(db_session) -> None:
     assert "无名女性幸存者" in next_state["npcs"][0]["aliases"]
     assert next_state["v2"]["npc_registry"][0]["name"] == "陈雨桐"
     assert next_state["relationships"][0]["npc"] == "陈雨桐"
-    assert next_state["relationships"][0]["trust"] == 6
+    assert next_state["relationships"][0]["status"] == "自报姓名后信任初建"
     assert len(next_state["relationships"]) == 1
     assert {"item": "罐头", "unit": "罐", "quantity": 10} in next_state["inventory"]
     assert {"item": "绷带", "quantity": 3} in next_state["inventory"]
