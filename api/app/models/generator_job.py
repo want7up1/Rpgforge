@@ -90,7 +90,7 @@ class TurnJob(Base):
     stage: Mapped[str | None] = mapped_column(String(64))
     stage_label: Mapped[str | None] = mapped_column(Text)
     stage_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    stage_total: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    stage_total: Mapped[int] = mapped_column(Integer, nullable=False, default=6, server_default="6")
     stage_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     maintenance_status: Mapped[str] = mapped_column(
         String(32),

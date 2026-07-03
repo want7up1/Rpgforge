@@ -1,754 +1,232 @@
 # AI Story Runtime Guide
 
-本文说明 RPGForge 当前 AI 架构中两件事：
+本文说明 RPGForge 当前 AI 剧情运行链路，以及外部 AI 写剧本时应遵守的 `story_settings v2` 结构。
 
-1. 游玩时，AI 生成剧情依据什么。
-2. 创建世界时，系统会生成并保存哪些设定。
+当前设计方向是**纯叙事化 RPG**：系统不再维护玩家可见的等级、经验、属性、技能熟练度、关系分数、骰子判定、危机条或压力时钟。长期一致性依赖文字化状态、剧本锚点、导演层决策、输出观测和后台维护。
 
-RPGForge 不是普通聊天应用。它的核心设计是：LLM 负责叙事和结构化提案，后端负责剧本约束、世界书、状态、记忆、任务队列和持久化。
+## 1. 核心数据源
 
-## 1. 剧情生成流程
+### 1.1 story_settings v2
 
-玩家在游戏中提交行动后，后端会按下面流程生成新回合：
+`story_settings` 是每局游戏最重要的持久剧本源。它保存在 `game_configs.story_settings`，由生成器、导入器、设定编辑页和模块合并流程共同维护。
+
+主要结构：
+
+- `game_profile`：标题、题材、简介等游戏外壳。
+- `worldview`：世界观、地点、势力、公开事实和隐藏事实。
+- `story_core`：核心幻想、主线目标、情绪弧、文风、禁止漂移方向。
+- `core_characters`：主角、NPC、身份、动机、公开信息和隐藏信息。
+- `act_plan`：分幕结构、目标、完成锚点、允许/禁止揭露、转幕目标。
+- `main_quest_path`：玩家可见或半可见的主线节点。
+- `core_mechanics`：非数值化的长期规则，告诉 GM 这个世界如何运转。
+- `action_style_rules`：按玩家输入匹配的行动风格规则。
+- `story_material_library`：可召回的剧情素材、线索、地点、秘密、人物资料。
+- `home_base`：据点、后台、基地或其他可反复返回的叙事空间。
+- `hard_rules`：最高优先级的必须遵守、绝对禁止、揭露和连续性规则。
+- `generation_parameters`：篇幅、段落、近期回合摘录等软参考。
+
+外部 AI 写剧本时，应以 `/api/generator/authoring-kit` 导出的创作包为准。
+
+### 1.2 runtime_story
+
+`runtime_story` 是后端从 `story_settings` 和当前状态构造出的运行视图，核心入口在 `api/app/services/story_settings.py`。
+
+使用方：
+
+- StoryDirector 使用完整运行视图，决定本回合该怎么推进。
+- GM 使用裁剪后的运行视图，不看到未来幕的详细内容。
+- StateExtractor 使用状态维护投影，只拿与锚点、任务、素材和连续性相关的必要字段。
+- Drift/观测类逻辑使用运行视图做一致性检查，不直接改写剧本设定。
+
+### 1.3 state_json 与 state_v2
+
+`state_json` 是持久运行状态；`state_v2` 是系统派生的结构化视图，入口在 `api/app/services/state_v2.py`。
+
+当前保留的玩家侧状态类型：
+
+- 当前场景：回合、时间、地点、在场 NPC、文字化处境压力。
+- 主角档案：姓名、身份、文字化处境。
+- conditions：中毒、受伤、被通缉等处境，全部使用文字 status/note。
+- relationships：NPC 对主角的态度变化，全部使用文字 status/note。
+- quest_log：任务当前状态。
+- open_threads：未解线索和已解决线索。
+- story_progress：当前幕、已完成锚点、转幕历史、结局状态。
+- npc_registry：NPC 身份、状态、位置和态度。
+
+## 2. 一回合生成流程
+
+玩家提交行动后，后端的大致链路如下：
 
 ```text
 玩家输入
-  -> 选择当前模式 selected_mode
-  -> 检索世界书 related_lore
-  -> 加载长期/章节/近期记忆 memory_summaries
-  -> StoryDirector 生成本回合导演决策
-  -> GM Runtime 生成玩家可见剧情和 A/B/C/D 选项
-  -> DriftValidator 按需校验是否偏离剧本
-  -> StateExtractor 提取状态变化
-  -> StateApplier 更新结构化状态
-  -> ContextCompressor 定期压缩长期记忆
+  -> 结算待处理状态 delta
+  -> 选择 action_style_rules
+  -> 召回 story_material_library
+  -> 加载 memory_summaries
+  -> 构造 state_v2 与 runtime_story
+  -> StoryDirector 产出导演决策
+  -> PromptBuilder 组装 GM system/user payload
+  -> GM Runtime 生成 narrative + A/B/C/D
+  -> OutputObserver 做确定性观测
+  -> 命中当前幕禁止揭露整串时，做一次最小化重写
+  -> 写入 Turn
+  -> StateExtractor 提取文字化状态 delta
+  -> StateApplier 应用状态并重建 state_v2
+  -> ContextCompressor 更新摘要
 ```
 
-其中 GM Runtime 是正式写剧情的模型调用。它不会只依赖聊天历史，而是读取结构化上下文。
+同步回合接口会在请求路径内完成状态提取。异步 job 路径会先把回合返回给前端，再由 turn maintenance job 在后台执行状态提取、状态应用、上下文压缩和审计。
 
-## 2. GM 生成剧情依据
+## 3. StoryDirector
 
-GM Runtime 的主要输入来自 `api/app/services/prompt_builder.py`。
+入口：`api/app/services/story_director.py`
+Prompt：`api/app/prompts/story_director.md`
 
-### 2.1 story_director
+StoryDirector 不写正文。它只输出本回合导演决策：
 
-`story_director` 是本回合导演层输出，来自 `api/app/services/story_director.py`。
+- `player_intent`
+- `current_act`
+- `scene_objective`
+- `mode_recommendation`
+- `allowed_reveals`
+- `forbidden_reveals`
+- `pacing_limit`
+- `gm_instruction`
+- `risk_note`
+- `cost_if_fails`
 
-它告诉 GM：
+当前设计没有骰子和成功率。`risk_note` / `cost_if_fails` 用来告诉 GM：这个行动有什么风险、失败时会有什么叙事代价。GM 再按剧情逻辑写出“是，但...”或“否，但...”的后果。
 
-- 玩家这次行动的真实意图。
-- 当前幕或当前阶段。
-- 本回合场景目标。
-- 建议使用的模式。
-- 本回合真正应该使用的世界书标题。
-- 本回合允许揭露的信息。
-- 本回合禁止提前揭露的信息。
-- 危机升级上限。
-- 需要保持一致的人物、地点、状态和关系。
-- 给 GM 的简短执行指令。
+## 4. act_pacing
 
-GM prompt 明确要求优先落实 `story_director.scene_objective`、`forbidden_reveals`、`pacing_limit` 和 `gm_instruction`。
+入口：`api/app/services/act_pacing.py`
 
-### 2.2 campaign_contract
+`act_pacing` 是确定性节奏信号，不写状态。它根据当前回合、上次锚点进展回合、当前幕未完成 required 锚点计算：
 
-`campaign_contract` 是长期强约束。
+- `pressure`: `low` / `rising` / `high` / `ready`
+- `turns_in_act`
+- `turns_since_anchor`
+- `next_required_anchor`
 
-它通常来自 `script_outline.campaign_contract`，并可能合并 `director_contract` 和 `story_contract`。
+当 pressure 为 `rising` 或 `high` 时：
 
-建议放入：
+- StoryDirector 应明显把 scene objective 收拢到下一个 required 锚点。
+- GM 的 A/B/C/D 至少留一条能推进锚点的行动选项。
 
-- 本局核心幻想。
-- 贯穿全剧的核心悬念。
-- 情绪弧线。
-- 必须保留的用户要求。
-- 禁止变成的方向。
-- 禁止跑偏方向。
-- 专有名词。
-- 节奏规则。
-- 当前幕 ID。
-- 机制契约。
+这用于避免玩家长期停留在准备、休整、训练或原地调查循环里。
 
-如果某个设定绝对不能被 AI 忘记，优先放进 `campaign_contract.must_preserve`、`campaign_contract.must_not_become` 或 `campaign_contract.forbidden_drift`。
+## 5. GM Runtime
 
-### 2.3 story_blueprint
+入口：`api/app/services/gameplay.py`
+Payload 构造：`api/app/services/prompt_builder.py`
+Prompt：`api/app/prompts/gm_runtime.md`
 
-`story_blueprint` 是从完整 `script_outline` 中抽取出来的运行时剧本蓝图，来自 `api/app/services/story_blueprint.py`。
-
-它会提供：
-
-- `user_brief`：用户创作简报。
-- `central_question`：核心悬念。
-- `main_goal`：主线目标。
-- `current_act`：当前幕目标、压力、允许揭露、禁止揭露、升级上限。
-- `truth_map`：幕后真相和揭露条件。
-- `clue_ladder`：线索阶梯。
-- `pressure_clock`：压力时钟。
-- `mechanics_contract`：核心机制规则。
-- `worldview`：世界观摘要、基调、核心冲突。
-- `forbidden_public_spoilers`：禁止公开剧透。
-
-GM Runtime 不再直接吃完整 `script_outline`，而是吃 `story_blueprint`。这样可以减少 token，同时保留运行时真正需要的剧本控制信息。
-
-### 2.4 current_state_v2
-
-`current_state_v2` 是当前结构化状态视图。
-
-它包括：
-
-- 当前回合数。
-- 当前时间和地点。
-- 主角状态。
-- 任务。
-- NPC。
-- 阵营。
-- 物品。
-- 技能、能力、状态、关系。
-- 已知事实。
-- 隐藏事实。
-- 未解线索和开放线程。
-
-GM 应遵守当前状态，不能让物品、NPC、地点、时间线凭空变化。
-
-### 2.5 always_on_lore
-
-`always_on_lore` 是常驻世界书。
-
-适合放：
-
-- 核心世界规则。
-- 主角身份规则。
-- 必须长期遵守的机制。
-- 当前章节必须一直记住的地点、NPC、阵营、诅咒、限制。
-
-常驻世界书会按优先级排序，最多注入一部分高优先级条目。
-
-### 2.6 related_lore
-
-`related_lore` 是本回合按玩家输入、当前模式、近期回合、状态和 story blueprint 检索出来的世界书。
-
-检索依据包括：
-
-- 玩家输入。
-- 游戏标题、题材、简介。
-- 当前模式。
-- 当前状态。
-- story blueprint 中的目标、线索、压力、机制。
-- 最近回合。
-- 世界书关键词、触发词和本地向量。
-
-GM prompt 要求只使用本回合召回的 `related_lore`，不要随意使用未召回的世界书细节。
-
-### 2.7 memory_summaries
-
-`memory_summaries` 是长期记忆摘要。
-
-包括：
-
-- `long_term`：长期摘要。
-- `chapter`：章节摘要。
-- `recent_turn_summaries`：最近回合摘要。
-
-它用于减少对完整聊天历史的依赖。
-
-### 2.8 recent_turns
-
-`recent_turns` 是最近回合上下文。
-
-当前为了节省 token，它不再传完整 `gm_output`，而是传：
-
-- `turn_number`
-- `player_input`
-- `visible_summary`
-- `hidden_summary`
-- `gm_output_excerpt`
-- `action_options`
-
-`gm_output_excerpt` 是短片段，只用于承接最近画面。长期一致性主要依赖 `memory_summaries` 和结构化状态。
-
-### 2.9 selected_mode
-
-`selected_mode` 是当前触发的模式注入。
-
-常见模式：
-
-- 主线模式
-- 调查模式
-- 社交模式
-- 探索模式
-- 战斗模式
-- 潜行模式
-
-模式用于告诉 GM 当前场景应该采用什么玩法规则和叙事策略。
-
-### 2.10 player_input
-
-`player_input` 是玩家本回合行动。
-
-GM 必须先回应玩家行动的直接结果，再引出新压力。不能跳过玩家行动直接升级主线。
-
-## 3. 世界生成时会生成哪些设定
-
-创建世界主要由 `GameGeneratorService.finalize_stream` 完成。
-
-流程是：
-
-```text
-用户概念和访谈结果
-  -> generate_config_outline.md 生成导演总纲
-  -> generate_config_section.md 并行生成角色、世界书、模式、初始状态、规则
-  -> 后端合并为 GeneratedGameConfig
-  -> create_game_from_config 落库
-```
-
-最终结构是 `GeneratedGameConfig`。
-
-### 3.1 基础信息
-
-字段：
-
-- `title`
-- `genre`
-- `description`
-
-用途：
-
-- 展示游戏。
-- 给检索和 GM 提供题材上下文。
-
-### 3.2 worldview
-
-世界观字段。
-
-建议包含：
-
-- `summary`
-- `tone`
-- `setting`
-- `core_conflicts`
-
-用途：
-
-- 给 GM 提供世界基调。
-- 给 story blueprint 提供世界摘要。
-- 给检索提供背景词。
-
-### 3.3 script_outline
-
-剧本骨架。
-
-这是整个剧情控制的主容器。推荐包含：
-
-- `title`
-- `user_brief`
-- `acts`
-- `campaign_contract`
-- `truth_map`
-- `clue_ladder`
-- `pressure_clock`
-- `mechanics_contract`
-- `forbidden_public_spoilers`
-
-注意：运行时 GM 不直接吃完整 `script_outline`，而是通过 `campaign_contract` 和 `story_blueprint` 使用其中关键内容。
-
-### 3.4 user_brief
-
-用户创作简报。
-
-推荐结构：
+GM 的输出结构固定：
 
 ```json
 {
-  "story_background": "故事背景",
-  "core_premise": "核心设定和主角处境",
-  "must_include": ["必须出现的内容"],
-  "forbidden_content": ["禁止出现或禁止偏离的内容"],
-  "playstyle_preferences": ["玩法偏好"],
-  "tone_preferences": ["风格偏好"],
-  "raw_user_input": "用户原始输入"
+  "narrative": "玩家可见剧情文本",
+  "visible_clues": ["本回合玩家可见线索"],
+  "action_options": [
+    {"key": "A", "label": "具体行动选项 A"},
+    {"key": "B", "label": "具体行动选项 B"},
+    {"key": "C", "label": "具体行动选项 C"},
+    {"key": "D", "label": "具体行动选项 D"}
+  ]
 }
 ```
 
-用途：
-
-- 保护用户原始意图。
-- 后端会把 `must_include` 合并进 `campaign_contract.must_preserve`。
-- 后端会把 `forbidden_content` 合并进 `campaign_contract.must_not_become` 和 `forbidden_drift`。
-
-### 3.5 campaign_contract
-
-战役契约。
-
-推荐结构：
+GM 必须遵守：
 
-```json
-{
-  "premise": "本局最核心的剧本承诺",
-  "player_fantasy": "玩家想体验的核心幻想",
-  "central_question": "贯穿全剧的核心悬念",
-  "emotional_arc": "情绪弧线",
-  "must_preserve": ["必须保留的设定"],
-  "must_not_become": ["禁止变成的方向"],
-  "tone_do": ["必须保持的味道"],
-  "tone_dont": ["不能滑向的味道"],
-  "relationship_arcs": [],
-  "forbidden_drift": ["禁止跑偏方向"],
-  "canon_terms": ["专有名词"],
-  "pacing_rules": ["节奏规则"],
-  "current_act": "act_1"
-}
-```
+- 不输出内部 JSON、状态结算、调试信息或隐藏事实。
+- 不在正文里输出 XP、技能、关系分数、危机值等数值机制。
+- 先回应玩家本次行动的直接结果，再引出新压力。
+- 使用剧情内动作、感官、对白和代价来体现风险。
+- 不把召回素材当作必须逐条塞进正文的清单。
 
-用途：
+## 6. OutputObserver 与禁止揭露兜底
 
-- 约束长期剧情方向。
-- 防止 AI 把故事变成另一种题材。
-- 防止提前进入终局、世界级危机、新组织、新 Boss。
-- 保护用户要求。
+入口：`api/app/services/output_observer.py`
 
-### 3.6 acts
+OutputObserver 只做确定性观测，结果写入 telemetry，不直接决定剧情质量。它会记录例如：
 
-幕结构。
+- 字数与格式观测。
+- 是否疑似重复上一回合开头。
+- 当前幕 forbidden reveals 是否被整串命中。
+- 行动选项是否符合基本结构。
 
-推荐结构：
+同步强改写只保留一个极窄兜底：如果 GM 正文整串命中当前幕禁止提前揭露的内容，系统会让 GM 做一次最小化重写，只删除或改写提前揭露部分。其他偏离由后台审计和 trace 观察处理。
 
-```json
-{
-  "id": "act_1",
-  "name": "第一幕名称",
-  "objective": "玩家本幕目标",
-  "dramatic_question": "本幕核心戏剧问题",
-  "pressure": "本幕主动逼近玩家的压力",
-  "must_hit_beats": ["必须发生或铺垫的节点"],
-  "allowed_reveals": ["本幕允许揭露的信息"],
-  "forbidden_reveals": ["本幕不能提前揭露的信息"],
-  "relationship_turn": "本幕关键关系变化",
-  "escalation_limit": "本幕危机升级上限",
-  "completion_signal": "进入下一幕的条件"
-}
-```
+## 7. StateExtractor
 
-用途：
+入口：`api/app/services/state_extractor.py`
+Prompt：`api/app/prompts/extract_state_delta.md`
 
-- StoryDirector 用它判断当前幕目标。
-- GM 用它控制揭露节奏。
-- DriftValidator 用它判断是否跑偏。
+StateExtractor 只提取已经在 GM 输出中明确发生的变化。它不创作剧情，也不推断隐藏真相。
 
-### 3.7 truth_map
+当前 delta 类型包括：
 
-真相地图。
+- `time_delta` / `time_current`
+- `location_change`
+- `inventory_add` / `inventory_remove`
+- `npc_updates`
+- `quest_updates`
+- `faction_updates`
+- `protagonist_updates`
+- `variable_updates`
+- `new_known_facts`
+- `new_hidden_facts`
+- `open_thread_updates`
+- `condition_updates`
+- `relationship_events`
+- `story_progress_update`
 
-推荐结构：
+已删除的旧数值字段不属于标准 delta 契约。
 
-```json
-{
-  "truth": "GM 知道的幕后真相",
-  "public_mask": "玩家初期看到的表象",
-  "reveal_condition": "允许揭露的条件"
-}
-```
+锚点推进完全依赖 `story_progress_update.completed_anchors`。如果 GM 文本已经明确满足当前幕 completion signal，Extractor 必须写入对应锚点 id；否则当前幕不会推进。
 
-用途：
+失败结局使用 `story_progress_update.defeat = true`，只在主角旅程已不可挽回地失败时上报。普通挫折、受伤、暂时被俘应写成 condition，而不是 defeat。
 
-- 记录幕后真相。
-- 防止 GM 忘记主线。
-- 配合 `clue_ladder` 控制逐步揭露。
+## 8. StateApplier
 
-注意：不要把真相地图直接写进玩家公开简介或 `known_facts`。
+入口：`api/app/services/state_applier.py`
 
-### 3.8 clue_ladder
+StateApplier 将 delta 应用到持久状态，并派生新的 `state_v2`。它负责：
 
-线索阶梯。
+- 更新时间和地点。
+- 合并 NPC、任务、势力、物品、事实和线索。
+- 合并文字化 conditions 与 relationships。
+- 标记完成锚点、转幕、胜利或失败结局。
+- 同步主线任务和开放线索状态。
 
-推荐结构：
+StateApplier 不处理等级、经验、技能熟练度、属性检定或关系分数。
 
-```json
-{
-  "stage": "第一层线索",
-  "clue": "玩家可发现的线索",
-  "points_to": "线索指向的人、地点、物件或矛盾",
-  "do_not_reveal": "此阶段不能直接说出的真相"
-}
-```
+## 9. ContextCompressor
 
-用途：
+入口：`api/app/services/context_compressor.py`
+Prompt：`api/app/prompts/compress_context.md`
 
-- 调查玩法的核心依据。
-- 防止 AI 一次性揭露答案。
-- 给每回合提供可验证发现。
+ContextCompressor 维护长期记忆、近期摘要和叙事连续性摘要。GM 使用这些摘要承接长局语气、人物关系和关键事实，但不能把摘要逐条复述为本回合新进展。
 
-### 3.9 pressure_clock
-
-压力时钟。
+## 10. Trace、审计与调试
 
-推荐结构：
+所有 LLM 调用会记录到 `agent_traces`，包括 prompt、输出、模型、token、latency 和错误信息。管理页和 admin API 可用于排查：
 
-```json
-{
-  "name": "压力来源",
-  "tick_condition": "何时推进",
-  "consequence": "推进后的后果",
-  "visibility": "public|mixed|gm_only"
-}
-```
+- StoryDirector 是否给出有效风险和锚点推进方向。
+- GM 是否忽视 `act_pacing` 或 `risk_note`。
+- StateExtractor 是否漏报 completed anchors。
+- OutputObserver 是否持续报重复、格式或禁止揭露 flags。
+- 后台 drift 审计是否显示长期偏离趋势。
 
-用途：
+## 11. 外部 AI 写剧本的最低要求
 
-- 让世界主动推进。
-- 让玩家拖延或失败有代价。
-- 给 GM 提供场景压力。
+外部 AI 产出的 JSON 至少应包含：
 
-### 3.10 mechanics_contract
+- `format_version`
+- `game_profile.title`
+- `story_core.main_goal`
+- 至少一个 `act_plan`，且每幕有明确 completion anchors。
+- `core_characters` 中至少有主角和关键 NPC。
+- `hard_rules` 中写清必须遵守与绝对禁止。
 
-机制契约。
-
-推荐结构：
-
-```json
-{
-  "name": "机制名称",
-  "rule": "必须长期遵守的规则",
-  "progression": "阶段、触发方式或叙事代价",
-  "visibility": "public|mixed|gm_only"
-}
-```
-
-用途：
-
-- 约束成长、资源、判定、能力限制和失败代价。
-- 世界书生成阶段会要求核心机制进入 lore entries。
-
-### 3.11 characters
-
-角色档案。
-
-生成字段包括：
-
-- `name`
-- `aliases`
-- `role`
-- `identity`
-- `description`
-- `appearance`
-- `visibility`
-- `dramatic_function`
-- `desire`
-- `fear`
-- `leverage`
-- `relationship_arc`
-- `public_limit`
-
-用途：
-
-- 创建角色档案。
-- 给角色页面展示。
-- 可从角色和世界书同步角色记录。
-
-注意：角色公开档案不要写隐藏真相。
-
-### 3.12 lore_entries
-
-世界书。
-
-生成字段包括：
-
-- `title`
-- `type`
-- `keywords`
-- `trigger_words`
-- `priority`
-- `always_on`
-- `visibility`
-- `public_info`
-- `gm_secret`
-- `content`
-- `usage_note`
-
-支持类型包括：
-
-- `core_rule`
-- `protagonist`
-- `npc`
-- `faction`
-- `location`
-- `item`
-- `plot_hook`
-- `mechanic`
-- `secret`
-- `clue`
-- `pressure`
-- `twist`
-
-用途：
-
-- `always_on=true` 的条目会常驻注入。
-- 其他条目按关键词、触发词、本地向量和 story blueprint 检索。
-- `gm_secret` 只给 GM 保持一致性，不能直接剧透。
-- `usage_note` 告诉 GM 何时注入、如何给线索、不能揭露什么。
-
-### 3.13 modes
-
-模式注入。
-
-生成字段包括：
-
-- `name`
-- `triggers`
-- `injection`
-- `priority`
-- `enabled`
-
-推荐至少包含：
-
-- 主线模式
-- 调查模式
-- 社交模式
-- 探索模式
-
-题材需要时加入：
-
-- 战斗模式
-- 潜行模式
-- 生存模式
-- 解谜模式
-
-用途：
-
-- 根据玩家输入触发不同玩法规则。
-- 例如调查模式要求给线索不给答案，社交模式要求遵守 NPC 欲望、恐惧和关系状态。
-
-### 3.14 initial_state
-
-初始状态。
-
-生成字段包括：
-
-- `current_turn`
-- `time`
-- `location`
-- `protagonist`
-- `conditions`
-- `relationships`
-- `inventory`
-- `quests`
-- `npcs`
-- `factions`
-- `variables`
-- `known_facts`
-- `hidden_facts`
-- `open_threads`
-
-用途：
-
-- 初始化 `GameState`。
-- 后续回合通过状态提取和状态应用更新。
-- GM 通过 `current_state_v2` 读取当前状态。
-
-注意：`initial_state` 只写开局已经成立的状态，不要写完整未来剧情计划。
-
-### 3.15 system_prompt
-
-系统规则。
-
-用于补充本局 GM 的题材、基调和叙事规则。
-
-注意：它不能覆盖 RPGForge 的全局输出契约。GM 仍必须输出 JSON，包含：
-
-- `narrative`
-- `visible_clues`
-- `action_options`
-
-## 4. 哪些设定最影响剧情稳定性
-
-优先级从高到低：
-
-1. `campaign_contract`
-2. `story_blueprint.current_act`
-3. `truth_map`
-4. `clue_ladder`
-5. `pressure_clock`
-6. `current_state_v2`
-7. `always_on_lore`
-8. `related_lore`
-9. `memory_summaries`
-10. `recent_turns`
-
-如果某个设定非常重要，不建议只写在正文描述里。应该至少放进以下之一：
-
-- `campaign_contract.must_preserve`
-- `campaign_contract.forbidden_drift`
-- `campaign_contract.canon_terms`
-- `acts.must_hit_beats`
-- `acts.forbidden_reveals`
-- `truth_map`
-- `clue_ladder`
-- `lore_entries`
-- `initial_state.hidden_facts`
-
-## 5. 推荐剧本输入模板
-
-如果手动给 AI 提供剧本，推荐使用下面模板。
-
-```json
-{
-  "title": "剧本标题",
-  "genre": "题材类型",
-  "description": "一句话简介",
-  "worldview": {
-    "summary": "世界观短摘要",
-    "tone": "叙事基调",
-    "setting": "初始舞台",
-    "core_conflicts": ["核心冲突"]
-  },
-  "script_outline": {
-    "title": "剧本标题",
-    "user_brief": {
-      "story_background": "故事背景",
-      "core_premise": "核心设定和主角处境",
-      "must_include": ["必须出现的内容"],
-      "forbidden_content": ["禁止出现或禁止偏离的内容"],
-      "playstyle_preferences": ["玩法偏好"],
-      "tone_preferences": ["风格偏好"],
-      "raw_user_input": "原始创作说明"
-    },
-    "campaign_contract": {
-      "premise": "本局最核心的剧本承诺",
-      "player_fantasy": "玩家想体验什么",
-      "central_question": "贯穿全剧的核心悬念",
-      "emotional_arc": "情绪弧线",
-      "must_preserve": ["绝对要保留的设定"],
-      "must_not_become": ["绝对不能变成的方向"],
-      "forbidden_drift": ["禁止跑偏方向"],
-      "canon_terms": ["专有名词"],
-      "pacing_rules": ["节奏规则"],
-      "current_act": "act_1"
-    },
-    "acts": [
-      {
-        "id": "act_1",
-        "name": "第一幕名称",
-        "objective": "玩家本幕目标",
-        "dramatic_question": "本幕戏剧问题",
-        "pressure": "本幕压力",
-        "must_hit_beats": ["必须发生或铺垫的节点"],
-        "allowed_reveals": ["允许揭露的信息"],
-        "forbidden_reveals": ["不能提前揭露的信息"],
-        "relationship_turn": "关键关系变化",
-        "escalation_limit": "危机升级上限",
-        "completion_signal": "进入下一幕的条件"
-      }
-    ],
-    "truth_map": [
-      {
-        "truth": "GM 幕后真相",
-        "public_mask": "玩家初期看到的表象",
-        "reveal_condition": "允许揭露的条件"
-      }
-    ],
-    "clue_ladder": [
-      {
-        "stage": "第一层线索",
-        "clue": "玩家可发现的线索",
-        "points_to": "线索指向什么",
-        "do_not_reveal": "这一阶段不能直接说出的真相"
-      }
-    ],
-    "pressure_clock": [
-      {
-        "name": "压力来源",
-        "tick_condition": "什么时候推进",
-        "consequence": "推进后的后果",
-        "visibility": "public|mixed|gm_only"
-      }
-    ],
-    "mechanics_contract": [
-      {
-        "name": "机制名称",
-        "rule": "长期规则",
-        "progression": "阶段、触发方式或叙事代价",
-        "visibility": "public|mixed|gm_only"
-      }
-    ],
-    "forbidden_public_spoilers": ["不能公开剧透的真相"]
-  }
-}
-```
-
-## 6. 常见问题
-
-### 6.1 为什么 AI 会跑偏？
-
-常见原因：
-
-- 强约束只写在普通描述里，没有进入 `campaign_contract`。
-- 真相和线索没有拆成 `truth_map` 和 `clue_ladder`。
-- 当前幕没有写 `forbidden_reveals` 和 `escalation_limit`。
-- 关键世界规则没有写入 `always_on` 世界书。
-
-### 6.2 为什么有些设定没有被使用？
-
-可能原因：
-
-- 世界书没有被召回。
-- 没有关键词或触发词。
-- `usage_note` 不清楚。
-- 设定只在完整 `script_outline` 里，但没有进入 `campaign_contract` 或 `story_blueprint` 会抽取的字段。
-
-### 6.3 如何避免提前剧透？
-
-把秘密分别写入：
-
-- `truth_map.truth`
-- `truth_map.reveal_condition`
-- `acts.forbidden_reveals`
-- `clue_ladder.do_not_reveal`
-- `forbidden_public_spoilers`
-- `lore_entries.gm_secret`
-- `initial_state.hidden_facts`
-
-公开字段只写表象。
-
-### 6.4 什么应该写进世界书？
-
-适合写进 `lore_entries`：
-
-- 核心地点。
-- 关键 NPC。
-- 重要阵营。
-- 物品。
-- 世界规则。
-- 能力机制。
-- 线索。
-- 压力来源。
-- 反转材料。
-
-如果它需要在某些关键词出现时被召回，就应该写进世界书。
-
-### 6.5 什么应该写进状态？
-
-适合写进 `initial_state` 或后续状态：
-
-- 当前地点。
-- 当前时间。
-- 主角身体/精神状态。
-- 当前持有物品。
-- 已接任务。
-- NPC 当前态度。
-- 已知事实。
-- 隐藏事实。
-- 未解线程。
-- 技能、能力、关系、条件、经验。
-
-状态描述的是“当前已经成立的事实”，不是未来剧情计划。
-
-## 7. 实用建议
-
-- 强约束写进 `campaign_contract`。
-- 剧情结构写进 `acts`。
-- 幕后真相写进 `truth_map`。
-- 调查推进写进 `clue_ladder`。
-- 主动压力写进 `pressure_clock`。
-- 世界固定信息写进 `lore_entries`。
-- 当前事实写进 `initial_state`。
-- 禁止公开的信息同时写进 `forbidden_public_spoilers`、`forbidden_reveals`、`gm_secret` 或 `hidden_facts`。
-
-这样 AI 在生成剧情时既能保留剧本丰富度，又能减少跑偏和提前剧透。
+导入端点会做归一化和基础校验，但弱剧本仍可能导致游玩时缺少锚点、缺少冲突或缺少转幕抓手。创作包里的 warnings 应在创建游戏前处理。

@@ -4,6 +4,7 @@ import anyio
 
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
+from app.schemas.turn import TurnJobRead
 from app.services.act_pacing import (
     ANCHOR_PACING_HIGH_TURNS,
     ANCHOR_PACING_STALL_TURNS_AFTER_HIGH,
@@ -2413,6 +2414,14 @@ def test_turn_job_stages_exclude_drift_validation() -> None:
     assert TURN_JOB_STAGE_TOTAL == 6
     assert "drift_validation" not in stages
     assert stages.index("gm_runtime") + 1 == stages.index("persist_turn")
+
+
+def test_turn_job_stage_total_defaults_match_runtime_stage_count() -> None:
+    """新建/待运行 job 的默认 stage_total 也必须与运行阶段数一致。"""
+    from app.services.turn_jobs import TURN_JOB_STAGE_TOTAL
+
+    assert TurnJob.__table__.c.stage_total.default.arg == TURN_JOB_STAGE_TOTAL
+    assert TurnJobRead.model_fields["stage_total"].default == TURN_JOB_STAGE_TOTAL
 
 
 def test_redact_forbidden_reveals_no_hit_is_zero_cost() -> None:

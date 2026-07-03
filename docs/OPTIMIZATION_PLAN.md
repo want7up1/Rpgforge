@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 39 — 看板成为完整设定编辑面：字段数据派生全覆盖（home_base/worldview facts/完成锚点等）+ 字段类型系统(number/bool/objectList/keyValue/json) + 空块折叠开关 + 手动新增数组项（纯前端） |
-| 完成日期 | 2026-06-04 |
+| 最近一轮 | Round 56 — 远端 Docker 部署验证：同步 Round 55 修复、重建 api/worker、执行 Alembic migration、确认健康检查和目标测试通过 |
+| 完成日期 | 2026-07-03 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **2026-06-04 一轮大型前端建设（Round 36–39）**：围绕「story_settings 可视化编辑」建了一套**设定看板**子系统，并落地三件事——① 生成页重设计（Round 36）② 设定页 + 信息架构去重（Round 37）③ **剧本炼金工坊**（Round 38，setting_modules 模块库 + 提取/并入 + AI 本地优化）④ 看板成为完整设定编辑面（Round 39，全字段数据驱动 + 字段类型系统 + 手动新增项）。详见各 Round 与下方「设计文档」。 |
@@ -26,6 +26,52 @@
 ---
 
 ## 1. 已完成
+
+### Round 56 (2026-07-03) — 远端 Docker 部署验证：Round 55 修复上线 + migration 落库
+
+**背景**：Round 55 已完成纯叙事化契约收口，但尚未部署。本轮将该修复部署到远端 Docker 运行环境，并验证数据库 migration、容器健康和关键业务读接口。
+
+**部署前保护**：部署前已创建 PostgreSQL dump 压缩备份，作为本次 migration 的回滚点；未删除或重建 Postgres/Redis 数据卷，未覆盖远端 `.env` 或运行态数据。
+
+**部署动作**：
+- 采用文件清单方式同步本轮变更文件和新 Alembic migration，避免整目录 `--delete` 触碰运行态文件。
+- 仅重建并重启 `api` / `worker`，`postgres` / `redis` 保持原数据卷运行，`web` 本轮无运行时代码变更未重建。
+- API 启动时自动执行 `alembic upgrade head`，迁移到 `20260703_0030`。
+
+**远端验证**：
+- `docker compose ps`：`api` / `postgres` / `redis` healthy，`worker` running，`web` running。
+- `alembic current`：`20260703_0030 (head)`。
+- 数据库 `turn_jobs.stage_total` column default：`6`。
+- `GET /health`：返回 `status=ok`，环境为 production。
+- `GET /`：HTTP 200。
+- `GET /api/games`：返回 list，业务读路由经 web 代理可达。
+- `GET /api/settings/deepseek`：返回脱敏设置字段，未输出密钥。
+- 容器内 `PYTHONPATH=. pytest tests/test_state_pipeline.py::test_state_delta_extraction_omits_removed_numeric_mechanics tests/test_gameplay.py::test_turn_job_stages_exclude_drift_validation tests/test_gameplay.py::test_turn_job_stage_total_defaults_match_runtime_stage_count tests/test_act_pacing.py -q`：11 passed。
+- 容器内 `PYTHONPATH=. pytest tests/test_markdown_contracts.py -q`：2 passed。
+- 容器内 `ruff check .`：All checks passed。
+- 抽查关键文件 SHA-256：本地与远端一致。
+
+**遗留风险**：本轮未消耗模型额度做真实生成/真实回合 E2E；`npm audit` 依赖漏洞与同步 generator endpoint timeout 仍留待下一轮。
+
+### Round 55 (2026-07-03) — 纯叙事化契约收口：delta 去旧数值字段 + stage_total 默认值归一 + 公开文档同步
+
+**背景**：全面审查后先修第一批低风险、确定性问题：Round 53 已转向纯叙事化，但状态提取 schema 仍残留旧 XP/技能/能力 delta 字段；turn job 新建态默认阶段数与真实运行阶段数不一致；README/AI 运行指南仍有部分旧机制表述。
+
+**改动**：
+- `StateDeltaExtraction` 删除 `xp_events` / `skill_events` / `ability_updates`，并补测试锁住“纯叙事 delta 不再暴露旧数值字段”的契约。
+- `TurnJob.stage_total` ORM 默认、server default、`TurnJobRead` schema 默认统一为 6，并新增 Alembic migration `20260703_0030_turn_job_stage_total_default.py`。
+- `README.md` / `README.zh-CN.md` / `docs/AI_STORY_RUNTIME_GUIDE.md` 同步为当前纯叙事化运行说明：状态延续靠文字化 conditions/relationships、导演层、节奏信号、输出观测和异步审计，不再宣传 XP/属性/技能/危机条等旧机制。
+
+**验证**：
+- `cd api && PYTHONPATH=. pytest tests/test_state_pipeline.py::test_state_delta_extraction_omits_removed_numeric_mechanics tests/test_gameplay.py::test_turn_job_stages_exclude_drift_validation tests/test_gameplay.py::test_turn_job_stage_total_defaults_match_runtime_stage_count tests/test_act_pacing.py -q`：11 passed。
+- `cd api && PYTHONPATH=. pytest tests/test_markdown_contracts.py -q`：2 passed。
+- `cd api && ruff check .`：All checks passed。
+- `bash ~/GitHub-Projects/_deploy/check-secrets.sh /Users/want7up/GitHub-Projects/Rpgforge`：未发现内网真值。
+- 公开文档旧字段扫描仅剩 `docs/AI_STORY_RUNTIME_GUIDE.md` 顶部“系统不再维护……”的反向说明，属于刻意保留的迁移语义。
+
+**部署**：本轮未部署；涉及数据库默认值变更，下次部署需执行 Alembic upgrade 到 `20260703_0030`。
+
+**遗留风险**：全量后端 pytest 依赖本地 compose/Postgres，当前未纳入本轮验证；`npm audit` 依赖漏洞与同步 generator endpoint timeout 问题未纳入本轮，留待下一批修复。
 
 ### Round 54 (2026-06-22) — 尺度中立化：解耦「写得像小说」与「文学得体审查」
 

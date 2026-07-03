@@ -112,7 +112,7 @@ class TurnJobRead(BaseModel):
     stage: str | None = None
     stage_label: str | None = None
     stage_index: int = 0
-    stage_total: int = 7
+    stage_total: int = 6
     stage_started_at: datetime | None = None
     maintenance_status: TurnJobMaintenanceStatus = "completed"
     maintenance_stage: str | None = None
