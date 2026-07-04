@@ -4,12 +4,12 @@ import anyio
 
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
-from app.schemas.turn import TurnJobRead
+from app.schemas.turn import GMRuntimeOutput, TurnJobRead
 from app.services.act_pacing import (
     ANCHOR_PACING_HIGH_TURNS,
     ANCHOR_PACING_STALL_TURNS_AFTER_HIGH,
 )
-from app.services.deepseek_client import ChatCompletionResult
+from app.services.deepseek_client import ChatCompletionResult, DeepSeekError
 from app.services.game_creator import create_game_from_config
 from app.services.gameplay import GameplayService
 from app.services.prompt_builder import PromptBuilder
@@ -2454,6 +2454,51 @@ def test_redact_forbidden_reveals_no_hit_is_zero_cost() -> None:
     assert result is runtime_output
     assert model == "deepseek-v4-pro-test"
     assert telemetry.rewrite_triggered is False
+
+
+def test_redact_forbidden_reveals_keeps_original_on_deepseek_error() -> None:
+    """剧透兜底重写的模型/API 失败不应中断已经生成好的回合。"""
+    from types import SimpleNamespace
+
+    class _FailingRouter:
+        async def use_pro(self, *args, **kwargs):
+            raise DeepSeekError("rewrite api unavailable")
+
+        async def use_flash(self, *args, **kwargs):
+            raise AssertionError("剧透重写不应调用 flash。")
+
+    service = GameplayService(router=_FailingRouter())
+    service._build_contextual_runtime_messages = lambda **_: [
+        {"role": "user", "content": "rewrite"}
+    ]
+    telemetry = SimpleNamespace(
+        output_observation={"forbidden_reveal_hits": ["账册真凶"]},
+        rewrite_triggered=False,
+    )
+    context = SimpleNamespace(telemetry=telemetry, game=SimpleNamespace(id="g"))
+    runtime_output = GMRuntimeOutput(
+        narrative="雨声里，账册真凶的名字几乎要从门缝后漏出来。",
+        visible_clues=[],
+        action_options=[
+            {"key": "A", "label": "追问门后的人"},
+            {"key": "B", "label": "先查看账册"},
+            {"key": "C", "label": "退到院中观察"},
+            {"key": "D", "label": "叫同伴守住后门"},
+        ],
+    )
+
+    async def _run():
+        return await service._redact_forbidden_reveals_if_hit(
+            context=context,
+            director_decision=None,
+            runtime_output=runtime_output,
+            model_used="deepseek-v4-pro-test",
+        )
+
+    result, model = anyio.run(_run)
+    assert result is runtime_output
+    assert model == "deepseek-v4-pro-test"
+    assert telemetry.rewrite_triggered is True
 
 
 def test_audit_drift_no_throw_on_missing_job(db_session) -> None:

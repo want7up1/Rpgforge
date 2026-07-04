@@ -69,6 +69,7 @@ export default function NewGamePage() {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [chatProcess, setChatProcess] = useState<GeneratorChatJobRead | null>(null);
   const [finalizeProcess, setFinalizeProcess] = useState<GeneratorFinalizeJobRead | null>(null);
+  const [generatedConfigSource, setGeneratedConfigSource] = useState<"ai" | "import" | null>(null);
   // 创建方式：ai = AI 访谈生成；import = 导入外部 AI 写的剧本 JSON。
   const [mode, setMode] = useState<"ai" | "import">("ai");
   const [scriptText, setScriptText] = useState("");
@@ -104,6 +105,7 @@ export default function NewGamePage() {
           if (cancelled || !done.config) return;
           aiSettingsRef.current = done.config.story_settings;
           setGeneratedConfig(done.config);
+          setGeneratedConfigSource("ai");
           setScriptWarnings(done.warnings ?? []);
           setPendingAction(null);
           return;
@@ -189,6 +191,7 @@ export default function NewGamePage() {
       aiSettingsRef.current = done.config.story_settings;
       setLockedIds([]); // 进入 settings 阶段，confirmed 阶段的锁定 id 不再适用
       setGeneratedConfig(done.config);
+      setGeneratedConfigSource("ai");
       setScriptWarnings(done.warnings ?? []);
       const next = buildBoardModel({ source: "settings", settings: done.config.story_settings });
       setLastDiff(diffBoard(baselineRef.current, next));
@@ -297,6 +300,7 @@ export default function NewGamePage() {
       setLockedIds([]);
       setConfirmed({});
       setGeneratedConfig(config);
+      setGeneratedConfigSource("import");
       setScriptWarnings(warnings ?? []);
       const next = buildBoardModel({ source: "settings", settings: config.story_settings });
       setLastDiff(diffBoard(baselineRef.current, next));
@@ -348,15 +352,17 @@ export default function NewGamePage() {
                 >
                   {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
                 </button>
-                <button
-                  className="app-button"
-                  disabled={pendingAction !== null}
-                  onClick={handleFinalize}
-                  title="复用已确认设定重新生成一个世界"
-                  type="button"
-                >
-                  重新生成
-                </button>
+                {generatedConfigSource === "ai" ? (
+                  <button
+                    className="app-button"
+                    disabled={pendingAction !== null}
+                    onClick={handleFinalize}
+                    title="复用已确认设定重新生成一个世界"
+                    type="button"
+                  >
+                    重新生成
+                  </button>
+                ) : null}
               </>
             ) : null}
           </div>

@@ -569,7 +569,7 @@ class GameplayService:
                     ),
                     timeout=GM_RUNTIME_TIMEOUT_SECONDS,
                 )
-        except (GameplayValidationError, TimeoutError) as exc:
+        except (DeepSeekError, GameplayValidationError, TimeoutError) as exc:
             logger.warning(
                 "剧透兜底重写失败（game %s），保留原稿：%s", context.game.id, exc
             )
