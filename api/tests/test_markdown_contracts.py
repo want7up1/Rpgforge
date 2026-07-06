@@ -7,6 +7,9 @@ def test_gm_runtime_prompt_uses_story_settings_v2_runtime_contract() -> None:
     assert "runtime_story 是剧本" in prompt  # Round 48：改为「剧本静态设定运行视图」
     assert "story_settings v2" in prompt
     assert "A、B、C、D 四个具体行动选项" in prompt
+    assert "A 选项固定为主线前进位" in prompt
+    assert "action_options[0]" in prompt
+    assert "稳定推动主线" in prompt
     assert "generation_parameters" in prompt
     assert "script_outline" not in prompt
     assert "campaign_contract" not in prompt
