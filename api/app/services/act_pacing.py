@@ -61,8 +61,9 @@ def compute_act_pacing(
         for anchor in open_anchors
         if isinstance(anchor, dict) and _required(anchor)
     ]
+    open_requirements = _open_required_anchor_requirements(open_required)
 
-    if not open_required:
+    if not open_requirements:
         pressure = "ready"
         next_required_anchor = None
     else:
@@ -72,7 +73,7 @@ def compute_act_pacing(
             pressure = "rising"
         else:
             pressure = "low"
-        first = open_required[0]
+        first = open_requirements[0][0]
         next_required_anchor = {
             "id": _text(first.get("id")),
             "title": _text(first.get("title")),
@@ -84,7 +85,7 @@ def compute_act_pacing(
     return {
         "turns_in_act": turns_in_act,
         "turns_since_anchor": turns_since_anchor,
-        "open_required_count": len(open_required),
+        "open_required_count": len(open_requirements),
         "pressure": pressure,
         "next_required_anchor": next_required_anchor,
     }
@@ -134,6 +135,33 @@ def _required(anchor: dict[str, Any]) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"false", "0", "no", ""}
     return bool(value)
+
+
+def _open_required_anchor_requirements(
+    anchors: list[dict[str, Any]],
+) -> list[list[dict[str, Any]]]:
+    requirements: list[list[dict[str, Any]]] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for anchor in anchors:
+        alternative_group = _alternative_group(anchor)
+        if alternative_group:
+            group = grouped.get(alternative_group)
+            if group is None:
+                group = []
+                grouped[alternative_group] = group
+                requirements.append(group)
+            group.append(anchor)
+            continue
+        requirements.append([anchor])
+    return [requirement for requirement in requirements if requirement]
+
+
+def _alternative_group(anchor: dict[str, Any]) -> str:
+    return _text(
+        anchor.get("alternative_group")
+        or anchor.get("alt_group")
+        or anchor.get("alternativeGroup")
+    )
 
 
 def _int(value: Any) -> int:

@@ -1,4 +1,7 @@
 import json
+from copy import deepcopy
+from types import SimpleNamespace
+from uuid import uuid4
 
 import anyio
 
@@ -272,6 +275,43 @@ def test_runtime_story_only_exposes_current_act_open_anchors(db_session) -> None
     ]
 
 
+def test_runtime_story_filters_satisfied_alternative_anchor_group() -> None:
+    config = build_two_act_config()
+    config.story_settings["act_plan"][0]["completion_anchors"] = [
+        {
+            "id": "act_1_sneak_entry",
+            "title": "潜入后门",
+            "required": True,
+            "alternative_group": "entry_path",
+            "completion_signal": "主角从后门潜入据点。",
+        },
+        {
+            "id": "act_1_talk_entry",
+            "title": "说服守卫",
+            "required": True,
+            "alternative_group": "entry_path",
+            "completion_signal": "守卫放行主角进入据点。",
+        },
+        {
+            "id": "act_1_find_ledger",
+            "title": "找到账册",
+            "required": True,
+            "completion_signal": "主角拿到账册。",
+        },
+    ]
+
+    state = deepcopy(config.initial_state)
+    state["story_progress"] = {
+        **state["story_progress"],
+        "completed_anchors": ["act_1_sneak_entry"],
+    }
+    runtime_story = build_runtime_story(config, state)
+
+    assert [anchor["id"] for anchor in runtime_story["current_act"]["completion_anchors"]] == [
+        "act_1_find_ledger"
+    ]
+
+
 def test_state_delta_advances_act_only_after_required_anchors(db_session) -> None:
     game = create_game_from_config(db_session, build_two_act_config())
     state = game.state
@@ -311,6 +351,92 @@ def test_state_delta_advances_act_only_after_required_anchors(db_session) -> Non
     assert second_state["story_progress"]["current_act"] == "act_2"
     assert second_state["story_progress"]["completed_acts"] == ["act_1"]
     assert second_state["story_progress"]["last_advance_turn"] == 2
+
+
+def test_state_delta_advances_after_alternative_anchor_group_and_required_anchor() -> None:
+    config = build_generated_config()
+    config.story_settings["act_plan"] = [
+        {
+            "id": "act_1",
+            "title": "进入据点",
+            "objective": "进入据点并拿到账册。",
+            "completion_anchors": [
+                {
+                    "id": "act_1_sneak_entry",
+                    "title": "潜入后门",
+                    "required": True,
+                    "alternative_group": "entry_path",
+                    "completion_signal": "主角从后门潜入据点。",
+                },
+                {
+                    "id": "act_1_talk_entry",
+                    "title": "说服守卫",
+                    "required": True,
+                    "alternative_group": "entry_path",
+                    "completion_signal": "守卫放行主角进入据点。",
+                },
+                {
+                    "id": "act_1_find_ledger",
+                    "title": "找到账册",
+                    "required": True,
+                    "completion_signal": "主角拿到账册。",
+                },
+            ],
+            "transition_to_next_act": {"target_act": "act_2"},
+        },
+        {
+            "id": "act_2",
+            "title": "追查旧账",
+            "objective": "沿账册追查下一条线索。",
+            "completion_anchors": [],
+        },
+    ]
+    config.story_settings["main_quest_path"] = []
+    game = SimpleNamespace(id=uuid4(), config=config)
+    state = SimpleNamespace(state_json=deepcopy(config.initial_state), game=game)
+
+    first_state = apply_state_delta(
+        state,
+        Turn(game_id=game.id, turn_number=1, player_input="", gm_output=""),
+        {
+            "story_progress_update": {
+                "completed_anchor": "act_1_sneak_entry",
+                "completed_act": "act_1",
+                "next_act": "act_2",
+                "reason": "已通过潜入路线进入据点。",
+            }
+        },
+    )
+
+    assert first_state["story_progress"]["current_act"] == "act_1"
+    assert first_state["story_progress"]["ready_for_next_act"] is False
+    assert first_state["story_progress"]["completed_acts"] == []
+    assert first_state["story_progress"]["current_act_anchor_progress"] == {
+        "done": 1,
+        "total": 2,
+    }
+
+    state.state_json = first_state
+    second_state = apply_state_delta(
+        state,
+        Turn(game_id=game.id, turn_number=2, player_input="", gm_output=""),
+        {
+            "story_progress_update": {
+                "completed_anchor": "act_1_find_ledger",
+                "completed_act": "act_1",
+                "next_act": "act_2",
+                "reason": "已经进入据点并拿到账册。",
+            }
+        },
+    )
+
+    progress = second_state["story_progress"]
+    assert progress["current_act"] == "act_2"
+    assert progress["completed_acts"] == ["act_1"]
+    assert set(progress["completed_anchors"]) == {
+        "act_1_sneak_entry",
+        "act_1_find_ledger",
+    }
 
 
 def test_state_delta_completes_required_anchors_and_derives_main_quests(db_session) -> None:

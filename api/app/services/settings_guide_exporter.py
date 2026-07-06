@@ -212,6 +212,7 @@ def _append_field_reference(lines: list[str]) -> None:
         ("completion_anchors[].id", "锚点 id", "必须全局唯一；状态提取器用它标记完成。", "导入生效", "act_1_anchor_1"),
         ("completion_anchors[].title", "锚点标题", "供 GM 识别该锚点，不一定直接展示。", "导入生效", "[锚点标题]"),
         ("completion_anchors[].required", "是否必达", "true 表示推进到下一幕前必须满足；默认 true。", "导入生效", "true"),
+        ("completion_anchors[].alternative_group", "替代组", "同一幕多个 required 锚点填相同值时，完成其中任意一个即可满足该组；普通必达锚点留空。", "导入生效", "entry_path"),
         ("completion_anchors[].description", "锚点说明", "解释这个锚点要达成什么，给 GM 参考。", "导入生效", "[锚点要达成什么]"),
         ("completion_anchors[].completion_signal", "完成信号", "写成可从剧情文本识别的明确事件。", "导入生效", "[可识别的剧情事件]"),
         ("transition_to_next_act.target_act", "下一幕目标", "只能指向存在的 act id；最后一幕可留空对象。", "导入生效", "act_2"),

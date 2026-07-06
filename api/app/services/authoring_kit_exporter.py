@@ -96,6 +96,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
                     "id": "act_1_inspect_lamp",
                     "title": "勘查灯室",
                     "required": True,
+                    "alternative_group": "",
                     "description": "确认灯塔是被人为熄灭。",
                     "completion_signal": "发现灯油被人为放空的痕迹。",
                 },
@@ -103,6 +104,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
                     "id": "act_1_second_person",
                     "title": "确认第二个人",
                     "required": True,
+                    "alternative_group": "",
                     "description": "证明失踪当晚灯塔不止看守人一人。",
                     "completion_signal": "找到不属于看守人的脚印或物件。",
                 },
@@ -129,6 +131,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
                     "id": "act_2_find_ledger",
                     "title": "找到旧账残页",
                     "required": True,
+                    "alternative_group": "",
                     "description": "拿到指向下一步的实物证据。",
                     "completion_signal": "获得走私旧账残页。",
                 }
@@ -258,7 +261,8 @@ _AI_INSTRUCTION = """\
    `story_material_library[].gm_secret`、`act_plan[].forbidden_reveals`、
    `hard_rules.must_not` 等隐藏位。
 7. 至少写 2 幕（`act_plan`），每幕至少 1 个 `required: true` 的完成锚点，
-   否则自动转幕兜底会失效。
+   否则自动转幕兜底会失效；多个 required 锚点如果是同一目标的替代路线，
+   可填相同的 `alternative_group`，表示完成其中任意一个即可满足该组。
 8. 产出后自检：JSON 能被 `JSON.parse` 解析，且字段名与范例一致。
 """
 

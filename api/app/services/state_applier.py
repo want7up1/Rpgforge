@@ -7,7 +7,6 @@ from app.models.turn import Turn
 from app.services.quantified_state import apply_quantified_state_events
 from app.services.state_v2 import normalize_state_v2
 from app.services.story_settings import (
-    completion_anchor_ids_for_act,
     story_settings_from_config,
     transition_target_for_act,
 )
@@ -921,12 +920,11 @@ def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: A
     # B —— 锚点进度按"当前幕"算（done/total），而非全局 completed_anchors 总数（含历史幕）；
     # A —— hidden 场景投影据 current_act + next_act 限定，给 GM 近期铺垫、不剧透远期幕。
     progress["next_act"] = transition_target_for_act(config, current_act)
-    required_ids = completion_anchor_ids_for_act(config, current_act, required_only=True)
-    done_ids = {_identity(anchor) for anchor in anchor_target if _identity(anchor)}
-    progress["current_act_anchor_progress"] = {
-        "done": sum(1 for aid in required_ids if aid in done_ids),
-        "total": len(required_ids),
-    }
+    progress["current_act_anchor_progress"] = _anchor_requirement_progress(
+        config,
+        current_act,
+        anchor_target,
+    )
     # C2 目标条：把当前幕标题/目标派生进 story_progress，供 state_v2 投影 + 前端 play 页固定展示。
     current_act_record = _act_record_for(config, current_act)
     progress["current_act_title"] = _text(current_act_record.get("title"))
@@ -1063,6 +1061,72 @@ def _completion_anchor_records_for_act(
             anchors.append(anchor)
         return anchors
     return []
+
+
+def _required_anchor_requirements_for_act(
+    config: Any,
+    act_id: str,
+) -> list[list[str]]:
+    requirements: list[list[str]] = []
+    grouped: dict[str, list[str]] = {}
+    for anchor in _completion_anchor_records_for_act(config, act_id, required_only=True):
+        anchor_id = _identity(anchor)
+        if not anchor_id:
+            continue
+        alternative_group = _anchor_alternative_group(anchor)
+        if alternative_group:
+            group = grouped.get(alternative_group)
+            if group is None:
+                group = []
+                grouped[alternative_group] = group
+                requirements.append(group)
+            group.append(anchor_id)
+            continue
+        requirements.append([anchor_id])
+    return [requirement for requirement in requirements if requirement]
+
+
+def _anchor_alternative_group(anchor: dict[str, Any]) -> str:
+    return _text(
+        anchor.get("alternative_group")
+        or anchor.get("alt_group")
+        or anchor.get("alternativeGroup")
+    )
+
+
+def _anchor_requirement_progress(
+    config: Any,
+    current_act: str,
+    completed_anchors: list[Any],
+) -> dict[str, int]:
+    requirements = _required_anchor_requirements_for_act(config, current_act)
+    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
+    return {
+        "done": sum(
+            1
+            for requirement in requirements
+            if any(anchor_id in completed for anchor_id in requirement)
+        ),
+        "total": len(requirements),
+    }
+
+
+def _first_unsatisfied_required_anchor_for_act(
+    config: Any,
+    current_act: str,
+    completed_anchors: list[str],
+) -> dict[str, Any] | None:
+    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
+    records = _completion_anchor_records_for_act(config, current_act, required_only=True)
+    records_by_id = {_identity(anchor): anchor for anchor in records if _identity(anchor)}
+    for requirement in _required_anchor_requirements_for_act(config, current_act):
+        if any(anchor_id in completed for anchor_id in requirement):
+            continue
+        for anchor_id in requirement:
+            anchor = records_by_id.get(anchor_id)
+            if anchor is not None:
+                return anchor
+    return None
 
 
 def _compact_text(value: Any) -> str:
@@ -1255,27 +1319,27 @@ def _fallback_anchor_quest(
     current_act: str,
     completed_anchors: list[str],
 ) -> dict[str, Any] | None:
-    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    for anchor in _completion_anchor_records_for_act(config, current_act, required_only=True):
-        anchor_id = _text(anchor.get("id"))
-        if not anchor_id or anchor_id in completed:
-            continue
-        title = _anchor_quest_title(anchor, anchor_id)
-        completion_signal = _text(anchor.get("completion_signal"))
-        return {
-            "id": f"anchor_quest_{anchor_id}",
-            "name": title,
-            "title": title,
-            "act_id": current_act,
-            "status": "active",
-            "objective": completion_signal or title,
-            "description": "当前幕仍有必需剧情锚点未完成。",
-            "completion_signal": completion_signal,
-            "optional": False,
-            "source": "completion_anchor",
-            "anchor_id": anchor_id,
-        }
-    return None
+    anchor = _first_unsatisfied_required_anchor_for_act(config, current_act, completed_anchors)
+    if anchor is None:
+        return None
+    anchor_id = _text(anchor.get("id"))
+    if not anchor_id:
+        return None
+    title = _anchor_quest_title(anchor, anchor_id)
+    completion_signal = _text(anchor.get("completion_signal"))
+    return {
+        "id": f"anchor_quest_{anchor_id}",
+        "name": title,
+        "title": title,
+        "act_id": current_act,
+        "status": "active",
+        "objective": completion_signal or title,
+        "description": "当前幕仍有必需剧情锚点未完成。",
+        "completion_signal": completion_signal,
+        "optional": False,
+        "source": "completion_anchor",
+        "anchor_id": anchor_id,
+    }
 
 
 def _anchor_quest_title(anchor: dict[str, Any], anchor_id: str) -> str:
@@ -1938,11 +2002,14 @@ def _computed_ready_for_next_act(
     current_act: str,
     completed_anchors: list[Any],
 ) -> bool | None:
-    required_anchor_ids = completion_anchor_ids_for_act(config, current_act, required_only=True)
-    if not required_anchor_ids:
+    requirements = _required_anchor_requirements_for_act(config, current_act)
+    if not requirements:
         return None
     completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    return all(anchor_id in completed for anchor_id in required_anchor_ids)
+    return all(
+        any(anchor_id in completed for anchor_id in requirement)
+        for requirement in requirements
+    )
 
 
 def _can_advance_to_act(
@@ -1964,9 +2031,12 @@ def _can_advance_to_act(
     if not allowed_targets and _act_exists(config, previous_act):
         return False
 
-    required_anchor_ids = completion_anchor_ids_for_act(config, previous_act, required_only=True)
+    requirements = _required_anchor_requirements_for_act(config, previous_act)
     completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    return all(anchor_id in completed for anchor_id in required_anchor_ids)
+    return all(
+        any(anchor_id in completed for anchor_id in requirement)
+        for requirement in requirements
+    )
 
 
 def _allowed_transition_targets(config: Any, current_act: str) -> set[str]:

@@ -15,15 +15,16 @@
 12. 只有当 GM 输出明确写出当前幕目标已经完成、completion_signal 已经达成，或剧情已经自然转入 runtime_story.next_act 时，才输出 story_progress_update.current_act。
 13. story_progress_update 只能推进运行时进度，不能修改剧本设定；不要跳幕，不要因为玩家意图或蓝图计划而提前推进。
 14. 如果 payload 中存在 director_hints，优先扫描其中 continuity_notes、forbidden_reveals、scene_objective 提到的人物、物品、地点、关系，把 GM 输出中明确发生的对应变化写入相应状态字段；不要因为 hints 提到就凭空写入未发生的变化。
-15. 如果 payload 中存在 drift_hints.state_conflicts，逐项检查 GM 输出是否仍存在该冲突：若已修正，无需输出任何额外修复；若 GM 写出了与 current_state 冲突的细节，请把"以 current_state 为准"的最小校正写入对应字段，不要新增矛盾。
-16. 如果 GM 输出的 `###/####` 场景标题、玩家输入或正文明确表示主视角已经返回、进入、撤回、来到、抵达或深入新地点，必须输出 location_change；不要只更新 NPC location。
-17. 如果多个同场 NPC 在本回合明确移动或互动于同一新地点，也必须把该地点输出为 location_change，确保全局 active_scene 跟随主视角。
-18. 不要把纯时间标题（如“清晨”“夜晚”“片刻后”）当作 location_change。
-19. 如果 GM 输出明确写出某个 NPC 被带到新地点、正在当前场景互动、同处 location_change 指向的地点，或本回合的互动只能发生在新场景中，则在该 NPC 的 npc_updates 中写入 location；不要只更新 status/attitude。
-20. quest_updates 管理任务状态变化。主线任务状态由系统按剧本与证据自动派生，你只在任务状态发生明确变化时输出，且必须用 `id` 字段携带该任务在 runtime_story.main_quest_path 中的 id（字段名就是 `id`，不要用 `quest_id`）：`{"id": "main_quest_2", "status": "completed", "progress": "一句话当前进展"}`。status 取值 active|completed|failed。禁止输出既无 id 又无 title 的空任务。
-21. open_thread_updates 管理未解线索/伏笔。新增线索用 `{"id": "稳定的英文蛇形 id", "title": "简短线索名", "status": "active"}`，title 要短、可复用（便于跨回合关联），不要写整段长句叙述。当某条线索描述的事已在本回合解决（包括其对应的任务或锚点已完成），输出 `{"id": "原线索的 id", "action": "resolve"}` 关闭它——resolve 时必须带回原来的 id。
-22. faction_updates 用 `{"id": "势力 id", "name": "势力名", "status": "..."}`；new_lore_candidates / new_known_facts / new_hidden_facts 都是字符串数组，每条一句话陈述句。
-23. **终局失败（defeat）**：仅当 GM 输出已明确写出主角的旅程以**不可挽回的失败**收场（主角死亡/被俘无解/彻底失败、剧情已无法继续推进主线）时，才输出 `story_progress_update.defeat = true`。这是失败结局的唯一来源，与 campaign_complete（胜利）互斥；普通挫折、受伤、暂时被擒**不算** defeat，写成 condition 即可。剧情仍能继续时绝不输出 defeat。
+15. **非数值代价闭环**：如果 director_hints.risk_note / cost_if_fails 非空，且 GM 输出明确写出了受伤、暴露、追捕、债务、失信、失物、线索外泄、任务受阻、未解麻烦等代价或并发症，必须把它落到可持续承接的字段：身体/处境写 `condition_updates`，NPC 态度写 `relationship_events`，未解麻烦或新压力写 `open_thread_updates`，任务受阻写 `quest_updates`。即使行动成功但带代价，也要记录代价；普通挫折、受伤、暂时被擒仍不是 defeat。不要只因为 risk_note/cost_if_fails 存在就虚构未在 GM 输出中发生的代价。
+16. 如果 payload 中存在 drift_hints.state_conflicts，逐项检查 GM 输出是否仍存在该冲突：若已修正，无需输出任何额外修复；若 GM 写出了与 current_state 冲突的细节，请把"以 current_state 为准"的最小校正写入对应字段，不要新增矛盾。
+17. 如果 GM 输出的 `###/####` 场景标题、玩家输入或正文明确表示主视角已经返回、进入、撤回、来到、抵达或深入新地点，必须输出 location_change；不要只更新 NPC location。
+18. 如果多个同场 NPC 在本回合明确移动或互动于同一新地点，也必须把该地点输出为 location_change，确保全局 active_scene 跟随主视角。
+19. 不要把纯时间标题（如“清晨”“夜晚”“片刻后”）当作 location_change。
+20. 如果 GM 输出明确写出某个 NPC 被带到新地点、正在当前场景互动、同处 location_change 指向的地点，或本回合的互动只能发生在新场景中，则在该 NPC 的 npc_updates 中写入 location；不要只更新 status/attitude。
+21. quest_updates 管理任务状态变化。主线任务状态由系统按剧本与证据自动派生，你只在任务状态发生明确变化时输出，且必须用 `id` 字段携带该任务在 runtime_story.main_quest_path 中的 id（字段名就是 `id`，不要用 `quest_id`）：`{"id": "main_quest_2", "status": "completed", "progress": "一句话当前进展"}`。status 取值 active|completed|failed。禁止输出既无 id 又无 title 的空任务。
+22. open_thread_updates 管理未解线索/伏笔。新增线索用 `{"id": "稳定的英文蛇形 id", "title": "简短线索名", "status": "active"}`，title 要短、可复用（便于跨回合关联），不要写整段长句叙述。当某条线索描述的事已在本回合解决（包括其对应的任务或锚点已完成），输出 `{"id": "原线索的 id", "action": "resolve"}` 关闭它——resolve 时必须带回原来的 id。
+23. faction_updates 用 `{"id": "势力 id", "name": "势力名", "status": "..."}`；new_lore_candidates / new_known_facts / new_hidden_facts 都是字符串数组，每条一句话陈述句。
+24. **终局失败（defeat）**：仅当 GM 输出已明确写出主角的旅程以**不可挽回的失败**收场（主角死亡/被俘无解/彻底失败、剧情已无法继续推进主线）时，才输出 `story_progress_update.defeat = true`。这是失败结局的唯一来源，与 campaign_complete（胜利）互斥；普通挫折、受伤、暂时被擒**不算** defeat，写成 condition 即可。剧情仍能继续时绝不输出 defeat。
 
 输出结构：
 {

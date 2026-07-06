@@ -189,11 +189,7 @@ def build_runtime_story(
     current_act_id = _runtime_current_act_id(story, progress)
     current_act = _current_act(story, current_act_id)
     completed_anchors = set(_strings(progress.get("completed_anchors")))
-    open_anchors = [
-        anchor
-        for anchor in _records(current_act.get("completion_anchors"))
-        if _text(anchor.get("id")) not in completed_anchors
-    ]
+    open_anchors = _open_completion_anchors(current_act, completed_anchors)
     next_act = _next_act(story, current_act)
 
     runtime_current_act = dict(current_act)
@@ -546,6 +542,35 @@ def completion_anchor_ids_for_act(
     return ids
 
 
+def _open_completion_anchors(
+    current_act: dict[str, Any],
+    completed_anchors: set[str],
+) -> list[dict[str, Any]]:
+    anchors = _records(current_act.get("completion_anchors"))
+    satisfied_required_groups = {
+        _anchor_alternative_group(anchor)
+        for anchor in anchors
+        if _bool(anchor.get("required"), True)
+        and _anchor_alternative_group(anchor)
+        and _text(anchor.get("id")) in completed_anchors
+    }
+
+    open_anchors: list[dict[str, Any]] = []
+    for anchor in anchors:
+        anchor_id = _text(anchor.get("id"))
+        if anchor_id in completed_anchors:
+            continue
+        alternative_group = _anchor_alternative_group(anchor)
+        if (
+            _bool(anchor.get("required"), True)
+            and alternative_group
+            and alternative_group in satisfied_required_groups
+        ):
+            continue
+        open_anchors.append(anchor)
+    return open_anchors
+
+
 def transition_target_for_act(config: GameConfig | None, act_id: str) -> str:
     story = story_settings_from_config(config)
     act = _current_act(story, act_id)
@@ -737,10 +762,19 @@ def _anchor(item: dict[str, Any], act_id: str, index: int) -> dict[str, Any]:
             "id": _text(item.get("id")) or f"{act_id}_anchor_{index + 1}",
             "title": _text(item.get("title") or item.get("name")) or "未命名锚点",
             "required": _bool(item.get("required"), True),
+            "alternative_group": _anchor_alternative_group(item),
             "description": _text(item.get("description") or item.get("goal")),
             "completion_signal": _text(item.get("completion_signal") or item.get("signal")),
         },
         item,
+    )
+
+
+def _anchor_alternative_group(anchor: dict[str, Any]) -> str:
+    return _text(
+        anchor.get("alternative_group")
+        or anchor.get("alt_group")
+        or anchor.get("alternativeGroup")
     )
 
 

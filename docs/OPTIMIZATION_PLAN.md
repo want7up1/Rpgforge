@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 56 — 远端 Docker 部署验证：同步 Round 55 修复、重建 api/worker、执行 Alembic migration、确认健康检查和目标测试通过 |
-| 完成日期 | 2026-07-03 |
+| 最近一轮 | Round 57 — 游玩方向修复：非数值代价闭环 + 替代锚点组/多路径转幕 |
+| 完成日期 | 2026-07-06 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **2026-06-04 一轮大型前端建设（Round 36–39）**：围绕「story_settings 可视化编辑」建了一套**设定看板**子系统，并落地三件事——① 生成页重设计（Round 36）② 设定页 + 信息架构去重（Round 37）③ **剧本炼金工坊**（Round 38，setting_modules 模块库 + 提取/并入 + AI 本地优化）④ 看板成为完整设定编辑面（Round 39，全字段数据驱动 + 字段类型系统 + 手动新增项）。详见各 Round 与下方「设计文档」。 |
@@ -26,6 +26,25 @@
 ---
 
 ## 1. 已完成
+
+### Round 57 (2026-07-06) — 游玩方向修复：非数值代价闭环 + 替代锚点组/多路径转幕
+
+**背景**：承接 2026-07-06 游玩方向审查，先修两项直接影响可玩性的低风险问题：纯叙事化后失败/代价容易只停留在正文气氛里；幕推进只支持所有 required 锚点全完成，缺少“多条路线任选其一”的转幕表达。
+
+**改动**：
+- 非数值代价闭环：`gm_runtime.md` 要求风险/代价写成后续能被状态提取器持续承接的具体后果；`extract_state_delta.md` 要求在 GM 输出明确发生时代入 `condition_updates` / `relationship_events` / `open_thread_updates` / `quest_updates`，且不得因 risk_note/cost_if_fails 本身虚构代价。
+- 替代锚点组：`completion_anchors[].alternative_group` 成为可选字段。同一幕多个 required 锚点填相同组名时，完成任意一个即可满足该组；未配置该字段的旧剧本继续按全部 required 锚点完成计算。
+- 运行时链路同步：`build_runtime_story` 隐藏已满足替代组的兄弟锚点；`state_applier` 的 ready/advance/current_act_anchor_progress/fallback anchor quest 均按“要求组”计算；`act_pacing` 的 open_required_count 与 next_required_anchor 同步支持替代组。
+- 作者入口同步：设定填写说明、authoring kit、生成 act_plan section prompt 补充 `alternative_group` 说明；审查台账见 `docs/REVIEW_FINDINGS.md`。
+- 历史日志：`docs/history/OPTIMIZATION_LOG_2026-07.md`。
+
+**验证**：
+- `cd api && PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/test_markdown_contracts.py tests/test_act_pacing.py tests/test_games.py::test_settings_guide_documents_every_normalized_field tests/test_gameplay.py::test_runtime_story_filters_satisfied_alternative_anchor_group tests/test_gameplay.py::test_state_delta_advances_after_alternative_anchor_group_and_required_anchor`：15 passed。
+- `cd api && python3 -m ruff check app tests`：All checks passed。
+- 远端运行环境：最小同步后重建 `api` / `worker`；`docker compose ps` 显示 `api` healthy、`worker` running；`GET /health` 返回 `status=ok`；容器内同一组目标 pytest：15 passed；`api` / `worker` 启动日志无异常。
+- 本机带 `db_session` 的旧目标测试因本地 Postgres 连接 `postgres:5432` 被关闭而未跑通。
+
+**遗留风险**：代价闭环仍依赖 GM/Extractor 遵守 prompt 合同，需用真实模型回合观察是否稳定产生并承接 conditions/open_threads/relationships；替代组需要后续在新剧本生成实机样本里观察是否会被合理使用。
 
 ### Round 56 (2026-07-03) — 远端 Docker 部署验证：Round 55 修复上线 + migration 落库
 

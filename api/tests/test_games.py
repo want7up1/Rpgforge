@@ -294,6 +294,7 @@ def test_settings_guide_export_is_markdown_and_does_not_change_json_export(db_se
     assert "设定填写说明" in guide_response.text
     assert "给 AI 的修改指令模板" in guide_response.text
     assert "story_material_library[].gm_secret" in guide_response.text
+    assert "completion_anchors[].alternative_group" in guide_response.text
     assert "completion_anchors[].completion_signal" in guide_response.text
     assert "导入生效范围：只覆盖剧本设定源" in guide_response.text
 

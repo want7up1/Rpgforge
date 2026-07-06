@@ -80,6 +80,35 @@ def test_high_pressure_points_to_first_open_required_anchor() -> None:
     assert pacing["next_required_anchor"]["completion_signal"] == "首领在战斗中倒下"
 
 
+def test_alternative_anchor_group_counts_as_one_open_requirement() -> None:
+    base = 4
+    pacing = compute_act_pacing(
+        _state(base + ANCHOR_PACING_RISING_TURNS, last_anchor_update_turn=base),
+        _runtime(
+            [
+                {
+                    "id": "act_1_sneak_entry",
+                    "required": True,
+                    "alternative_group": "entry_path",
+                    "title": "潜入后门",
+                    "completion_signal": "主角从后门潜入据点。",
+                },
+                {
+                    "id": "act_1_talk_entry",
+                    "required": True,
+                    "alternative_group": "entry_path",
+                    "title": "说服守卫",
+                    "completion_signal": "守卫放行主角进入据点。",
+                },
+                ANCHOR_REQ,
+            ]
+        ),
+    )
+
+    assert pacing["open_required_count"] == 2
+    assert pacing["next_required_anchor"]["id"] == "act_1_sneak_entry"
+
+
 def test_ready_when_no_open_required_anchor() -> None:
     # 当幕 required 锚点已全完成，只剩可选锚点 → 不硬推、pressure=ready。
     pacing = compute_act_pacing(

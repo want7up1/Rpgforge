@@ -57,6 +57,7 @@ target_section = "act_plan"
           "id": "act_1_anchor_1",
           "title": "锚点标题",
           "required": true,
+          "alternative_group": "",
           "description": "完成这个锚点意味着什么剧情条件已经满足",
           "completion_signal": "GM 或状态提取器可识别的完成信号"
         }
@@ -69,7 +70,7 @@ target_section = "act_plan"
     }
   ]
 }
-限制：默认生成五幕。每幕 2-4 个 completion_anchors；锚点只属于本幕，不要把 act_2 锚点放进 act_1。最后一幕 transition_to_next_act 使用空对象。
+限制：默认生成五幕。每幕 2-4 个 completion_anchors；锚点只属于本幕，不要把 act_2 锚点放进 act_1。多个 required 锚点如果是“多选一完成路线”，写相同的 alternative_group；普通必须全部完成的锚点留空。最后一幕 transition_to_next_act 使用空对象。
 
 target_section = "main_quest_path"
 输出：
