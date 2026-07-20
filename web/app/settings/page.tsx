@@ -210,31 +210,32 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <section className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold sm:text-3xl">设置</h1>
-        <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
+      <section className="px-panel px-panel-strong px-panel-pad">
+        <p className="px-eyebrow">SYSTEM CONSOLE</p>
+        <h1 className="px-heading mt-2 text-3xl">系统设置</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
           这里保存运行时模型配置。浏览器只访问当前 Web 端口，后端由 Docker 内网代理。
         </p>
       </section>
 
       {state.status === "loading" ? (
-        <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-          正在读取设置...
+        <section className="px-panel px-panel-pad text-sm text-[color:var(--muted)]">
+          <span className="px-caret" aria-hidden="true" /> 正在读取设置…
         </section>
       ) : state.status === "error" ? (
-        <section className="app-alert">{state.message}</section>
+        <section className="px-alert">{state.message}</section>
       ) : (
         <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
           <form
-            className="app-card app-card-pad"
+            className="px-panel px-panel-pad"
             onSubmit={handleSubmit}
           >
             <div className="grid gap-4">
               {state.settings.settings_protected ? (
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold">设置管理 Token</span>
+                  <span className="px-label">设置管理 Token</span>
                   <input
-                    className="app-input"
+                    className="px-input"
                     onChange={(event) => setAdminToken(event.target.value)}
                     placeholder="SETTINGS_ADMIN_TOKEN"
                     type="password"
@@ -242,16 +243,16 @@ export default function SettingsPage() {
                   />
                 </label>
               ) : (
-                <div className="app-alert">
+                <div className="px-alert">
                   当前未配置 SETTINGS_ADMIN_TOKEN。生产环境会禁止保存设置；外网部署必须配置强 Token
                   并放在认证反代后。
                 </div>
               )}
 
               <label className="grid gap-2">
-                <span className="text-sm font-semibold">DeepSeek API Key</span>
+                <span className="px-label">DeepSeek API Key</span>
                 <input
-                  className="app-input"
+                  className="px-input"
                   disabled={clearApiKey}
                   onChange={(event) => setApiKey(event.target.value)}
                   placeholder="留空表示不修改现有 Key"
@@ -270,9 +271,9 @@ export default function SettingsPage() {
               </label>
 
               <label className="grid gap-2">
-                <span className="text-sm font-semibold">Base URL</span>
+                <span className="px-label">Base URL</span>
                 <input
-                  className="app-input"
+                  className="px-input"
                   onChange={(event) => setBaseUrl(event.target.value)}
                   placeholder="https://api.deepseek.com"
                   value={baseUrl}
@@ -281,26 +282,26 @@ export default function SettingsPage() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold">Flash 模型槽位</span>
+                  <span className="px-label">Flash 模型槽位</span>
                   <input
-                    className="app-input"
+                    className="px-input"
                     onChange={(event) => setFlashModel(event.target.value)}
                     value={flashModel}
                   />
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-semibold">Pro 模型槽位</span>
+                  <span className="px-label">Pro 模型槽位</span>
                   <input
-                    className="app-input"
+                    className="px-input"
                     onChange={(event) => setProModel(event.target.value)}
                     value={proModel}
                   />
                 </label>
               </div>
 
-              <section className="grid gap-3 border-t border-[color:var(--border)] pt-4">
+              <section className="grid gap-3 border-t-2 border-[color:var(--border)] pt-4">
                 <div>
-                  <h2 className="text-lg font-semibold">模型职责分配</h2>
+                  <h2 className="px-heading text-base">模型职责分配</h2>
                   <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
                     每个步骤选择使用 Flash 或 Pro 槽位。槽位对应的实际模型名由上方输入框决定。
                   </p>
@@ -325,13 +326,13 @@ export default function SettingsPage() {
               </section>
 
               {message ? (
-                <div className="app-status">
+                <div className="px-status">
                   {message}
                 </div>
               ) : null}
 
               <button
-                className="app-button app-button-primary"
+                className="px-btn px-btn-primary"
                 disabled={pending || !flashModel.trim() || !proModel.trim()}
                 type="submit"
               >
@@ -340,8 +341,8 @@ export default function SettingsPage() {
             </div>
           </form>
 
-          <aside className="app-card app-card-pad">
-            <h2 className="text-lg font-semibold">当前状态</h2>
+          <aside className="px-panel px-panel-pad">
+            <h2 className="px-heading text-base">当前状态</h2>
             <dl className="mt-4 grid gap-3 text-sm">
               <StatusRow label="API Key">
                 {state.settings.api_key_configured
@@ -365,7 +366,7 @@ export default function SettingsPage() {
                         key={row.key}
                       >
                         <span>{row.label}</span>
-                        <span className="app-pill">
+                        <span className="px-badge">
                           {slotLabel(slot)} · {slot === "pro" ? state.settings.pro_model : state.settings.flash_model}
                         </span>
                       </div>
@@ -400,10 +401,10 @@ function ModelRouteControl({
   const activeModel = slot === "pro" ? proModel : flashModel;
 
   return (
-    <article className="rounded border border-[color:var(--border)] p-3">
+    <article className="px-card">
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
         <div className="min-w-0">
-          <h3 className="font-semibold">{row.label}</h3>
+          <h3 className="font-bold">{row.label}</h3>
           <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
             {row.description}
           </p>
@@ -411,16 +412,16 @@ function ModelRouteControl({
             当前实际模型：{activeModel || "未填写"}
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="mode-switch">
           <button
-            className={slot === "flash" ? "app-button app-button-primary" : "app-button"}
+            className={slot === "flash" ? "mode-active" : undefined}
             onClick={() => onChange("flash")}
             type="button"
           >
             Flash
           </button>
           <button
-            className={slot === "pro" ? "app-button app-button-primary" : "app-button"}
+            className={slot === "pro" ? "mode-active" : undefined}
             onClick={() => onChange("pro")}
             type="button"
           >
@@ -466,8 +467,8 @@ function StatusRow({
   label: string;
 }) {
   return (
-    <div className="border-b border-[color:var(--border)] pb-3 last:border-b-0">
-      <dt className="text-[color:var(--muted)]">{label}</dt>
+    <div className="border-b-2 border-[color:var(--border)] pb-3 last:border-b-0">
+      <dt className="px-label">{label}</dt>
       <dd className="mt-1 break-all font-medium">{children}</dd>
     </div>
   );

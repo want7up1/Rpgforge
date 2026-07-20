@@ -30,21 +30,21 @@ function SubItemEditor({
             <input type="checkbox" checked={Boolean(item[s.key])} onChange={(e) => set(s.key, e.target.checked)} />
           ) : s.type === "number" ? (
             <input
-              className="app-input"
+              className="px-input"
               type="number"
               value={asStr(item[s.key])}
               onChange={(e) => set(s.key, e.target.value === "" ? 0 : Number(e.target.value))}
             />
           ) : s.type === "stringList" ? (
             <textarea
-              className="app-input min-h-16"
+              className="px-input min-h-16"
               value={(Array.isArray(item[s.key]) ? (item[s.key] as string[]) : []).join("\n")}
               onChange={(e) => set(s.key, e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))}
             />
           ) : s.type === "textarea" ? (
-            <textarea className="app-input min-h-16" value={asStr(item[s.key])} onChange={(e) => set(s.key, e.target.value)} />
+            <textarea className="px-input min-h-16" value={asStr(item[s.key])} onChange={(e) => set(s.key, e.target.value)} />
           ) : (
-            <input className="app-input" value={asStr(item[s.key])} onChange={(e) => set(s.key, e.target.value)} />
+            <input className="px-input" value={asStr(item[s.key])} onChange={(e) => set(s.key, e.target.value)} />
           )}
         </label>
       ))}
@@ -58,7 +58,7 @@ function JsonEditor({ value, onChange }: { value: BoardFieldValue; onChange: (v:
   return (
     <div className="grid gap-1">
       <textarea
-        className="app-input min-h-24 font-mono text-xs"
+        className="px-input min-h-24 font-mono text-xs"
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -85,15 +85,15 @@ export function BoardFieldEditor({
   onChange: (v: BoardFieldValue) => void;
 }) {
   if (field.type === "text") {
-    return <input className="app-input" value={asStr(value)} onChange={(e) => onChange(e.target.value)} />;
+    return <input className="px-input" value={asStr(value)} onChange={(e) => onChange(e.target.value)} />;
   }
   if (field.type === "textarea") {
-    return <textarea className="app-input min-h-24 resize-y leading-6" value={asStr(value)} onChange={(e) => onChange(e.target.value)} />;
+    return <textarea className="px-input min-h-24 resize-y leading-6" value={asStr(value)} onChange={(e) => onChange(e.target.value)} />;
   }
   if (field.type === "number") {
     return (
       <input
-        className="app-input"
+        className="px-input"
         type="number"
         value={asStr(value)}
         onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
@@ -114,7 +114,7 @@ export function BoardFieldEditor({
         {list.map((s, i) => (
           <div key={i} className="flex gap-2">
             <input
-              className="app-input flex-1"
+              className="px-input flex-1"
               value={s}
               onChange={(e) => {
                 const n = [...list];
@@ -122,10 +122,10 @@ export function BoardFieldEditor({
                 onChange(n);
               }}
             />
-            <button className="app-button" type="button" onClick={() => onChange(list.filter((_, j) => j !== i))}>✕</button>
+            <button className="px-btn" type="button" onClick={() => onChange(list.filter((_, j) => j !== i))}>✕</button>
           </div>
         ))}
-        <button className="app-button w-fit" type="button" onClick={() => onChange([...list, ""])}>＋ 加一条</button>
+        <button className="px-btn w-fit" type="button" onClick={() => onChange([...list, ""])}>＋ 加一条</button>
       </div>
     );
   }
@@ -145,11 +145,11 @@ export function BoardFieldEditor({
                 onChange(n);
               }}
             />
-            <button className="app-button mt-2" type="button" onClick={() => onChange(items.filter((_, j) => j !== i))}>删除此项</button>
+            <button className="px-btn mt-2" type="button" onClick={() => onChange(items.filter((_, j) => j !== i))}>删除此项</button>
           </div>
         ))}
         <button
-          className="app-button w-fit"
+          className="px-btn w-fit"
           type="button"
           onClick={() =>
             onChange([
@@ -171,7 +171,7 @@ export function BoardFieldEditor({
         {entries.map(([k, v], i) => (
           <div key={i} className="flex gap-2">
             <input
-              className="app-input w-1/3"
+              className="px-input w-1/3"
               value={k}
               onChange={(e) => {
                 const next: Record<string, unknown> = {};
@@ -181,9 +181,9 @@ export function BoardFieldEditor({
                 onChange(next);
               }}
             />
-            <input className="app-input flex-1" value={asStr(v)} onChange={(e) => onChange({ ...obj, [k]: e.target.value })} />
+            <input className="px-input flex-1" value={asStr(v)} onChange={(e) => onChange({ ...obj, [k]: e.target.value })} />
             <button
-              className="app-button"
+              className="px-btn"
               type="button"
               onClick={() => {
                 const next = { ...obj };
@@ -195,7 +195,7 @@ export function BoardFieldEditor({
             </button>
           </div>
         ))}
-        <button className="app-button w-fit" type="button" onClick={() => onChange({ ...obj, "": "" })}>＋ 加一项</button>
+        <button className="px-btn w-fit" type="button" onClick={() => onChange({ ...obj, "": "" })}>＋ 加一项</button>
       </div>
     );
   }

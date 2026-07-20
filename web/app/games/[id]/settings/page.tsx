@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { GamePageHeader } from "@/components/GamePageHeader";
+import { GameSubpageShell } from "@/components/GameMenu";
 import { SettingsBoard } from "@/components/board/SettingsBoard";
 import { SettingsAdvanced } from "@/components/settings/SettingsAdvanced";
 import { ModuleMergePanel } from "@/components/workshop/ModuleMergePanel";
@@ -48,19 +48,21 @@ export default function GameSettingsPage() {
 
   if (state.status === "loading")
     return (
-      <AppShell>
-        <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">正在读取设定...</section>
+      <AppShell variant="focus">
+        <section className="px-panel px-panel-pad text-sm text-[color:var(--muted)]">
+          <span className="px-caret" aria-hidden="true" /> 正在读取设定…
+        </section>
       </AppShell>
     );
   if (state.status === "error")
     return (
-      <AppShell>
-        <section className="app-alert">{state.message}</section>
+      <AppShell variant="focus">
+        <section className="px-alert">{state.message}</section>
       </AppShell>
     );
 
   return (
-    <AppShell>
+    <AppShell variant="focus">
       <SettingsView
         game={state.game}
         versions={state.versions}
@@ -120,12 +122,17 @@ function SettingsView({
   }
 
   return (
-    <div className="grid gap-4 sm:gap-5">
-      <GamePageHeader active="settings" eyebrow="设定" gameId={game.id} title={game.title} subtitle="剧本唯一主设定源" />
-      <p className="app-status">
+    <GameSubpageShell
+      active="settings"
+      eyebrow="SCRIPT · 设定"
+      gameId={game.id}
+      subtitle="剧本唯一主设定源"
+      title={game.title}
+    >
+      <p className="px-status">
         这里是该剧本「唯一主设定源」。修改只影响后续回合，不改写已发生的剧情/状态；回合生成中不可改。
       </p>
-      {error ? <p className="app-alert">{error}</p> : null}
+      {error ? <p className="px-alert">{error}</p> : null}
       <SettingsBoard
         model={model}
         loading={saving}
@@ -156,6 +163,6 @@ function SettingsView({
           onSaved={() => setModuleBlock(null)}
         />
       ) : null}
-    </div>
+    </GameSubpageShell>
   );
 }

@@ -35,8 +35,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 function Fold({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <details className="surface-panel">
-      <summary className="cursor-pointer surface-title">{title}</summary>
+    <details className="px-panel px-panel-pad">
+      <summary className="cursor-pointer px-heading text-base">{title}</summary>
       <div className="mt-4">{children}</div>
     </details>
   );
@@ -94,23 +94,23 @@ function RawJsonEditor({ game, onRefresh, disabled = false }: { game: GameDetail
 
   return (
     <form className="grid gap-3" onSubmit={handleSubmit}>
-      <p className="surface-subtle">直接编辑整份设定。只作用于 story_settings，不改回合历史/状态/摘要/存档。</p>
+      <p className="text-sm text-[color:var(--muted)]">直接编辑整份设定。只作用于 story_settings，不改回合历史/状态/摘要/存档。</p>
       <textarea
-        className="app-input min-h-[320px] font-mono text-xs"
+        className="px-input min-h-[320px] font-mono text-xs"
         disabled={disabled || saving}
         onChange={(e) => setDraft(e.target.value)}
         value={draft}
       />
       <div className="flex flex-wrap gap-2">
-        <button className="app-button app-button-primary" disabled={disabled || saving} type="submit">
+        <button className="px-btn px-btn-primary" disabled={disabled || saving} type="submit">
           {saving ? "保存中..." : "保存 story_settings"}
         </button>
-        <button className="app-button" disabled={disabled || saving} type="button" onClick={() => { setDraft(formatJson(current)); setError(null); setStatus("已恢复为当前已保存内容。"); }}>
+        <button className="px-btn" disabled={disabled || saving} type="button" onClick={() => { setDraft(formatJson(current)); setError(null); setStatus("已恢复为当前已保存内容。"); }}>
           恢复当前内容
         </button>
       </div>
-      {status ? <p className="app-status">{status}</p> : null}
-      {error ? <p className="app-alert">{error}</p> : null}
+      {status ? <p className="px-status">{status}</p> : null}
+      {error ? <p className="px-alert">{error}</p> : null}
     </form>
   );
 }
@@ -160,15 +160,15 @@ function ImportExport({ game, onRefresh, disabled = false }: { game: GameDetail;
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap gap-2">
-        <button className="app-button app-button-primary w-fit" disabled={disabled || busy} type="button" onClick={() => download("json")}>导出 JSON</button>
-        <button className="app-button w-fit" disabled={disabled || busy} type="button" onClick={() => download("guide")}>下载填写说明</button>
+        <button className="px-btn px-btn-primary w-fit" disabled={disabled || busy} type="button" onClick={() => download("json")}>导出 JSON</button>
+        <button className="px-btn w-fit" disabled={disabled || busy} type="button" onClick={() => download("guide")}>下载填写说明</button>
       </div>
       <label className="grid gap-1 text-sm font-medium">
         <span>导入 story_settings JSON（覆盖设定，不动存档/回合/状态）</span>
-        <input accept="application/json,.json" className="app-input" disabled={disabled || busy} onChange={handleImport} type="file" />
+        <input accept="application/json,.json" className="px-input" disabled={disabled || busy} onChange={handleImport} type="file" />
       </label>
-      {status ? <p className="app-status">{status}</p> : null}
-      {error ? <p className="app-alert">{error}</p> : null}
+      {status ? <p className="px-status">{status}</p> : null}
+      {error ? <p className="px-alert">{error}</p> : null}
     </div>
   );
 }
@@ -206,9 +206,9 @@ function VersionHistory({
 
   return (
     <div className="grid gap-3">
-      <p className="surface-subtle">保存/导入/恢复设定时会记录快照；恢复只影响设定，不影响存档进度。</p>
-      {status ? <p className="app-status">{status}</p> : null}
-      {error ? <p className="app-alert">{error}</p> : null}
+      <p className="text-sm text-[color:var(--muted)]">保存/导入/恢复设定时会记录快照；恢复只影响设定，不影响存档进度。</p>
+      {status ? <p className="px-status">{status}</p> : null}
+      {error ? <p className="px-alert">{error}</p> : null}
       {versions.length === 0 ? (
         <p className="text-sm text-[color:var(--muted)]">暂无设置版本。</p>
       ) : (
@@ -219,7 +219,7 @@ function VersionHistory({
                 <p className="text-sm font-semibold">{version.scope} · {version.action}</p>
                 <p className="text-xs text-[color:var(--muted)]">{new Date(version.created_at).toLocaleString()}</p>
               </div>
-              <button className="app-button" disabled={disabled || restoringId === version.id} type="button" onClick={() => handleRestore(version.id)}>
+              <button className="px-btn" disabled={disabled || restoringId === version.id} type="button" onClick={() => handleRestore(version.id)}>
                 {restoringId === version.id ? "恢复中..." : "恢复"}
               </button>
             </div>

@@ -93,174 +93,106 @@ export default function Home() {
           .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
           .slice(0, 3)
       : [];
+  const latestGame = recentGames[0] ?? null;
 
   return (
-    <AppShell>
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_24rem]">
-        {gamesState.status === "loading" ? (
-          <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-            正在读取冒险存档...
-          </section>
-        ) : gamesState.status === "error" ? (
-          <section className="app-alert">{gamesState.message}</section>
-        ) : recentGames.length > 0 ? (
-          <LauncherHero game={recentGames[0]} />
-        ) : (
-          <EmptyLauncher />
-        )}
-
-        <aside className="app-card app-card-pad grid content-start gap-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-xl font-semibold">存档列表</h2>
-            <Link className="app-button" href="/games">
-              全部
-            </Link>
+    <AppShell variant="title">
+      <div className="title-screen">
+        <div className="grid w-full max-w-2xl gap-8 px-2">
+          <div className="grid gap-3 text-center">
+            <p className="px-eyebrow">STATE-DRIVEN AI TEXT RPG</p>
+            <h1 className="title-logo">RPG
+              <wbr />FORGE</h1>
+            <p className="text-xs tracking-[0.35em] text-[color:var(--faint)]">
+              — 文 字 冒 险 终 端 —
+            </p>
           </div>
-          <div className="grid gap-3">
-            {gamesState.status === "ready" && recentGames.length > 0 ? (
-              recentGames.map((game) => <RecentGameCard game={game} key={game.id} compact />)
-            ) : (
-              <p className="text-sm leading-6 text-[color:var(--muted)]">
-                还没有冒险。创建第一场冒险后，这里会显示最近存档。
-              </p>
-            )}
-          </div>
-          <Link className="app-button app-button-primary" href="/games/new">
-            创建新冒险
-          </Link>
-          <Link className="app-button" href="/settings">
-            DeepSeek 设置
-          </Link>
-          <SystemStatus health={health} />
-        </aside>
-      </section>
-    </AppShell>
-  );
-}
 
-function LauncherHero({ game }: { game: GameListItem }) {
-  return (
-    <section className="relative overflow-hidden rounded-lg border border-[color:var(--border)] bg-[linear-gradient(120deg,rgba(12,17,15,0.96),rgba(33,46,39,0.88),rgba(93,73,42,0.58))] p-5 shadow-[var(--shadow)] sm:p-7 lg:min-h-[24rem]">
-      <div className="pointer-events-none absolute inset-y-8 right-6 hidden w-72 rounded-lg border border-[color:var(--border)] bg-[linear-gradient(rgba(217,179,111,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(217,179,111,0.12)_1px,transparent_1px)] bg-[length:32px_32px] opacity-70 lg:block" />
-      <div className="relative z-10 grid min-h-[20rem] content-between gap-8">
-        <div>
-          <p className="text-sm font-bold text-[color:var(--gold)]">当前冒险 · 最近存档</p>
-          <h1 className="mt-3 max-w-3xl break-words text-4xl font-black leading-none sm:text-6xl">
-            {game.title}
-          </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-[color:var(--muted)]">
-            {game.description || "继续这段尚未完成的文字 RPG。"}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="app-pill">{game.genre || "未分类"}</span>
-          <span className="app-pill">{game.status}</span>
-          <span className="app-pill">更新于 {formatDate(game.updated_at)}</span>
-        </div>
-        <div className="grid gap-2 sm:flex sm:flex-wrap">
-          <Link className="app-button app-button-primary sm:min-w-32" href={`/games/${game.id}/play`}>
-            继续冒险
-          </Link>
-          <Link className="app-button sm:min-w-28" href={`/games/${game.id}/characters`}>
-            角色档案
-          </Link>
-          <Link className="app-button sm:min-w-28" href={`/games/${game.id}/history`}>
-            旅程记录
-          </Link>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function EmptyLauncher() {
-  return (
-    <section className="app-card app-card-pad grid min-h-[20rem] content-center gap-4">
-      <div>
-        <p className="text-sm font-bold text-[color:var(--gold)]">RPGForge</p>
-        <h1 className="mt-2 text-3xl font-black sm:text-5xl">开始第一场冒险</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[color:var(--muted)]">
-          输入一个世界想法，确认设定后生成剧本设定、角色、状态和初始剧情。
-        </p>
-      </div>
-      <Link className="app-button app-button-primary w-full sm:w-fit" href="/games/new">
-        创建新冒险
-      </Link>
-    </section>
-  );
-}
-
-function RecentGameCard({
-  compact = false,
-  game
-}: {
-  compact?: boolean;
-  game: GameListItem;
-}) {
-  return (
-    <article className="app-link-card">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h3 className="break-words font-semibold">{game.title}</h3>
-          {!compact ? (
-            <p className="mt-1 line-clamp-2 text-sm leading-6 text-[color:var(--muted)]">
-              {game.genre || "未分类"} · {game.description || "暂无简介"}
+          {gamesState.status === "loading" ? (
+            <p className="text-center text-sm text-[color:var(--muted)]">
+              <span className="px-caret" aria-hidden="true" /> 正在读取存档…
             </p>
           ) : null}
-        </div>
-        <span className="app-pill">{game.status}</span>
-      </div>
-      <div className="mt-2 grid gap-2 sm:flex sm:items-center sm:justify-between">
-        <p className="text-xs text-[color:var(--muted)]">
-          更新于 {formatDate(game.updated_at)}
-        </p>
-        <div className="grid grid-cols-2 gap-2 sm:flex">
-          <Link className="app-button app-button-primary" href={`/games/${game.id}/play`}>
-            继续冒险
-          </Link>
-          <Link className="app-button" href={`/games/${game.id}`}>
-            概览
-          </Link>
-        </div>
-      </div>
-    </article>
-  );
-}
+          {gamesState.status === "error" ? (
+            <p className="px-alert">{gamesState.message}</p>
+          ) : null}
 
-function SystemStatus({ health }: { health: HealthState }) {
-  return (
-    <div className="border-t border-[color:var(--border)] pt-3 text-sm">
-      <div className="flex items-center gap-2">
-        <span
-          className={`h-2.5 w-2.5 rounded-full ${
-            health.status === "online"
-              ? "bg-[color:var(--success)]"
-              : health.status === "offline"
-                ? "bg-[color:var(--warning)]"
-                : "bg-[color:var(--muted)]"
-          }`}
-        />
-        <span className="font-medium">{formatHealthStatus(health)}</span>
-      </div>
-      <p className="mt-2 text-xs leading-5 text-[color:var(--muted)]">
-        {health.status === "online"
-          ? `${health.data.service} · ${health.data.environment}`
-          : health.status === "offline"
-            ? health.message
-            : "正在检查服务连接。"}
-      </p>
-    </div>
-  );
-}
+          <nav aria-label="主菜单" className="grid gap-1 border-2 border-[color:var(--border)] bg-[color:var(--panel)] p-2">
+            {latestGame ? (
+              <Link className="title-menu-item" href={`/games/${latestGame.id}/play`}>
+                <span>
+                  继续冒险
+                  <span className="ml-2 text-xs text-[color:var(--amber)]">
+                    ◂ {latestGame.title} ▸
+                  </span>
+                </span>
+              </Link>
+            ) : null}
+            <Link className="title-menu-item" href="/games/new">
+              <span>新的冒险</span>
+            </Link>
+            <Link className="title-menu-item" href="/games">
+              <span>读取存档</span>
+            </Link>
+            <Link className="title-menu-item" href="/workshop">
+              <span>炼金工坊</span>
+            </Link>
+            <Link className="title-menu-item" href="/settings">
+              <span>系统设置</span>
+            </Link>
+          </nav>
 
-function formatHealthStatus(health: HealthState) {
-  if (health.status === "online") {
-    return "API 在线";
-  }
-  if (health.status === "offline") {
-    return "API 离线";
-  }
-  return "检查中";
+          {recentGames.length > 0 ? (
+            <section className="grid gap-2">
+              <p className="px-label text-center">最近冒险</p>
+              <div className="grid gap-2">
+                {recentGames.map((game, index) => (
+                  <Link
+                    className="save-slot"
+                    href={`/games/${game.id}/play`}
+                    key={game.id}
+                  >
+                    <span className="save-slot-index">SLOT {index + 1}</span>
+                    <span className="flex flex-wrap items-center gap-2 pr-16">
+                      <strong className="min-w-0 break-words">{game.title}</strong>
+                      <span className="px-badge">{game.status}</span>
+                    </span>
+                    <span className="text-xs text-[color:var(--muted)]">
+                      {game.genre || "未分类"} · 更新于 {formatDate(game.updated_at)}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : gamesState.status === "ready" ? (
+            <p className="text-center text-sm text-[color:var(--muted)]">
+              还没有任何冒险存档。选择「新的冒险」开始第一局。
+            </p>
+          ) : null}
+
+          <footer className="flex items-center justify-center gap-2 text-xs text-[color:var(--faint)]">
+            <span
+              aria-hidden="true"
+              className={
+                health.status === "online"
+                  ? "px-led px-led-on"
+                  : health.status === "offline"
+                    ? "px-led px-led-off"
+                    : "px-led px-led-blink"
+              }
+            />
+            <span>
+              {health.status === "online"
+                ? `API 在线 · ${health.data.service} · ${health.data.environment}`
+                : health.status === "offline"
+                  ? `API 离线 · ${health.message}`
+                  : "正在检查 API 连接…"}
+            </span>
+          </footer>
+        </div>
+      </div>
+    </AppShell>
+  );
 }
 
 function formatDate(value: string) {

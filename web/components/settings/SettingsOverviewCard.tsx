@@ -15,22 +15,21 @@ export function SettingsOverviewCard({
   const model = useMemo(() => buildBoardModel({ source: "settings", settings: storySettings }), [storySettings]);
   const cats = model.categories.filter((c) => c.blocks.length > 0);
   return (
-    <section className="surface-panel surface-panel-strong">
+    <section className="px-panel px-panel-strong px-panel-pad">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="surface-title">设定概览</h2>
+          <h2 className="px-heading text-base">设定概览</h2>
           {cats.map((c) => (
             <span
-              className="app-pill"
+              className={c.tone === "danger" ? "px-badge px-badge-amber" : "px-badge"}
               key={c.id}
-              style={c.tone === "danger" ? { borderColor: "#e0a23d", color: "#b5701f" } : undefined}
             >
               {c.icon} {c.label} {c.blocks.length}
             </span>
           ))}
         </div>
-        <Link className="app-button app-button-primary w-full sm:w-fit" href={`/games/${gameId}/settings`}>
-          查看 / 编辑全部设定 →
+        <Link className="px-btn px-btn-primary w-full sm:w-fit" href={`/games/${gameId}/settings`}>
+          查看 / 编辑全部设定 ▸
         </Link>
       </div>
     </section>

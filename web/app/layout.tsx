@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Press_Start_2P } from "next/font/google";
+import { PixelDialogProvider } from "@/components/PixelDialog";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"]
-});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
+  subsets: ["latin"]
+});
+
+const pressStart2P = Press_Start_2P({
+  variable: "--font-press-start",
+  weight: "400",
   subsets: ["latin"]
 });
 
@@ -28,8 +30,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        {children}
+      <body className={`${geistMono.variable} ${pressStart2P.variable}`}>
+        <PixelDialogProvider>{children}</PixelDialogProvider>
       </body>
     </html>
   );

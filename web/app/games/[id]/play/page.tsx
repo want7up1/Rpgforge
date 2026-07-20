@@ -1,9 +1,16 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  type SyntheticEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { CharacterModal } from "@/components/CharacterModal";
@@ -72,8 +79,11 @@ export default function PlayPage() {
   const [turnProgress, setTurnProgress] = useState<string | null>(null);
   const [turnProcess, setTurnProcess] = useState<TurnJobRead | null>(null);
   const [actionMode, setActionMode] = useState<ActionMode>("action");
+  const [customActionOpen, setCustomActionOpen] = useState(false);
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterRead | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // C3 首次引导卡：仅首次进 play 页弹一次，localStorage 记忆后不再打扰。
   useEffect(() => {
@@ -278,11 +288,15 @@ export default function PlayPage() {
     return () => controller.abort();
   }, [params.id, restoreActiveTurnJob]);
 
-  async function submitTurn(payload: Parameters<typeof createTurnJob>[1]) {
+  async function submitTurn(
+    payload: Parameters<typeof createTurnJob>[1],
+    options: { reopenComposerOnError?: boolean } = {}
+  ) {
     if (state.status !== "ready" || pending || maintenanceActive) {
       return;
     }
 
+    setCustomActionOpen(false);
     setError(null);
     setTurnProgress("已创建回合任务，等待 DeepSeek Pro 开始书写剧情...");
     setTurnProcess(null);
@@ -305,6 +319,9 @@ export default function PlayPage() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "提交回合失败。");
       setTurnProgress("回合生成失败，已保留收到的过程信息。");
+      if (options.reopenComposerOnError) {
+        setCustomActionOpen(true);
+      }
     } finally {
       setPending(false);
     }
@@ -319,51 +336,32 @@ export default function PlayPage() {
     if (!playerInput) {
       return;
     }
-    submitTurn({ player_input: playerInput });
+    void submitTurn(
+      { player_input: playerInput },
+      { reopenComposerOnError: true }
+    );
   }
 
   return (
     <AppShell variant="gameplay">
       {state.status === "loading" ? (
-        <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-          正在读取游戏...
+        <section className="px-panel px-panel-pad m-4 text-sm text-[color:var(--muted)]">
+          <span className="px-caret" aria-hidden="true" /> 正在进入冒险…
         </section>
       ) : state.status === "error" ? (
-        <section className="app-alert">{state.message}</section>
+        <section className="px-alert m-4">{state.message}</section>
       ) : (
         <>
-          <div className="adventure-mobile-tabs" aria-label="移动端游戏导航">
-            <Link className="app-button" href={`/games/${params.id}`}>
-              冒险
-            </Link>
-            <Link className="app-button" href={`/games/${params.id}/memory`}>
-              资料
-            </Link>
-            <Link className="app-button" href={`/games/${params.id}/characters`}>
-              角色
-            </Link>
-            <Link className="app-button" href={`/games/${params.id}/status`}>
-              状态
-            </Link>
-            <Link className="app-button" href={`/games/${params.id}/history`}>
-              历史
-            </Link>
-            <Link className="app-button" href="/games">
-              存档
-            </Link>
-          </div>
-          <div className="adventure-frame">
-            <AdventureSidebar
-              currentTurn={latestTurn?.turn_number ?? 0}
-              game={state.game}
-              stateV2={stateV2}
-            />
-
-            <main className="adventure-main">
-              <header className="adventure-topbar">
+          <div className="game-screen">
+            <div>
+              <div className="px-topbar border-x-0 border-t-0">
+                <Link href="/" className="px-brand px-font text-[0.55rem]" title="返回标题画面">
+                  <span aria-hidden="true" className="text-[color:var(--amber)]">▓▓</span>
+                  RPGFORGE
+                </Link>
                 <div className="min-w-0">
-                  <h1 className="truncate text-xl font-black">{state.game.title}</h1>
-                  <p className="mt-1 truncate text-sm text-[color:var(--muted)]">
+                  <h1 className="truncate text-sm font-bold">{state.game.title}</h1>
+                  <p className="truncate text-xs text-[color:var(--muted)]">
                     第 {latestTurn?.turn_number ?? 0} 回合
                     {stateV2?.active_scene.location
                       ? ` · ${stateV2.active_scene.location}`
@@ -371,90 +369,117 @@ export default function PlayPage() {
                     {stateV2?.active_scene.time ? ` · ${stateV2.active_scene.time}` : ""}
                   </p>
                 </div>
-                <div className="adventure-topbar-actions flex flex-wrap justify-end gap-2">
+                <div className="ml-auto flex items-center gap-1.5">
                   {latestTurn && latestTurn.turn_number > 0 ? (
                     <button
-                      className="app-button"
+                      className="px-btn min-h-8 px-2 py-1 text-xs"
                       disabled={pending || maintenanceActive}
                       onClick={() => handleRewind(latestTurn.turn_number - 1)}
                       title="删除最新一回合，回到上一回合重新选择"
                       type="button"
                     >
-                      撤销上一回合
+                      ↩ 撤销
                     </button>
                   ) : null}
-                  <Link className="app-button" href={`/games/${params.id}`}>
-                    概览
-                  </Link>
-                  <Link className="app-button" href={`/games/${params.id}/history`}>
-                    历史
-                  </Link>
-                  <Link className="app-button" href="/games">
-                    存档
-                  </Link>
+                  <button
+                    aria-expanded={journalOpen}
+                    className="px-btn min-h-8 px-2 py-1 text-xs"
+                    onClick={() => { setJournalOpen((v) => !v); setMenuOpen(false); }}
+                    type="button"
+                  >
+                    ▤ 手账
+                  </button>
+                  <button
+                    aria-expanded={menuOpen}
+                    className="px-btn min-h-8 px-2 py-1 text-xs"
+                    onClick={() => { setMenuOpen((v) => !v); setJournalOpen(false); }}
+                    type="button"
+                  >
+                    ▦ 菜单
+                  </button>
                 </div>
-              </header>
+              </div>
+              {menuOpen ? (
+                <div className="border-b-2 border-[color:var(--border)] bg-[rgba(5,12,7,0.96)] px-2 py-2">
+                  <GameMenuInline gameId={params.id} />
+                </div>
+              ) : null}
+            </div>
 
-              <section className="adventure-story-scroll">
-                <div className="adventure-story-column">
-                  {error ? <div className="app-alert mb-4">{error}</div> : null}
-                  {isEnded && stateV2 ? (
-                    <CampaignEndingCard
-                      gameId={params.id}
-                      outcome={isDefeated ? "defeat" : "victory"}
-                      stateV2={stateV2}
-                    />
-                  ) : null}
-                  {!isEnded && stateV2 ? <ObjectivePanel stateV2={stateV2} /> : null}
-                  {stateV2 ? (
-                    <PresentCharactersStrip
-                      characters={state.characters}
-                      latestTurn={latestTurn}
-                      onCharacterClick={setSelectedCharacter}
-                      stateV2={stateV2}
-                    />
-                  ) : null}
-                  <StoryPanel
+            <section className="game-scroll">
+              <div className="game-scroll-column">
+                {error ? <div className="px-alert mb-4">{error}</div> : null}
+                {isEnded && stateV2 ? (
+                  <CampaignEndingCard
+                    gameId={params.id}
+                    outcome={isDefeated ? "defeat" : "victory"}
+                    stateV2={stateV2}
+                  />
+                ) : null}
+                {!isEnded && stateV2 ? <ObjectiveBanner stateV2={stateV2} /> : null}
+                {stateV2 ? (
+                  <PresentCharactersStrip
                     characters={state.characters}
                     latestTurn={latestTurn}
                     onCharacterClick={setSelectedCharacter}
-                    onSelectAction={(option) => submitTurn({ selected_option: option })}
-                    pending={pending}
-                    process={turnProcess}
-                    progress={turnProgress}
-                    maintenanceActive={maintenanceActive}
-                    backgroundMaintenanceActive={backgroundMaintenanceActive}
+                    stateV2={stateV2}
                   />
-                  {isEnded ? (
-                    <footer className="adventure-composer">
-                      <div className="adventure-composer-inner text-sm text-[color:var(--muted)]">
-                        {isDefeated
-                          ? "主角已倒下，这段旅程到此终结。可在上方开启新的冒险。"
-                          : "本场冒险已抵达结局，旅程到此圆满。可在上方开启新的冒险。"}
-                      </div>
-                    </footer>
-                  ) : (
-                    <AdventureComposer
-                      actionMode={actionMode}
-                      disabled={pending || maintenanceActive}
-                      input={input}
-                      maintenanceActive={maintenanceActive}
-                      onInputChange={setInput}
-                      onModeChange={setActionMode}
-                      onSubmit={handleSubmit}
-                      pending={pending}
-                    />
-                  )}
-                </div>
-              </section>
-            </main>
+                ) : null}
+                <StoryPanel
+                  characters={state.characters}
+                  latestTurn={latestTurn}
+                  onCharacterClick={setSelectedCharacter}
+                  onSelectAction={(option) => submitTurn({ selected_option: option })}
+                  pending={pending}
+                  process={turnProcess}
+                  progress={turnProgress}
+                  maintenanceActive={maintenanceActive}
+                  backgroundMaintenanceActive={backgroundMaintenanceActive}
+                />
+              </div>
+            </section>
 
-            <AdventureInspector
-              characters={state.characters}
-              game={state.game}
-              stateV2={stateV2}
-            />
+            {isEnded ? (
+              <footer className="command-bar">
+                <p className="mx-auto w-full max-w-[840px] text-sm text-[color:var(--muted)]">
+                  {isDefeated
+                    ? "主角已倒下，这段旅程到此终结。可在上方开启新的冒险。"
+                    : "本场冒险已抵达结局，旅程到此圆满。可在上方开启新的冒险。"}
+                </p>
+              </footer>
+            ) : (
+              <AdventureComposer
+                actionMode={actionMode}
+                disabled={pending || maintenanceActive}
+                expanded={customActionOpen}
+                input={input}
+                maintenanceActive={maintenanceActive}
+                onInputChange={setInput}
+                onModeChange={setActionMode}
+                onExpandedChange={setCustomActionOpen}
+                onSubmit={handleSubmit}
+                pending={pending}
+              />
+            )}
           </div>
+
+          {journalOpen ? (
+            <>
+              <button
+                aria-label="关闭冒险手账"
+                className="journal-overlay"
+                onClick={() => setJournalOpen(false)}
+                type="button"
+              />
+              <JournalDrawer
+                characters={state.characters}
+                game={state.game}
+                onClose={() => setJournalOpen(false)}
+                stateV2={stateV2}
+              />
+            </>
+          ) : null}
+
           <CharacterModal
             character={selectedCharacter}
             onClose={() => setSelectedCharacter(null)}
@@ -469,137 +494,101 @@ export default function PlayPage() {
   );
 }
 
-function AdventureSidebar({
-  currentTurn,
-  game,
-  stateV2
-}: {
-  currentTurn: number;
-  game: GameDetail;
-  stateV2: StateV2 | null;
-}) {
+function GameMenuInline({ gameId }: { gameId: string }) {
+  const items = [
+    { label: "状态", en: "STATUS", href: `/games/${gameId}/status` },
+    { label: "角色", en: "PARTY", href: `/games/${gameId}/characters` },
+    { label: "旅程", en: "LOG", href: `/games/${gameId}/history` },
+    { label: "记忆", en: "MEMO", href: `/games/${gameId}/memory` },
+    { label: "设定", en: "SCRIPT", href: `/games/${gameId}/settings` },
+    { label: "营地", en: "CAMP", href: `/games/${gameId}/camp` },
+    { label: "离开", en: "EXIT", href: "/games" }
+  ];
   return (
-    <aside className="adventure-sidebar">
-      <Link className="mb-6 flex items-center gap-2 font-black" href="/">
-        <span className="brand-mark-small" aria-hidden="true">
-          <Image
-            alt=""
-            className="brand-mark-image"
-            height={32}
-            src="/rpg-deepseek-logo.png"
-            width={32}
-          />
-        </span>
-        <span>RPGForge</span>
-      </Link>
-
-      <section className="mb-5 grid gap-2">
-        <p className="text-xs font-black uppercase text-[color:var(--faint)]">Adventure</p>
-        <div className="app-link-card">
-          <div className="adventure-sidebar-card-title-row">
-            <strong className="min-w-0 truncate">{game.title}</strong>
-            <span className="app-pill adventure-turn-pill">{currentTurn}</span>
-          </div>
-          <p className="text-xs leading-5 text-[color:var(--muted)]">
-            {stateV2?.active_scene.location || game.genre || "当前冒险"}
-          </p>
-        </div>
-        <Link className="app-button app-button-primary" href={`/games/${game.id}/play`}>
-          剧情
+    <nav aria-label="游戏菜单" className="px-menu justify-center">
+      {items.map((item) => (
+        <Link className="px-menu-link" href={item.href} key={item.en}>
+          <span>{item.label}</span>
+          <span className="px-menu-en">{item.en}</span>
         </Link>
-      </section>
-
-      <section className="mb-5 grid gap-2">
-        <p className="text-xs font-black uppercase text-[color:var(--faint)]">Tools</p>
-        <Link className="app-button" href={`/games/${game.id}/memory`}>
-          剧本设定 · {storyMaterialCount(game)}
-        </Link>
-        <Link className="app-button" href={`/games/${game.id}/characters`}>
-          角色档案
-        </Link>
-        <Link className="app-button" href={`/games/${game.id}/status`}>
-          状态面板
-        </Link>
-        <Link className="app-button" href={`/games/${game.id}/history`}>
-          旅程记录
-        </Link>
-      </section>
-
-      <section className="app-status text-xs">
-        <strong className="block text-[color:var(--foreground)]">当前存档</strong>
-        <span className="mt-1 block">
-          {stateV2?.conditions.length ? `${stateV2.conditions.length} 个状态` : "状态稳定"}
-        </span>
-      </section>
-    </aside>
+      ))}
+    </nav>
   );
 }
 
-function AdventureInspector({
+function JournalDrawer({
   characters,
   game,
+  onClose,
   stateV2
 }: {
   characters: CharacterRead[];
   game: GameDetail;
+  onClose: () => void;
   stateV2: StateV2 | null;
 }) {
   const visibleCharacters = characters.filter((character) => character.is_visible).slice(0, 3);
 
   return (
-    <aside className="adventure-inspector">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="text-xl font-black">冒险资料</h2>
-        <Link className="app-button" href={`/games/${game.id}/memory`}>
-          打开
-        </Link>
+    <aside aria-label="冒险手账" className="journal-drawer">
+      <div className="flex items-center justify-between gap-2 border-b-2 border-[color:var(--border)] px-3 py-2.5">
+        <h2 className="px-heading text-sm">冒险手账</h2>
+        <button aria-label="关闭冒险手账" className="px-btn h-8 w-8 px-0" onClick={onClose} type="button">
+          ×
+        </button>
       </div>
+      <div className="journal-body grid content-start gap-3">
+        {stateV2 ? <PlayStateStrip gameId={game.id} stateV2={stateV2} /> : null}
 
-      {stateV2 ? <PlayStateStrip gameId={game.id} stateV2={stateV2} /> : null}
-
-      <section className="app-card app-card-pad mt-3">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold">角色</h3>
-          <Link className="text-sm text-[color:var(--muted)]" href={`/games/${game.id}/characters`}>
-            全部
-          </Link>
-        </div>
-        <div className="grid gap-3">
-          {visibleCharacters.length > 0 ? (
-            visibleCharacters.map((character) => (
-              <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-3" key={character.id}>
-                <CharacterPortrait character={character} />
-                <div className="min-w-0">
-                  <strong className="block truncate">{character.name}</strong>
-                  <p className="truncate text-xs text-[color:var(--muted)]">
-                    {character.identity || character.description || "角色档案"}
-                  </p>
+        <section className="px-card">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="px-label">角色</h3>
+            <Link className="text-xs text-[color:var(--phosphor)]" href={`/games/${game.id}/characters`}>
+              全部 ▸
+            </Link>
+          </div>
+          <div className="grid gap-3">
+            {visibleCharacters.length > 0 ? (
+              visibleCharacters.map((character) => (
+                <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-3" key={character.id}>
+                  <CharacterPortrait character={character} />
+                  <div className="min-w-0">
+                    <strong className="block truncate">{character.name}</strong>
+                    <p className="truncate text-xs text-[color:var(--muted)]">
+                      {character.identity || character.description || "角色档案"}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))
-          ) : (
-            <p className="text-sm text-[color:var(--muted)]">暂无可见角色。</p>
-          )}
-        </div>
-      </section>
+              ))
+            ) : (
+              <p className="text-sm text-[color:var(--muted)]">暂无可见角色。</p>
+            )}
+          </div>
+        </section>
 
-      <section className="app-card app-card-pad mt-3">
-        <h3 className="font-semibold">剧本素材</h3>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {storyMaterialTitles(game).map((title) => (
-            <span className="app-pill" key={title}>
-              {title}
-            </span>
-          ))}
-        </div>
-      </section>
+        <section className="px-card">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="px-label">剧本素材</h3>
+            <Link className="text-xs text-[color:var(--phosphor)]" href={`/games/${game.id}/memory`}>
+              记忆 ▸
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {storyMaterialTitles(game).map((title) => (
+              <span className="px-badge" key={title}>
+                {title}
+              </span>
+            ))}
+          </div>
+        </section>
 
-      <section className="app-card app-card-pad mt-3">
-        <h3 className="font-semibold">旅程记忆</h3>
-        <p className="mt-2 line-clamp-5 text-sm leading-6 text-[color:var(--muted)]">
-          {game.summaries[0]?.content || game.description || "暂无记忆摘要。"}
-        </p>
-      </section>
+        <section className="px-card">
+          <h3 className="px-label">旅程记忆</h3>
+          <p className="px-wrap mt-2 line-clamp-5 text-sm leading-6 text-[color:var(--muted)]">
+            {game.summaries[0]?.content || game.description || "暂无记忆摘要。"}
+          </p>
+        </section>
+      </div>
     </aside>
   );
 }
@@ -611,10 +600,10 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
     stateV2.conditions.length > 0 ? `${stateV2.conditions.length} 个状态` : "状态稳定";
 
   return (
-    <section className="app-card app-card-pad">
-      <div className="grid gap-3">
+    <section className="px-card px-card-green">
+      <div className="grid gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-semibold">
+          <div className="font-bold text-[color:var(--phosphor)]">
             {protagonist.name || "主角"}
           </div>
           {protagonist.identity ? (
@@ -622,15 +611,12 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
               {protagonist.identity}
             </p>
           ) : null}
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className="text-[color:var(--muted)]">
-              {scene.location || "未知地点"}
-            </span>
-            <span className="text-[color:var(--muted)]">· {conditionLabel}</span>
-          </div>
+          <p className="mt-1.5 text-xs text-[color:var(--muted)]">
+            {scene.location || "未知地点"} · {conditionLabel}
+          </p>
         </div>
-        <Link className="app-button w-full sm:w-fit" href={`/games/${gameId}/status`}>
-          查看状态
+        <Link className="px-btn w-full" href={`/games/${gameId}/status`}>
+          查看状态 STATUS ▸
         </Link>
       </div>
     </section>
@@ -650,7 +636,7 @@ function CampaignEndingCard({
   const epilogue = stateV2.story_progress.epilogue;
   const completedActs = stateV2.story_progress.completed_acts.length;
   const isDefeat = outcome === "defeat";
-  const badge = isDefeat ? "败局" : "剧终";
+  const badge = isDefeat ? "GAME OVER" : "THE END";
   const summary = isDefeat
     ? "你的旅程在此折戟"
     : `你走完了这段冒险${completedActs > 0 ? ` · 共 ${completedActs} 幕` : ""}`;
@@ -660,28 +646,28 @@ function CampaignEndingCard({
 
   return (
     <section
-      className={`campaign-ending-card${isDefeat ? " campaign-ending-card-defeat" : ""}`}
+      className={`ending-screen mb-5${isDefeat ? " ending-screen-defeat" : ""}`}
       aria-label={isDefeat ? "败局" : "剧终"}
     >
-      <div className="campaign-ending-head">
-        <span className="campaign-ending-badge">{badge}</span>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="ending-badge">{badge}</span>
         <span className="text-sm text-[color:var(--muted)]">{summary}</span>
       </div>
       {epilogue ? (
-        <div className="campaign-ending-epilogue">
+        <div className="mt-4">
           <StoryMarkdown content={epilogue} />
         </div>
       ) : (
         <p className="mt-3 text-sm leading-7 text-[color:var(--muted)]">{fallbackText}</p>
       )}
-      <div className="campaign-ending-actions">
-        <Link className="app-button app-button-primary" href="/games/new">
-          开启新冒险
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link className="px-btn px-btn-primary" href="/games/new">
+          ▸ 开启新冒险
         </Link>
-        <Link className="app-button" href={`/games/${gameId}/history`}>
+        <Link className="px-btn" href={`/games/${gameId}/history`}>
           回顾旅程
         </Link>
-        <Link className="app-button" href="/games">
+        <Link className="px-btn" href="/games">
           所有存档
         </Link>
       </div>
@@ -692,32 +678,33 @@ function CampaignEndingCard({
 // C3 首次引导卡：一次性解释四种输入模式 +「你可以尝试任何行动」，降低上手门槛。
 function OnboardingCard({ onDismiss }: { onDismiss: () => void }) {
   return (
-    <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-label="新手引导">
-      <div className="onboarding-card app-card app-card-pad">
-        <h2 className="text-xl font-black">开始你的冒险</h2>
-        <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">
+    <div className="px-modal-overlay" role="dialog" aria-modal="true" aria-label="新手引导">
+      <div className="px-modal max-w-md">
+        <p className="px-eyebrow">HOW TO PLAY</p>
+        <h2 className="px-heading mt-2 text-xl">开始你的冒险</h2>
+        <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">
           这是一场由 AI 主持的文字 RPG。<strong className="text-[color:var(--foreground)]">你可以尝试任何行动</strong>
-          ——直接在输入框里写下你想做的事，GM 会据此推进剧情。下方四种输入模式只是帮你表达意图：
+          ——直接在命令行里写下你想做的事，GM 会据此推进剧情。下方四种输入模式只是帮你表达意图：
         </p>
-        <ul className="onboarding-mode-list">
+        <ul className="mt-3 grid gap-2">
           {MODE_GUIDE.map((mode) => (
-            <li key={mode.key}>
-              <span className="onboarding-mode-name">{mode.label}</span>
-              <span className="onboarding-mode-hint">{mode.hint}</span>
+            <li className="grid grid-cols-[3.2rem_minmax(0,1fr)] items-baseline gap-2 text-sm leading-6" key={mode.key}>
+              <span className="font-bold text-[color:var(--amber)]">{mode.label}</span>
+              <span className="px-wrap text-[color:var(--muted)]">{mode.hint}</span>
             </li>
           ))}
         </ul>
-        <button className="app-button app-button-primary mt-4 w-full" onClick={onDismiss} type="button">
-          知道了，开始冒险
+        <button className="px-btn px-btn-primary mt-4 w-full" onClick={onDismiss} type="button">
+          ▸ 知道了，开始冒险
         </button>
       </div>
     </div>
   );
 }
 
-// C2 目标条：游玩主界面固定展示「当前幕目标 + 本幕进度 + 进行中任务/未解线索」，
+// C2 目标横幅：游玩主界面固定展示「当前幕目标 + 本幕进度 + 进行中任务/未解线索」，
 // 数据全部取自 stateV2（current_act_objective 由后端 story_progress 派生）。
-function ObjectivePanel({ stateV2 }: { stateV2: StateV2 }) {
+function ObjectiveBanner({ stateV2 }: { stateV2: StateV2 }) {
   const progress = stateV2.story_progress;
   const objective = progress.current_act_objective;
   const actTitle = progress.current_act_title;
@@ -731,29 +718,31 @@ function ObjectivePanel({ stateV2 }: { stateV2: StateV2 }) {
   }
 
   return (
-    <section className="objective-panel" aria-label="当前目标">
-      <div className="objective-panel-head">
-        <span className="story-label">当前目标</span>
-        {actTitle ? <span className="app-pill">{actTitle}</span> : null}
+    <section className="quest-banner" aria-label="当前目标">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="story-label">⚑ 当前目标</span>
+        {actTitle ? <span className="px-badge px-badge-amber">{actTitle}</span> : null}
         {anchor.total > 0 ? (
-          <span className="objective-panel-progress">
+          <span className="ml-auto text-xs text-[color:var(--muted)]">
             本幕 {anchor.done}/{anchor.total}
           </span>
         ) : null}
       </div>
-      {objective ? <p className="objective-panel-objective">{objective}</p> : null}
+      {objective ? (
+        <p className="px-wrap mt-1.5 text-[0.95rem] font-semibold leading-7">{objective}</p>
+      ) : null}
       {activeQuests.length > 0 || openThread ? (
-        <ul className="objective-panel-list">
+        <ul className="mt-2 grid gap-1 text-sm text-[color:var(--muted)]">
           {activeQuests.map((quest) => (
-            <li key={quest.name}>
-              <span className="objective-panel-tag">任务</span>
-              {quest.objective || quest.name}
+            <li className="flex items-baseline gap-2" key={quest.name}>
+              <span className="flex-none text-xs font-bold text-[color:var(--amber)]">任务</span>
+              <span className="px-wrap">{quest.objective || quest.name}</span>
             </li>
           ))}
           {openThread ? (
-            <li key={openThread.title}>
-              <span className="objective-panel-tag objective-panel-tag-thread">线索</span>
-              {openThread.title}
+            <li className="flex items-baseline gap-2" key={openThread.title}>
+              <span className="flex-none text-xs font-bold text-[color:var(--phosphor)]">线索</span>
+              <span className="px-wrap">{openThread.title}</span>
             </li>
           ) : null}
         </ul>
@@ -803,15 +792,15 @@ function PresentCharactersStrip({
   }
 
   return (
-    <section className="present-characters-strip" aria-label="当前在场角色">
-      <div className="present-characters-header">
-        <span className="story-label">当前在场角色</span>
-        <span className="app-pill">{present.length}</span>
+    <section className="mb-4 border-2 border-[#8a6420] bg-[color:var(--panel)] p-3" aria-label="当前在场角色">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="story-label">在场者</span>
+        <span className="px-badge">{present.length}</span>
       </div>
-      <div className="present-characters-list">
+      <div className="grid gap-2 sm:grid-cols-2">
         {present.map((entry) => (
           <button
-            className="present-character-chip"
+            className="present-chip"
             disabled={!entry.character}
             key={entry.name}
             onClick={() => {
@@ -824,12 +813,12 @@ function PresentCharactersStrip({
             {entry.character ? (
               <CharacterPortrait character={entry.character} />
             ) : (
-              <span className="present-character-fallback">
+              <span className="grid h-10 w-10 place-items-center border-2 border-[#8a6420] bg-[rgba(255,179,71,0.1)] font-black text-[color:var(--amber)]">
                 {entry.name.slice(0, 1)}
               </span>
             )}
-            <span className="min-w-0 text-left">
-              <strong className="block truncate">{entry.name}</strong>
+            <span className="min-w-0">
+              <strong className="block truncate text-sm">{entry.name}</strong>
               <span className="block truncate text-xs text-[color:var(--muted)]">
                 {[entry.identity, entry.status].filter(Boolean).join(" · ")}
               </span>
@@ -844,8 +833,10 @@ function PresentCharactersStrip({
 function AdventureComposer({
   actionMode,
   disabled,
+  expanded,
   input,
   maintenanceActive,
+  onExpandedChange,
   onInputChange,
   onModeChange,
   onSubmit,
@@ -853,14 +844,17 @@ function AdventureComposer({
 }: {
   actionMode: ActionMode;
   disabled: boolean;
+  expanded: boolean;
   input: string;
   maintenanceActive: boolean;
+  onExpandedChange: (expanded: boolean) => void;
   onInputChange: (value: string) => void;
   onModeChange: (mode: ActionMode) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   pending: boolean;
 }) {
   const modeOptions = MODE_GUIDE;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   let submitLabel = "发送";
   if (pending) {
     submitLabel = "发送中...";
@@ -870,45 +864,89 @@ function AdventureComposer({
     submitLabel = "继续";
   }
 
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded]);
+
+  if (!expanded) {
+    return (
+      <footer className="command-bar">
+        <div className="mx-auto flex w-full max-w-[840px] justify-end">
+          <button
+            aria-expanded="false"
+            className="px-btn px-btn-primary min-h-9"
+            disabled={disabled}
+            onClick={() => onExpandedChange(true)}
+            type="button"
+          >
+            ＋ 自定义行动
+          </button>
+        </div>
+      </footer>
+    );
+  }
+
   return (
-    <footer className="adventure-composer">
-      <form className="adventure-composer-inner" onSubmit={onSubmit}>
-        <div className="adventure-mode-row" aria-label="输入模式">
-          {modeOptions.map((mode) => (
-            <button
-              className={
-                actionMode === mode.key
-                  ? "adventure-mode-button adventure-mode-button-active"
-                  : "adventure-mode-button"
-              }
-              key={mode.key}
-              onClick={() => onModeChange(mode.key)}
-              title={mode.hint}
-              type="button"
-            >
-              {mode.label}
-            </button>
-          ))}
+    <footer className="command-bar">
+      <form className="mx-auto grid w-full max-w-[840px] gap-2" onSubmit={onSubmit}>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="mode-switch" aria-label="输入模式">
+            {modeOptions.map((mode) => (
+              <button
+                className={actionMode === mode.key ? "mode-active" : undefined}
+                key={mode.key}
+                onClick={() => onModeChange(mode.key)}
+                title={mode.hint}
+                type="button"
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <span className="hidden text-xs text-[color:var(--faint)] sm:inline">
+            {modeOptions.find((m) => m.key === actionMode)?.hint}
+          </span>
+          <button
+            aria-expanded="true"
+            className="px-btn ml-auto min-h-8 px-2 py-1 text-xs"
+            onClick={() => onExpandedChange(false)}
+            type="button"
+          >
+            − 收起
+          </button>
         </div>
 
-        <div className="adventure-input-row">
+        <div className="flex items-start gap-2 border-2 border-[color:var(--border-strong)] bg-[color:var(--input)] px-3 py-2 shadow-[inset_2px_2px_0_0_rgba(0,0,0,0.45)] focus-within:border-[color:var(--phosphor)]">
+          <span aria-hidden="true" className="command-prompt mt-0.5">&gt;</span>
           <label className="sr-only" htmlFor="free-action-input">
             自由行动
           </label>
           <textarea
-            className="app-input leading-6"
+            className="command-input"
             disabled={disabled}
             id="free-action-input"
             onChange={(event) => onInputChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
             placeholder={placeholderForMode(actionMode)}
+            ref={textareaRef}
+            rows={2}
             value={input}
           />
           <button
-            className="app-button app-button-primary"
+            className="px-btn px-btn-primary min-h-9 self-end"
             disabled={disabled || (actionMode !== "continue" && !input.trim())}
             type="submit"
           >
-            {submitLabel}
+            {submitLabel} ▸
           </button>
         </div>
       </form>
@@ -964,27 +1002,27 @@ function StoryPanel({
   return (
     <div className="grid gap-4">
       {latestTurn && !pending && latestTurn.turn_number > 0 ? (
-        <article className="story-block story-block-player">
+        <article className="scroll-block scroll-block-player">
           <div className="story-label">你 · 第 {latestTurn.turn_number} 回合</div>
-          <p className="app-wrap-text mt-2 whitespace-pre-wrap text-base leading-8">{latestTurn.player_input}</p>
+          <p className="px-wrap mt-1 whitespace-pre-wrap text-base leading-8">&gt; {latestTurn.player_input}</p>
         </article>
       ) : null}
 
       {hasLiveProcess ? (
-        <article className="story-block">
+        <article className="scroll-block">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="story-label">
               {maintenanceActive ? "后台维护 · 状态提取" : "DeepSeek Pro · 剧情生成"}
             </div>
-            <span className="app-pill">{process.status}</span>
+            <span className="px-badge px-badge-bright">{process.status}</span>
           </div>
-          <div className="app-status text-xs">
+          <div className="px-status text-xs">
             {maintenanceActive ? (
               <MaintenanceStageProgress process={process} />
             ) : (
               <TurnStageProgress process={process} />
             )}
-            <div>{progress || process.progress_message || "等待 DeepSeek 返回剧情。"}</div>
+            <div className="mt-2">{progress || process.progress_message || "等待 DeepSeek 返回剧情。"}</div>
             <div className="mt-1">
               最近更新：{formatLastEvent(process.last_event_at)} · 思考 {reasoning.length} 字 ·
               剧情 {liveNarrative.length} 字
@@ -997,18 +1035,16 @@ function StoryPanel({
             process={process}
             reasoningLength={reasoning.length}
           />
-          <details className="mt-3 rounded border border-[color:var(--border)] bg-[color:var(--input)]">
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-              思考过程
-            </summary>
-            <pre className="app-wrap-text max-h-56 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
+          <details className="px-fold mt-3">
+            <summary>思考过程</summary>
+            <pre className="px-wrap max-h-56 overflow-auto whitespace-pre-wrap border-t-2 border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
               {reasoning || "尚未收到思考过程。"}
             </pre>
           </details>
         </article>
       ) : null}
 
-      <article className="story-block">
+      <article className="scroll-block">
         <div className="story-label">
           GM ·{" "}
           {pending
@@ -1043,7 +1079,7 @@ function StoryPanel({
       ) : null}
 
       {maintenanceActive ? (
-        <section className="app-status">
+        <section className="px-status">
           <strong className="block text-[color:var(--foreground)]">上一回合状态提取中</strong>
           <span className="mt-1 block">
             {process?.maintenance_message || "正在整理状态变更，完成后才能继续下一回合。"}
@@ -1052,7 +1088,7 @@ function StoryPanel({
       ) : null}
 
       {backgroundMaintenanceActive ? (
-        <section className="app-status">
+        <section className="px-status">
           <strong className="block text-[color:var(--foreground)]">记忆摘要后台维护中</strong>
           <span className="mt-1 block">
             {process?.maintenance_message || "正在更新长期记忆，不影响继续行动。"}
@@ -1061,20 +1097,20 @@ function StoryPanel({
       ) : null}
 
       {actionOptions.length > 0 ? (
-        <section className="story-block">
-          <div className="story-label">建议行动</div>
-          <div className="story-choice-grid">
+        <section className="scroll-block">
+          <div className="story-label">抉择</div>
+          <div className="choice-grid">
             {actionOptions.map((option) => (
               <button
                 aria-label={`选择建议行动 ${option.key}：${option.label}`}
-                className="story-choice-button"
+                className="choice-card"
                 disabled={pending || maintenanceActive}
                 key={option.key}
                 onClick={() => onSelectAction(option)}
                 type="button"
               >
-                <span className="story-choice-key">{option.key}</span>
-                <span className="story-choice-copy">{option.label}</span>
+                <span className="choice-key">{option.key}</span>
+                <span className="choice-copy">{option.label}</span>
               </button>
             ))}
           </div>
@@ -1086,35 +1122,35 @@ function StoryPanel({
 
 function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) {
   return (
-    <article className="turn-settlement-card">
+    <article className="px-card px-card-green">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="story-label">本回合变化</div>
+          <div className="story-label">战报 · 本回合变化</div>
           <h3 className="mt-1 font-black">结算摘要</h3>
         </div>
-        <span className="app-pill">
+        <span className="px-badge">
           {settlement.hasChanges ? `${settlement.sections.length} 类变化` : "暂无结构化结算"}
         </span>
       </div>
 
-      <ul className="turn-settlement-summary">
+      <ul className="mt-3 grid gap-1.5 pl-4 text-sm leading-6">
         {(settlement.summary.length > 0
           ? settlement.summary
           : ["本回合暂无可结构化结算。"]).map((item) => (
-          <li key={item}>{item}</li>
+          <li className="px-wrap list-disc" key={item}>{item}</li>
         ))}
       </ul>
 
       {settlement.hasChanges ? (
-        <details className="turn-settlement-details">
+        <details className="px-fold mt-3">
           <summary>查看详细变更</summary>
-          <div className="turn-settlement-section-grid">
+          <div className="grid gap-2 border-t-2 border-[color:var(--border)] pt-3 sm:grid-cols-2">
             {settlement.sections.map((section) => (
-              <section className="turn-settlement-section" key={section.key}>
-                <h4>{section.label}</h4>
-                <ul>
+              <section className="px-card" key={section.key}>
+                <h4 className="text-sm font-bold text-[color:var(--amber)]">{section.label}</h4>
+                <ul className="mt-2 grid gap-1 pl-4 text-xs leading-5 text-[color:var(--muted)]">
                   {section.items.map((item) => (
-                    <li key={item}>{item}</li>
+                    <li className="px-wrap list-disc" key={item}>{item}</li>
                   ))}
                 </ul>
               </section>
@@ -1159,61 +1195,63 @@ function TurnInsightsPanel({ gameId, turnId }: { gameId: string; turnId: string 
     data?.cache_hit_rate != null ? `${Math.round(data.cache_hit_rate * 100)}%` : "—";
 
   return (
-    <details className="generation-detail-panel" onToggle={handleToggle}>
+    <details className="px-fold" onToggle={handleToggle}>
       <summary>本回合详情 · 成本与质量</summary>
-      {loading ? (
-        <p className="mt-2 text-sm text-[color:var(--muted)]">加载中…</p>
-      ) : error ? (
-        <p className="mt-2 text-sm text-[color:var(--muted)]">{error}</p>
-      ) : data ? (
-        <dl className="generation-detail-grid">
-          <div>
-            <dt>本回合 token</dt>
-            <dd>
-              输入 {data.total_tokens_input} · 输出 {data.total_tokens_output}
-            </dd>
-          </div>
-          <div>
-            <dt>缓存命中率</dt>
-            <dd>
-              {hitRate}（命中 {data.total_cache_hit_tokens} / 未命中{" "}
-              {data.total_cache_miss_tokens}）
-            </dd>
-          </div>
-          {gen ? (
+      <div className="px-fold-body">
+        {loading ? (
+          <p className="text-sm text-[color:var(--muted)]">加载中…</p>
+        ) : error ? (
+          <p className="text-sm text-[color:var(--muted)]">{error}</p>
+        ) : data ? (
+          <dl className="detail-grid">
             <div>
-              <dt>篇幅</dt>
+              <dt>本回合 token</dt>
               <dd>
-                {gen.narrative_chars} 字 · {gen.paragraph_count} 段
+                输入 {data.total_tokens_input} · 输出 {data.total_tokens_output}
               </dd>
             </div>
-          ) : null}
-          {obs?.canon ? (
             <div>
-              <dt>canon 使用</dt>
+              <dt>缓存命中率</dt>
               <dd>
-                {obs.canon.used ?? 0}/{obs.canon.total ?? 0} 个专名
+                {hitRate}（命中 {data.total_cache_hit_tokens} / 未命中{" "}
+                {data.total_cache_miss_tokens}）
               </dd>
             </div>
-          ) : null}
-          <div>
-            <dt>各 agent token</dt>
-            <dd>
-              {data.agents.length === 0
-                ? "—"
-                : data.agents
-                    .map((a) => `${a.agent} ${a.tokens_input ?? "?"}`)
-                    .join(" · ")}
-            </dd>
-          </div>
-          <div>
-            <dt>质量观测</dt>
-            <dd>{flags.length === 0 ? "无异常" : flags.join("；")}</dd>
-          </div>
-        </dl>
-      ) : (
-        <p className="mt-2 text-sm text-[color:var(--muted)]">展开加载本回合 token / 缓存 / 质量观测。</p>
-      )}
+            {gen ? (
+              <div>
+                <dt>篇幅</dt>
+                <dd>
+                  {gen.narrative_chars} 字 · {gen.paragraph_count} 段
+                </dd>
+              </div>
+            ) : null}
+            {obs?.canon ? (
+              <div>
+                <dt>canon 使用</dt>
+                <dd>
+                  {obs.canon.used ?? 0}/{obs.canon.total ?? 0} 个专名
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>各 agent token</dt>
+              <dd>
+                {data.agents.length === 0
+                  ? "—"
+                  : data.agents
+                      .map((a) => `${a.agent} ${a.tokens_input ?? "?"}`)
+                      .join(" · ")}
+              </dd>
+            </div>
+            <div>
+              <dt>质量观测</dt>
+              <dd>{flags.length === 0 ? "无异常" : flags.join("；")}</dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="text-sm text-[color:var(--muted)]">展开加载本回合 token / 缓存 / 质量观测。</p>
+        )}
+      </div>
     </details>
   );
 }
@@ -1230,9 +1268,9 @@ function GenerationDetails({
   reasoningLength: number;
 }) {
   return (
-    <details className="generation-detail-panel">
+    <details className="px-fold mt-3">
       <summary>生成详情</summary>
-      <dl className="generation-detail-grid">
+      <dl className="detail-grid border-t-2 border-[color:var(--border)] pt-3">
         <div>
           <dt>当前阶段</dt>
           <dd>
@@ -1296,8 +1334,8 @@ function TurnStageProgress({ process }: { process: StoryProcessJob }) {
   }, [isActive, process.stage_started_at]);
 
   return (
-    <div className="turn-stage-progress">
-      <div className="turn-stage-progress-meta">
+    <div className="px-progress">
+      <div className="flex flex-wrap justify-between gap-2 text-xs font-bold text-[color:var(--foreground)]">
         <span>
           {stageIndex}/{stageTotal} · {stageLabel}
         </span>
@@ -1308,11 +1346,11 @@ function TurnStageProgress({ process }: { process: StoryProcessJob }) {
         aria-valuemax={stageTotal}
         aria-valuemin={1}
         aria-valuenow={stageIndex}
-        className="turn-stage-progress-track"
+        className="px-progress-track"
         role="progressbar"
       >
         <div
-          className="turn-stage-progress-fill"
+          className="px-progress-fill"
           style={{ width: `${stagePercent}%` }}
         />
       </div>
@@ -1330,8 +1368,8 @@ function MaintenanceStageProgress({ process }: { process: StoryProcessJob }) {
   }, [process.maintenance_started_at]);
 
   return (
-    <div className="turn-stage-progress">
-      <div className="turn-stage-progress-meta">
+    <div className="px-progress">
+      <div className="flex flex-wrap justify-between gap-2 text-xs font-bold text-[color:var(--foreground)]">
         <span>{stageLabel}</span>
         <span>{formatStageElapsed(process.maintenance_started_at, now)}</span>
       </div>
@@ -1340,10 +1378,10 @@ function MaintenanceStageProgress({ process }: { process: StoryProcessJob }) {
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={65}
-        className="turn-stage-progress-track"
+        className="px-progress-track"
         role="progressbar"
       >
-        <div className="turn-stage-progress-fill" style={{ width: "65%" }} />
+        <div className="px-progress-fill px-progress-fill-amber" style={{ width: "65%" }} />
       </div>
     </div>
   );
@@ -1424,10 +1462,6 @@ function formatStageElapsed(value: string | null, now: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `已等待 ${minutes} 分 ${remainingSeconds} 秒`;
-}
-
-function storyMaterialCount(game: GameDetail): number {
-  return storyMaterials(game).length;
 }
 
 function storyMaterialTitles(game: GameDetail): string[] {

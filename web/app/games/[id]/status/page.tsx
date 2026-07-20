@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { GamePageHeader } from "@/components/GamePageHeader";
+import { GameSubpageShell } from "@/components/GameMenu";
 import { getGame } from "@/lib/api";
 import {
   getStateV2FromGame,
@@ -51,13 +51,13 @@ export default function GameStatusPage() {
   }, [params.id]);
 
   return (
-    <AppShell>
+    <AppShell variant="focus">
       {state.status === "loading" ? (
-        <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-          正在读取角色状态...
+        <section className="px-panel px-panel-pad text-sm text-[color:var(--muted)]">
+          <span className="px-caret" aria-hidden="true" /> 正在读取角色状态…
         </section>
       ) : state.status === "error" ? (
-        <section className="app-alert">{state.message}</section>
+        <section className="px-alert">{state.message}</section>
       ) : (
         <StatusView game={state.game} stateV2={state.stateV2} />
       )}
@@ -78,21 +78,19 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
       : "";
 
   return (
-    <div className="grid gap-4 sm:gap-5">
-      <GamePageHeader
-        active="status"
-        eyebrow="状态"
-        gameId={game.id}
-        meta={endingLabel ? <span className="app-pill">{endingLabel}</span> : undefined}
-        primaryAction={
-          <Link className="app-button app-button-primary w-full sm:w-fit" href={`/games/${game.id}/play`}>
-            继续冒险
-          </Link>
-        }
-        subtitle={protagonist.identity || game.description || "当前档案尚未记录主角身份。"}
-        title={protagonist.name || game.title}
-      />
-
+    <GameSubpageShell
+      active="status"
+      eyebrow="STATUS · 状态"
+      gameId={game.id}
+      meta={endingLabel ? <span className="px-badge px-badge-amber">{endingLabel}</span> : undefined}
+      primaryAction={
+        <Link className="px-btn px-btn-primary w-full sm:w-fit" href={`/games/${game.id}/play`}>
+          ▸ 继续冒险
+        </Link>
+      }
+      subtitle={protagonist.identity || game.description || "当前档案尚未记录主角身份。"}
+      title={protagonist.name || game.title}
+    >
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <Metric label="状态" value={stateV2.conditions.length} />
         <Metric label="关系" value={stateV2.relationship_tracks.length} />
@@ -109,7 +107,7 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
       <RelationshipsPanel relationships={stateV2.relationship_tracks} />
       <QuestThreadPanel stateV2={stateV2} />
       <NpcPanel stateV2={stateV2} />
-    </div>
+    </GameSubpageShell>
   );
 }
 
@@ -117,10 +115,8 @@ function CharacterPanel({ stateV2 }: { stateV2: StateV2 }) {
   const protagonist = stateV2.protagonist_sheet;
 
   return (
-    <section className="surface-panel surface-panel-strong">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">主角</h2>
-      </div>
+    <section className="px-panel px-panel-strong px-panel-pad">
+      <h2 className="px-heading text-base">主角</h2>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <CompactField label="姓名" value={protagonist.name || "未记录"} />
         <CompactField label="身份" value={protagonist.identity || "未记录"} />
@@ -134,10 +130,10 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
   const storyProgress = stateV2.story_progress;
 
   return (
-    <section className="surface-panel surface-panel-strong">
+    <section className="px-panel px-panel-strong px-panel-pad">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">当前局面</h2>
-        <span className="app-pill">第 {scene.turn} 回合</span>
+        <h2 className="px-heading text-base">当前局面</h2>
+        <span className="px-badge px-badge-bright">第 {scene.turn} 回合</span>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <CompactField label="当前幕" value={formatStoryProgress(storyProgress)} />
@@ -152,7 +148,7 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
       </div>
       {scene.present_npcs.length > 0 ? (
         <div className="mt-4">
-          <h3 className="text-sm font-semibold">在场 NPC</h3>
+          <h3 className="px-label">在场 NPC</h3>
           <PillList values={scene.present_npcs} />
         </div>
       ) : null}
@@ -180,10 +176,10 @@ function formatAnchorProgress(progress: StateV2["story_progress"]): string {
 
 function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
   return (
-    <section className="surface-panel">
+    <section className="px-panel px-panel-pad">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">当前状态</h2>
-        <span className="app-pill">{conditions.length} 项</span>
+        <h2 className="px-heading text-base">当前状态</h2>
+        <span className="px-badge">{conditions.length} 项</span>
       </div>
       <div className="mt-4 grid gap-2">
         {conditions.length === 0 ? (
@@ -193,10 +189,10 @@ function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
             // 纯文字处境：状态一句话 + 可选补充/来源，无 severity/duration 数字。
             const detail = [condition.status, condition.note].filter(Boolean).join(" · ");
             return (
-              <article className="archive-card" key={condition.name}>
-                <h3 className="font-semibold">{condition.name}</h3>
+              <article className="px-card" key={condition.name}>
+                <h3 className="font-bold text-[color:var(--phosphor)]">{condition.name}</h3>
                 {detail || condition.source ? (
-                  <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                  <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
                     {detail}
                     {condition.source ? `${detail ? " · " : ""}来源：${condition.source}` : ""}
                   </p>
@@ -212,10 +208,10 @@ function ConditionsPanel({ conditions }: { conditions: ConditionState[] }) {
 
 function RelationshipsPanel({ relationships }: { relationships: RelationshipTrack[] }) {
   return (
-    <section className="surface-panel">
+    <section className="px-panel px-panel-pad">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">NPC 关系</h2>
-        <span className="app-pill">{relationships.length} 人</span>
+        <h2 className="px-heading text-base">NPC 关系</h2>
+        <span className="px-badge">{relationships.length} 人</span>
       </div>
       <div className="mt-4 grid gap-3 xl:grid-cols-2">
         {relationships.length === 0 ? (
@@ -233,13 +229,13 @@ function RelationshipsPanel({ relationships }: { relationships: RelationshipTrac
 function RelationshipCard({ relationship }: { relationship: RelationshipTrack }) {
   // 纯叙事：status 是一句关系叙述，note 是可选补充，皆为文字、无数值轴。
   return (
-    <article className="archive-card archive-card-green">
-      <h3 className="font-semibold">{relationship.npc}</h3>
-      <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+    <article className="px-card px-card-green">
+      <h3 className="font-bold text-[color:var(--phosphor)]">{relationship.npc}</h3>
+      <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
         {relationship.status || "尚无明确的关系描述。"}
       </p>
       {relationship.note ? (
-        <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+        <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
           {relationship.note}
         </p>
       ) : null}
@@ -257,19 +253,19 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
 
   return (
     <section className="grid gap-4 xl:grid-cols-2">
-      <section className="surface-panel">
+      <section className="px-panel px-panel-pad">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="surface-title">任务</h2>
-          <span className="app-pill">{active.length} 个进行中</span>
+          <h2 className="px-heading text-base">任务</h2>
+          <span className="px-badge">{active.length} 个进行中</span>
         </div>
         <div className="mt-4 grid gap-3">
           {active.length === 0 ? (
             <EmptyText>暂无进行中的任务。</EmptyText>
           ) : (
             active.map((quest, index) => (
-              <article className="archive-card archive-card-accent" key={`active-${quest.name}-${index}`}>
-                <h3 className="font-semibold">{quest.name}</h3>
-                <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+              <article className="px-card px-card-accent" key={`active-${quest.name}-${index}`}>
+                <h3 className="font-bold">{quest.name}</h3>
+                <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
                   {quest.objective || quest.status}
                 </p>
               </article>
@@ -277,22 +273,20 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
           )}
         </div>
         {settledQuests.length > 0 ? (
-          <details className="mt-3 rounded border border-[color:var(--border)] bg-[color:var(--input)]">
-            <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-              已完成 / 已结束（{settledQuests.length}）
-            </summary>
-            <div className="grid gap-2 border-t border-[color:var(--border)] p-3">
+          <details className="px-fold mt-3">
+            <summary>已完成 / 已结束（{settledQuests.length}）</summary>
+            <div className="grid gap-2 border-t-2 border-[color:var(--border)] pt-3">
               {settledQuests.map(({ quest, outcome }, index) => (
                 <article
-                  className="rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] p-3"
+                  className="px-card"
                   key={`${outcome}-${quest.name}-${index}`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-medium text-[color:var(--muted)]">{quest.name}</h3>
-                    <span className="app-pill">{outcome === "failed" ? "已失败" : "已完成"}</span>
+                    <span className="px-badge">{outcome === "failed" ? "已失败" : "已完成"}</span>
                   </div>
                   {quest.objective ? (
-                    <p className="app-wrap-text mt-2 text-xs leading-5 text-[color:var(--muted)]">
+                    <p className="px-wrap mt-2 text-xs leading-5 text-[color:var(--muted)]">
                       {quest.objective}
                     </p>
                   ) : null}
@@ -303,10 +297,10 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
         ) : null}
       </section>
 
-      <section className="surface-panel">
+      <section className="px-panel px-panel-pad">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="surface-title">未解线索</h2>
-          <span className="app-pill">{stateV2.open_threads.active.length} 条</span>
+          <h2 className="px-heading text-base">未解线索</h2>
+          <span className="px-badge">{stateV2.open_threads.active.length} 条</span>
         </div>
         <div className="mt-4 grid gap-3">
           {stateV2.open_threads.active.length === 0 ? (
@@ -317,10 +311,10 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
               // status 中文映射；无实义时回退到来源，两者皆空则不渲染附注行。
               const detail = [statusLabel, thread.source].filter(Boolean).join(" · ");
               return (
-                <article className="archive-card" key={`${thread.title}-${thread.source}-${index}`}>
-                  <h3 className="font-semibold">{thread.title}</h3>
+                <article className="px-card" key={`${thread.title}-${thread.source}-${index}`}>
+                  <h3 className="font-bold">{thread.title}</h3>
                   {detail ? (
-                    <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+                    <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
                       {detail}
                     </p>
                   ) : null}
@@ -336,19 +330,19 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
 
 function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
   return (
-    <section className="surface-panel">
+    <section className="px-panel px-panel-pad">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="surface-title">已知 NPC</h2>
-        <span className="app-pill">{stateV2.npc_registry.length} 人</span>
+        <h2 className="px-heading text-base">已知 NPC</h2>
+        <span className="px-badge">{stateV2.npc_registry.length} 人</span>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {stateV2.npc_registry.length === 0 ? (
           <EmptyText>暂无已登记 NPC。</EmptyText>
         ) : (
           stateV2.npc_registry.map((npc) => (
-            <article className="archive-card" key={npc.id || npc.name}>
-              <h3 className="font-semibold">{npc.name}</h3>
-              <p className="app-wrap-text mt-2 text-sm leading-6 text-[color:var(--muted)]">
+            <article className="px-card" key={npc.id || npc.name}>
+              <h3 className="font-bold text-[color:var(--phosphor)]">{npc.name}</h3>
+              <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
                 {[npc.identity, npc.status, npc.location, npc.relationship || npc.attitude]
                   .filter(Boolean)
                   .join(" · ") || "暂无更多记录。"}
@@ -363,18 +357,18 @@ function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
 
 function Metric({ label, value }: { label: string; value: number | string }) {
   return (
-    <article className="metric-tile">
-      <p className="metric-tile-label">{label}</p>
-      <p className="metric-tile-value">{value}</p>
+    <article className="px-metric">
+      <p className="px-metric-label">{label}</p>
+      <p className="px-metric-value">{value}</p>
     </article>
   );
 }
 
 function CompactField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-[color:var(--border)] bg-[color:var(--input)] p-3">
-      <p className="text-xs text-[color:var(--muted)]">{label}</p>
-      <p className="app-wrap-text mt-1 text-sm font-medium leading-6">{value}</p>
+    <div className="border-2 border-[color:var(--border)] bg-[color:var(--input)] p-3">
+      <p className="px-label">{label}</p>
+      <p className="px-wrap mt-1 text-sm font-medium leading-6">{value}</p>
     </div>
   );
 }
@@ -383,7 +377,7 @@ function PillList({ values }: { values: string[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
       {values.map((value) => (
-        <span className="app-pill" key={value}>
+        <span className="px-badge" key={value}>
           {value}
         </span>
       ))}
@@ -392,9 +386,5 @@ function PillList({ values }: { values: string[] }) {
 }
 
 function EmptyText({ children }: { children: string }) {
-  return (
-    <p className="app-wrap-text rounded border border-dashed border-[color:var(--border)] p-3 text-sm leading-6 text-[color:var(--muted)]">
-      {children}
-    </p>
-  );
+  return <p className="px-empty">{children}</p>;
 }

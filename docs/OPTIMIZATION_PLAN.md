@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 57 — 游玩方向修复：非数值代价闭环 + 替代锚点组/多路径转幕 |
-| 完成日期 | 2026-07-06 |
+| 最近一轮 | Round 58 — 前端 UI 全面重做：像素磷光绿终端风 + 信息架构重组（功能 100% 保留） |
+| 完成日期 | 2026-07-20 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **2026-06-04 一轮大型前端建设（Round 36–39）**：围绕「story_settings 可视化编辑」建了一套**设定看板**子系统，并落地三件事——① 生成页重设计（Round 36）② 设定页 + 信息架构去重（Round 37）③ **剧本炼金工坊**（Round 38，setting_modules 模块库 + 提取/并入 + AI 本地优化）④ 看板成为完整设定编辑面（Round 39，全字段数据驱动 + 字段类型系统 + 手动新增项）。详见各 Round 与下方「设计文档」。 |
@@ -26,6 +26,22 @@
 ---
 
 ## 1. 已完成
+
+### Round 58 (2026-07-18) — 前端 UI 全面重做：像素磷光绿终端风 + 信息架构重组
+
+**背景**：用户要求 UI 彻底重做（功能冻结、不参考旧布局/风格），方向为「文字类游戏 × 像素风 × 磷光绿终端」。交付前已先输出新信息架构与「功能→界面映射表」并经用户确认（接受 `/games/[id]` 概览页改重定向 play、选定磷光绿主题）。
+
+**信息架构（新）**：壳外 = 标题画面 `/`（主菜单 + CONTINUE 最近存档 + SLOT 最近存档 + API LED）→ `/games` 存档槽位 → `/games/new` 创造炉三幕向导（道路/锻造/启程）→ `/workshop`、`/settings`、`/admin`。壳内 = play 主游戏画面为绝对中心 + 唤出式菜单（STATUS/PARTY/LOG/MEMO/SCRIPT/CAMP）。**路由变化**：`/games/[id]` 307 重定向到 `/play`；原概览页内容（指标/设定概览/状态快照/进度存档/导出/危险操作）整体迁入新路由 `/games/[id]/camp`（营地）。其余子页 URL 不变。
+
+**play 重构**：三栏布局 → 单栏剧情卷轴 + 顶部紧凑顶栏（撤销/手账/菜单）+ 底部命令行（`>` 提示符 + 四种模式拨片 + Enter 发送/Shift+Enter 换行）；左侧栏与右侧 Inspector 收进「手账」右滑抽屉与「菜单」展开条；建议选项改 A/B/C/D 抉择卡；结局全屏像素卡；进度改 8-bit 分段「施法条」；新手引导/维护提示/结算卡/洞察折叠全部保留。
+
+**技术落地**：`globals.css` 全量重写为 `.px-*` 设计系统（阶梯切角、CRT 扫描线+暗角、磷光绿 token、LED、px-btn/input/badge/fold/table 等；保留 story-* 阅读层衬线与 reduced-motion/focus-visible 无障碍）；字体 Press Start 2P（英文像素）+ Geist Mono；新增 `PixelDialog`（Promise 化 confirm/prompt，替代 window.confirm/prompt 于 games/camp/workshop）、`GameMenu`（局内菜单栏 + GameSubpageShell）；`GamePageHeader`/`ChatHistorySheet` 删除（功能分别并入 GameSubpageShell 与内联 DialogueLog）；board 看板/工坊/设置组件逻辑零改动仅皮肤化；`web/lib` 全部未动。api.ts 中未暴露方法保持原样不增删。
+
+**验证**：`eslint .` 0/0、`tsc --noEmit` 0、vitest 52 passed、`next build` 全路由通过；本地 dev 全路由 200 + `/games/[id]` 307。远端运行环境：rsync 同步（另手动删除远端两个已删组件文件），`docker compose up -d --build web`（api 因依赖被顺带重启、worker 未动）；全服务 healthy；web 日志无异常；壳外 6 页 + 真实存档 7 个局内页全部 200、概览 307、`/health` ok。
+
+**遗留**：Press Start 2P 仅拉丁字符，中文铬件靠等宽+字距模拟像素感；CRT 扫描线如需关闭可在 globals.css 的 body::before 调整。
+
+**2026-07-20 移动端复查补充**：用 Playwright（iPhone 13 设备模拟 + 360/375px）对全页面做溢出扫描与截图核验后修复——① AppShell gameplay 高度加 `h-screen` 回退（`h-[100dvh]` 在不支持 dvh 的 WebView 里会塌高、底部命令行被推出视口）；② `.px-modal`/`.title-screen` 同步加 vh→dvh 回退；③ 命令行输入框字号 0.95rem→1rem（消除 iOS 聚焦自动缩放）；④ 角色页立绘列改移动端双列紧凑网格（原单列全宽立绘占满屏幕）；⑤ CharacterModal 立绘移动端限宽 w-32；⑥ CharacterPortrait 占位框改容器查询（cqw）自适应，修复小尺寸头像（在场 chips/手账）首字竖排溢出；⑦ play 底部命令行默认折叠为「自定义行动」按钮，点击后才展开模式与输入框，提交即收起、失败时恢复输入。复验：12 页面 × 360/375/390 三档宽度零横向溢出，弹窗/抽屉/命令行均可见可用；自定义行动折叠/展开另以 555×600 和 375×600 实机页面验证通过。
 
 ### Round 57 (2026-07-06) — 游玩方向修复：非数值代价闭环 + 替代锚点组/多路径转幕
 
