@@ -43,3 +43,4 @@ docker compose exec api pytest tests/             # 后端测试（需要 Postgr
 - 新增 LLM 调用 → 必须设独立 timeout、必须有 fallback
 - 新增 TurnJob 字段 → 同步 model / schema / router / `_publish_turn_snapshot` / 前端类型
 - prompt 文件修改 → 在 OPTIMIZATION_PLAN.md 里记录改了哪个规则编号
+- **前端工作门（Round 44 起）**：新前端工作须先服务玩家核心循环「读剧情 → 做选择 → 看后果」，或修正确性/可访问性回归。**冻结设定看板/工坊（SettingsBoard/generatorBoard/workshop）的作者便利新功能**（objectList 拖排、批量抽取、单块重生、模块版本史等）——它与玩家循环无关，是 Round 36–43 的投入轴错配。要做先在 OPTIMIZATION_PLAN.md 说明它如何服务玩家循环。

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { BlockDetailModal } from "@/components/board/BlockDetailModal";
+import { usePixelDialog } from "@/components/PixelDialog";
 import { deleteModule, importModules, listModules, moduleExportUrl, patchModule } from "@/lib/api";
 import {
   writeBlockFields,
@@ -21,6 +22,7 @@ const TYPE_LABELS: Record<string, string> = {
 const CATEGORY_ORDER = Object.keys(TYPE_LABELS);
 
 export default function WorkshopPage() {
+  const dialog = usePixelDialog();
   const [modules, setModules] = useState<SettingModule[]>([]);
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
@@ -57,7 +59,7 @@ export default function WorkshopPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("删除该模块？")) return;
+    if (!(await dialog.confirm("删除该模块？", { confirmLabel: "删除", danger: true }))) return;
     try {
       await deleteModule(id);
       setTick((n) => n + 1);
@@ -67,7 +69,7 @@ export default function WorkshopPage() {
   }
 
   async function handleRename(m: SettingModule) {
-    const name = window.prompt("模块名", m.name);
+    const name = await dialog.prompt("模块名", { defaultValue: m.name });
     if (!name || !name.trim()) return;
     try {
       await patchModule(m.id, { name: name.trim() });
@@ -116,55 +118,58 @@ export default function WorkshopPage() {
 
   return (
     <AppShell>
-      <section className="game-page-hero">
-        <h1 className="game-page-title">剧本炼金工坊</h1>
-        <p className="mt-2 text-sm text-[color:var(--muted)]">可复用设定模块的个人库（仅本地，文件导入导出）。按分类管理与编辑。</p>
+      <section className="px-panel px-panel-strong px-panel-pad">
+        <p className="px-eyebrow">ALCHEMY WORKSHOP</p>
+        <h1 className="px-heading mt-2 text-3xl">剧本炼金工坊</h1>
+        <p className="mt-2 text-sm text-[color:var(--muted)]">
+          可复用设定模块的个人库（仅本地，文件导入导出）。按分类管理与编辑。
+        </p>
       </section>
-      {error ? <section className="app-alert">{error}</section> : null}
+      {error ? <section className="px-alert">{error}</section> : null}
 
-      <section className="surface-panel">
+      <section className="px-panel px-panel-pad">
         <div className="flex flex-wrap items-center gap-2">
-          <input className="app-input max-w-xs" placeholder="搜索名称/描述…" value={q}
+          <input className="px-input max-w-xs" placeholder="搜索名称/描述…" value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }} />
-          <button className="app-button" type="button" onClick={handleSearch}>搜索</button>
-          <select className="app-input max-w-[10rem]" value={type} onChange={(e) => setType(e.target.value)}>
+          <button className="px-btn" type="button" onClick={handleSearch}>搜索</button>
+          <select className="px-input max-w-[10rem]" value={type} onChange={(e) => setType(e.target.value)}>
             <option value="">全部类型</option>
             {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
           <span className="flex-1" />
-          <button className="app-button" type="button" onClick={() => fileRef.current?.click()}>⬆ 导入工坊文件</button>
+          <button className="px-btn" type="button" onClick={() => fileRef.current?.click()}>⇧ 导入工坊文件</button>
           <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImport} />
-          <a className={`app-button ${selected.size ? "" : "pointer-events-none opacity-50"}`}
-            href={moduleExportUrl([...selected])} download="rpgforge-modules.json">⬇ 导出所选（{selected.size}）</a>
+          <a className={`px-btn ${selected.size ? "" : "pointer-events-none opacity-50"}`}
+            href={moduleExportUrl([...selected])} download="rpgforge-modules.json">⇩ 导出所选（{selected.size}）</a>
         </div>
 
         {modules.length === 0 ? (
-          <p className="surface-subtle mt-4">暂无模块。去任意剧本设定页的看板「存为模块」。</p>
+          <p className="px-empty mt-4">暂无模块。去任意剧本设定页的看板「存为模块」。</p>
         ) : (
           <div className="mt-4 grid gap-5">
             {groups.map((group) => (
               <div key={group.cat}>
                 <div className="flex items-center gap-2">
-                  <h2 className="surface-title">{group.label}</h2>
-                  <span className="app-pill">{group.items.length}</span>
+                  <h2 className="px-heading text-base">{group.label}</h2>
+                  <span className="px-badge">{group.items.length}</span>
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {group.items.map((m) => (
-                    <article key={m.id} className={`archive-card ${selected.has(m.id) ? "ring-2 ring-[#4a9a6f]" : ""}`}>
+                    <article key={m.id} className={`px-card ${selected.has(m.id) ? "border-[color:var(--phosphor)]" : ""}`}>
                       <div className="flex items-center justify-between gap-2">
-                        <label className="flex items-center gap-2 font-semibold">
+                        <label className="flex items-center gap-2 font-bold">
                           <input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} />
                           {m.name}
                         </label>
-                        <span className="app-pill">{TYPE_LABELS[m.module_type] ?? m.module_type}</span>
+                        <span className="px-badge">{TYPE_LABELS[m.module_type] ?? m.module_type}</span>
                       </div>
                       {m.description ? <p className="mt-1 text-xs text-[color:var(--muted)]">{m.description}</p> : null}
-                      {m.tags.length ? <p className="mt-1 text-xs text-[color:var(--muted)]">{m.tags.map((t) => `#${t}`).join(" ")}</p> : null}
+                      {m.tags.length ? <p className="mt-1 text-xs text-[color:var(--amber)]">{m.tags.map((t) => `#${t}`).join(" ")}</p> : null}
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <button className="app-button" type="button" onClick={() => setEditing(m)}>编辑内容</button>
-                        <button className="app-button" type="button" onClick={() => void handleRename(m)}>改名</button>
-                        <button className="app-button" type="button" onClick={() => void handleDelete(m.id)}>删除</button>
+                        <button className="px-btn" type="button" onClick={() => setEditing(m)}>编辑内容</button>
+                        <button className="px-btn" type="button" onClick={() => void handleRename(m)}>改名</button>
+                        <button className="px-btn px-btn-danger" type="button" onClick={() => void handleDelete(m.id)}>删除</button>
                       </div>
                     </article>
                   ))}

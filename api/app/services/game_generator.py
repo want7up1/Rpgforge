@@ -19,6 +19,7 @@ from app.services.prompt_loader import load_prompt_template
 from app.services.story_settings import (
     STORY_SETTINGS_FORMAT_VERSION,
     normalize_story_settings,
+    story_settings_warnings,
     validate_story_settings,
 )
 
@@ -236,7 +237,11 @@ class GameGeneratorService:
             content=final_json,
             model=model_used,
         )
-        return GeneratorFinalizeResponse(config=config, model_used=model_used or "unknown")
+        return GeneratorFinalizeResponse(
+            config=config,
+            model_used=model_used or "unknown",
+            warnings=story_settings_warnings(config.story_settings),
+        )
 
     async def _generate_finalize_outline(
         self,
@@ -868,18 +873,15 @@ def _initial_state(
     initial_state["current_turn"] = _int(initial_state.get("current_turn"), 0)
     initial_state["time"] = _mapping(initial_state.get("time"))
     initial_state["location"] = _mapping(initial_state.get("location"))
+    protagonist.pop("attributes", None)
     initial_state["protagonist"] = protagonist
-    progression = _mapping(initial_state.get("progression"))
-    progression.setdefault("level", 1)
-    progression.setdefault("xp", 0)
-    progression.setdefault("next_level_xp", 100)
-    progression.setdefault("total_xp", 0)
-    progression.setdefault("xp_log", [])
-    initial_state["progression"] = progression
-    initial_state["skills"] = _list(initial_state.get("skills"))
-    initial_state["abilities"] = _list(initial_state.get("abilities"))
+    # 纯叙事化：不再种 progression/skills/abilities 等数值结构；模型残留也丢弃。
+    for key in ("progression", "skills", "abilities"):
+        initial_state.pop(key, None)
     initial_state["conditions"] = _list(initial_state.get("conditions"))
-    initial_state["relationships"] = _list(initial_state.get("relationships"))
+    initial_state["relationships"] = _clean_narrative_relationships(
+        initial_state.get("relationships")
+    )
     initial_state["inventory"] = _list(initial_state.get("inventory"))
     initial_state["quests"] = _list(initial_state.get("quests"))
     initial_state["npcs"] = _list(initial_state.get("npcs"))
@@ -891,3 +893,31 @@ def _initial_state(
     initial_state["hidden_facts"] = _list(initial_state.get("hidden_facts"))
     initial_state["open_threads"] = _list(initial_state.get("open_threads"))
     return initial_state
+
+
+_REMOVED_RELATIONSHIP_NUMERIC_KEYS = {
+    "trust",
+    "affection",
+    "respect",
+    "fear",
+    "loyalty",
+    "conflict",
+    "score",
+    "value",
+}
+
+
+def _clean_narrative_relationships(value: Any) -> list[Any]:
+    relationships: list[Any] = []
+    for item in _list(value):
+        if not isinstance(item, dict):
+            relationships.append(item)
+            continue
+        relationships.append(
+            {
+                key: val
+                for key, val in item.items()
+                if key not in _REMOVED_RELATIONSHIP_NUMERIC_KEYS
+            }
+        )
+    return relationships

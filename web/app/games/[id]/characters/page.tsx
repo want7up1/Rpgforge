@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 
 import { AppShell } from "@/components/AppShell";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
-import { GamePageHeader } from "@/components/GamePageHeader";
+import { GameSubpageShell } from "@/components/GameMenu";
 import {
   buildCharacterRuntimeView,
   characterRoleLabels,
@@ -154,54 +154,50 @@ export default function CharactersPage() {
   return (
     <AppShell variant="focus">
       {state.status === "loading" ? (
-        <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-          正在读取角色档案...
+        <section className="px-panel px-panel-pad text-sm text-[color:var(--muted)]">
+          <span className="px-caret" aria-hidden="true" /> 正在读取角色档案…
         </section>
       ) : state.status === "error" ? (
-        <section className="app-alert">{state.message}</section>
+        <section className="px-alert">{state.message}</section>
       ) : (
-        <div className="mx-auto grid w-full max-w-6xl gap-4">
-          <GamePageHeader
-            active="characters"
-            eyebrow="角色"
-            gameId={params.id}
-            primaryAction={
-              <button
-                className="app-button app-button-primary w-full sm:w-fit"
-                disabled={syncing}
-                onClick={handleSync}
-                type="button"
-              >
-                {syncing ? "同步中..." : "同步角色"}
-              </button>
-            }
-            subtitle={`角色档案 · ${state.characters.length} 个角色`}
-            title={state.game.title}
-          />
-
+        <GameSubpageShell
+          active="characters"
+          eyebrow="PARTY · 角色"
+          gameId={params.id}
+          primaryAction={
+            <button
+              className="px-btn px-btn-primary w-full sm:w-fit"
+              disabled={syncing}
+              onClick={handleSync}
+              type="button"
+            >
+              {syncing ? "同步中..." : "⟳ 同步角色"}
+            </button>
+          }
+          subtitle={`角色档案 · ${state.characters.length} 个角色`}
+          title={state.game.title}
+        >
           <CharacterFilters
             filters={filters}
             onChange={setFilters}
             sources={sources}
           />
 
-          {message ? <div className="app-status text-sm">{message}</div> : null}
+          {message ? <div className="px-status text-sm">{message}</div> : null}
 
           <section className="grid gap-4">
             {state.characters.length === 0 ? (
-              <div className="surface-panel text-sm leading-6 text-[color:var(--muted)]">
-                暂无角色档案。可以点击“同步角色”从当前游戏状态和剧本设定中建立档案。
+              <div className="px-empty">
+                暂无角色档案。可以点击「同步角色」从当前游戏状态和剧本设定中建立档案。
               </div>
             ) : groupedCharacters.length === 0 ? (
-              <div className="surface-panel text-sm leading-6 text-[color:var(--muted)]">
-                没有符合筛选条件的角色。
-              </div>
+              <div className="px-empty">没有符合筛选条件的角色。</div>
             ) : (
               groupedCharacters.map((group) => (
                 <section className="grid gap-3" key={group.role}>
                   <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-lg font-black">{characterRoleLabels[group.role]}</h2>
-                    <span className="app-pill">{group.characters.length}</span>
+                    <h2 className="px-heading text-lg">{characterRoleLabels[group.role]}</h2>
+                    <span className="px-badge">{group.characters.length}</span>
                   </div>
                   {group.characters.map((character) => (
                     <CharacterEditor
@@ -216,7 +212,7 @@ export default function CharactersPage() {
               ))
             )}
           </section>
-        </div>
+        </GameSubpageShell>
       )}
     </AppShell>
   );
@@ -232,20 +228,20 @@ function CharacterFilters({
   sources: string[];
 }) {
   return (
-    <section className="surface-panel grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_10rem_10rem]">
+    <section className="px-panel px-panel-pad grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_10rem_10rem]">
       <label className="grid gap-1 text-sm">
-        <span className="font-semibold">搜索</span>
+        <span className="px-label">搜索</span>
         <input
-          className="app-input"
+          className="px-input"
           onChange={(event) => onChange({ ...filters, query: event.target.value })}
           placeholder="姓名、别名、身份、介绍"
           value={filters.query}
         />
       </label>
       <label className="grid gap-1 text-sm">
-        <span className="font-semibold">类型</span>
+        <span className="px-label">类型</span>
         <select
-          className="app-input"
+          className="px-input"
           onChange={(event) =>
             onChange({ ...filters, role: event.target.value as Filters["role"] })
           }
@@ -260,9 +256,9 @@ function CharacterFilters({
         </select>
       </label>
       <label className="grid gap-1 text-sm">
-        <span className="font-semibold">可见性</span>
+        <span className="px-label">可见性</span>
         <select
-          className="app-input"
+          className="px-input"
           onChange={(event) =>
             onChange({ ...filters, visibility: event.target.value as Filters["visibility"] })
           }
@@ -274,9 +270,9 @@ function CharacterFilters({
         </select>
       </label>
       <label className="grid gap-1 text-sm">
-        <span className="font-semibold">来源</span>
+        <span className="px-label">来源</span>
         <select
-          className="app-input"
+          className="px-input"
           onChange={(event) => onChange({ ...filters, source: event.target.value })}
           value={filters.source}
         >
@@ -384,12 +380,12 @@ function CharacterEditor({
   }
 
   return (
-    <article className="character-card">
-      <div className="character-editor-layout">
-        <div className="character-editor-media md:self-start">
-          <CharacterPortrait character={character} className="character-editor-portrait" />
-          <label className={`app-button cursor-pointer text-center ${busy ? "opacity-60" : ""}`}>
-            {operation === "upload" ? "上传中..." : "上传立绘"}
+    <article className="px-panel px-panel-pad">
+      <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 sm:grid-cols-[8rem_minmax(0,1fr)] sm:gap-4 md:grid-cols-[11rem_minmax(0,1fr)]">
+        <div className="grid content-start gap-2 self-start">
+          <CharacterPortrait character={character} />
+          <label className={`px-btn cursor-pointer whitespace-normal text-center text-xs ${busy ? "opacity-60" : ""}`}>
+            {operation === "upload" ? "上传中..." : "⇧ 上传立绘"}
             <input
               accept="image/png,image/jpeg,image/webp"
               className="sr-only"
@@ -400,25 +396,25 @@ function CharacterEditor({
           </label>
           {character.portrait_url ? (
             <button
-              className="app-button"
+              className="px-btn px-btn-danger whitespace-normal text-xs"
               disabled={busy}
               onClick={handleDeletePortrait}
               type="button"
             >
-              {operation === "delete" ? "移除中..." : "移除立绘"}
+              {operation === "delete" ? "移除中..." : "✕ 移除立绘"}
             </button>
           ) : null}
           {statusText ? (
-            <span className="text-sm leading-5 text-[color:var(--muted)]">{statusText}</span>
+            <span className="text-xs leading-5 text-[color:var(--muted)]">{statusText}</span>
           ) : null}
         </div>
 
         <div className="grid content-start gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-2xl font-black">{character.name}</h2>
-            <span className="app-pill">{characterRoleLabels[character.role]}</span>
-            <span className="app-pill">{character.is_visible ? "已公开" : "隐藏"}</span>
-            <span className="app-pill">{character.source}</span>
+            <h2 className="px-heading break-words text-xl">{character.name}</h2>
+            <span className="px-badge px-badge-amber">{characterRoleLabels[character.role]}</span>
+            <span className="px-badge">{character.is_visible ? "已公开" : "隐藏"}</span>
+            <span className="px-badge">{character.source}</span>
           </div>
 
           <section className="grid gap-3 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -429,18 +425,20 @@ function CharacterEditor({
 
           <RuntimeStateBlock runtimeView={runtimeView} />
 
-          <details className="character-edit-details">
-            <summary className="cursor-pointer font-semibold">导演字段</summary>
-            <StoryProfileGrid storyProfile={character.story_profile} />
+          <details className="px-fold">
+            <summary>导演字段</summary>
+            <div className="px-fold-body">
+              <StoryProfileGrid storyProfile={character.story_profile} />
+            </div>
           </details>
 
-          <details className="character-edit-details">
-            <summary className="cursor-pointer font-semibold">编辑角色档案</summary>
-            <form className="character-card-form mt-4" onSubmit={handleSave}>
+          <details className="px-fold">
+            <summary>编辑角色档案</summary>
+            <form className="grid gap-3 border-t-2 border-[color:var(--border)] pt-4" onSubmit={handleSave}>
               <label className="grid gap-1 text-sm">
-                <span className="font-semibold">角色名称</span>
+                <span className="px-label">角色名称</span>
                 <input
-                  className="app-input"
+                  className="px-input"
                   disabled={busy}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, name: event.target.value }))
@@ -449,9 +447,9 @@ function CharacterEditor({
                 />
               </label>
               <label className="grid gap-1 text-sm">
-                <span className="font-semibold">别名</span>
+                <span className="px-label">别名</span>
                 <textarea
-                  className="app-input min-h-16 resize-y leading-6"
+                  className="px-input min-h-16 resize-y leading-6"
                   disabled={busy}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, aliases: event.target.value }))
@@ -461,9 +459,9 @@ function CharacterEditor({
                 />
               </label>
               <label className="grid gap-1 text-sm">
-                <span className="font-semibold">角色类型</span>
+                <span className="px-label">角色类型</span>
                 <select
-                  className="app-input"
+                  className="px-input"
                   disabled={busy}
                   onChange={(event) =>
                     setDraft((current) => ({
@@ -481,9 +479,9 @@ function CharacterEditor({
                 </select>
               </label>
               <label className="grid gap-1 text-sm">
-                <span className="font-semibold">身份介绍</span>
+                <span className="px-label">身份介绍</span>
                 <input
-                  className="app-input"
+                  className="px-input"
                   disabled={busy}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, identity: event.target.value }))
@@ -492,9 +490,9 @@ function CharacterEditor({
                 />
               </label>
               <label className="grid gap-1 text-sm">
-                <span className="font-semibold">公开介绍</span>
+                <span className="px-label">公开介绍</span>
                 <textarea
-                  className="app-input min-h-20 resize-y leading-6"
+                  className="px-input min-h-20 resize-y leading-6"
                   disabled={busy}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, description: event.target.value }))
@@ -503,9 +501,9 @@ function CharacterEditor({
                 />
               </label>
               <label className="grid gap-1 text-sm">
-                <span className="font-semibold">外貌描述</span>
+                <span className="px-label">外貌描述</span>
                 <textarea
-                  className="app-input min-h-20 resize-y leading-6"
+                  className="px-input min-h-20 resize-y leading-6"
                   disabled={busy}
                   onChange={(event) =>
                     setDraft((current) => ({ ...current, appearance: event.target.value }))
@@ -532,7 +530,7 @@ function CharacterEditor({
                 <span>在剧情中允许点击查看</span>
               </label>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <button className="app-button app-button-primary" disabled={busy} type="submit">
+                <button className="px-btn px-btn-primary" disabled={busy} type="submit">
                   {operation === "save" ? "保存中..." : "保存档案"}
                 </button>
                 {statusText ? (
@@ -557,9 +555,9 @@ function CharacterReadOnlyBlock({
   wide?: boolean;
 }) {
   return (
-    <section className={wide ? "archive-card lg:col-span-2" : "archive-card"}>
-      <div className="text-xs font-semibold text-[color:var(--muted)]">{label}</div>
-      <p className="app-wrap-text mt-2 whitespace-pre-wrap text-sm leading-6">
+    <section className={wide ? "px-card lg:col-span-2" : "px-card"}>
+      <div className="px-label">{label}</div>
+      <p className="px-wrap mt-2 whitespace-pre-wrap text-sm leading-6">
         {value?.trim() || "暂无记录。"}
       </p>
     </section>
@@ -571,18 +569,16 @@ function RuntimeStateBlock({ runtimeView }: { runtimeView: CharacterRuntimeView 
     ? [
         runtimeView.location ? `位置：${runtimeView.location}` : "",
         runtimeView.status ? `状态：${runtimeView.status}` : "",
-        runtimeView.stage ? `关系阶段：${runtimeView.stage}` : "",
         runtimeView.relationship ? `关系：${runtimeView.relationship}` : "",
-        runtimeView.attitude ? `态度：${runtimeView.attitude}` : "",
-        runtimeView.recent ? `最近互动：${runtimeView.recent}` : ""
+        runtimeView.note ? `补充：${runtimeView.note}` : ""
       ].filter(Boolean)
     : [];
 
   return (
-    <section className="rounded-md border border-[color:var(--border)] p-3">
-      <div className="text-xs font-semibold text-[color:var(--muted)]">当前状态</div>
+    <section className="border-2 border-[color:var(--border)] p-3">
+      <div className="px-label">当前状态</div>
       {facts.length > 0 ? (
-        <ul className="app-wrap-text mt-2 grid gap-1 text-sm leading-6">
+        <ul className="px-wrap mt-2 grid gap-1 text-sm leading-6">
           {facts.map((fact) => (
             <li key={fact}>{fact}</li>
           ))}
@@ -590,15 +586,6 @@ function RuntimeStateBlock({ runtimeView }: { runtimeView: CharacterRuntimeView 
       ) : (
         <p className="mt-2 text-sm leading-6 text-[color:var(--muted)]">暂无当前状态记录。</p>
       )}
-      {runtimeView?.axes.length ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {runtimeView.axes.map((axis) => (
-            <span className="app-pill" key={axis.key}>
-              {axis.label} {axis.value}
-            </span>
-          ))}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -606,13 +593,13 @@ function RuntimeStateBlock({ runtimeView }: { runtimeView: CharacterRuntimeView 
 function StoryProfileGrid({ storyProfile }: { storyProfile: CharacterStoryProfile }) {
   const normalized = normalizeStoryProfile(storyProfile);
   return (
-    <div className="mt-3 grid gap-3 md:grid-cols-2">
+    <div className="grid gap-3 md:grid-cols-2">
       {storyProfileEntries(normalized).map(([key, value]) => (
-        <section className="rounded-md border border-[color:var(--border)] p-3" key={key}>
-          <div className="text-xs font-semibold text-[color:var(--muted)]">
+        <section className="border-2 border-[color:var(--border)] p-3" key={key}>
+          <div className="px-label">
             {storyProfileLabels[key]}
           </div>
-          <p className="app-wrap-text mt-2 whitespace-pre-wrap text-sm leading-6">
+          <p className="px-wrap mt-2 whitespace-pre-wrap text-sm leading-6">
             {value || "暂无记录。"}
           </p>
         </section>
@@ -632,13 +619,13 @@ function StoryProfileEditor({
 }) {
   const normalized = normalizeStoryProfile(storyProfile);
   return (
-    <fieldset className="grid gap-3 rounded-md border border-[color:var(--border)] p-3">
-      <legend className="px-1 text-sm font-semibold">导演编剧字段</legend>
+    <fieldset className="grid gap-3 border-2 border-[color:var(--border)] p-3">
+      <legend className="px-1 text-sm font-bold">导演编剧字段</legend>
       {storyProfileEntries(normalized).map(([key, value]) => (
         <label className="grid gap-1 text-sm" key={key}>
-          <span className="font-semibold">{storyProfileLabels[key]}</span>
+          <span className="px-label">{storyProfileLabels[key]}</span>
           <textarea
-            className="app-input min-h-16 resize-y leading-6"
+            className="px-input min-h-16 resize-y leading-6"
             disabled={disabled}
             onChange={(event) =>
               onChange({

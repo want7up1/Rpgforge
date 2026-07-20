@@ -189,11 +189,7 @@ def build_runtime_story(
     current_act_id = _runtime_current_act_id(story, progress)
     current_act = _current_act(story, current_act_id)
     completed_anchors = set(_strings(progress.get("completed_anchors")))
-    open_anchors = [
-        anchor
-        for anchor in _records(current_act.get("completion_anchors"))
-        if _text(anchor.get("id")) not in completed_anchors
-    ]
+    open_anchors = _open_completion_anchors(current_act, completed_anchors)
     next_act = _next_act(story, current_act)
 
     runtime_current_act = dict(current_act)
@@ -382,7 +378,10 @@ def gm_hard_constraints(runtime_story: dict[str, Any]) -> dict[str, list[str]]:
     story_core = _record(runtime_story.get("story_core"))
     current_act = _record(runtime_story.get("current_act"))
 
-    # 当前幕目标 + 未完成必需锚点（build_runtime_story 已把 completion_anchors 过滤为未完成项）。
+    # 当前幕目标（幕内静态）。未完成锚点随完成逐回合变化——不放进 system 幕级简报，否则会碎裂
+    # DeepSeek prefix cache 的稳定前缀（Round 48 多段切分）。锚点仍在 user 的
+    # runtime_story.current_act.completion_anchors / current_state_v2.story_progress 里，
+    # GM 据此推进（gm_runtime 规则 30–32）。
     act_lines: list[str] = []
     objective = _text(current_act.get("objective"))
     if objective:
@@ -390,11 +389,6 @@ def gm_hard_constraints(runtime_story: dict[str, Any]) -> dict[str, list[str]]:
     dramatic_question = _text(current_act.get("dramatic_question"))
     if dramatic_question:
         act_lines.append(f"核心戏剧问题：{dramatic_question}")
-    for anchor in _records(current_act.get("completion_anchors")):
-        required = "必需" if _bool(anchor.get("required"), True) else "可选"
-        label = _text(anchor.get("title")) or _text(anchor.get("completion_signal"))
-        if label and label != "未命名锚点":
-            act_lines.append(f"[{required}锚点] {label}")
 
     # 核心机制规则（rule 文本，去掉纯展示用字段）。
     mechanic_lines: list[str] = []
@@ -548,6 +542,35 @@ def completion_anchor_ids_for_act(
     return ids
 
 
+def _open_completion_anchors(
+    current_act: dict[str, Any],
+    completed_anchors: set[str],
+) -> list[dict[str, Any]]:
+    anchors = _records(current_act.get("completion_anchors"))
+    satisfied_required_groups = {
+        _anchor_alternative_group(anchor)
+        for anchor in anchors
+        if _bool(anchor.get("required"), True)
+        and _anchor_alternative_group(anchor)
+        and _text(anchor.get("id")) in completed_anchors
+    }
+
+    open_anchors: list[dict[str, Any]] = []
+    for anchor in anchors:
+        anchor_id = _text(anchor.get("id"))
+        if anchor_id in completed_anchors:
+            continue
+        alternative_group = _anchor_alternative_group(anchor)
+        if (
+            _bool(anchor.get("required"), True)
+            and alternative_group
+            and alternative_group in satisfied_required_groups
+        ):
+            continue
+        open_anchors.append(anchor)
+    return open_anchors
+
+
 def transition_target_for_act(config: GameConfig | None, act_id: str) -> str:
     story = story_settings_from_config(config)
     act = _current_act(story, act_id)
@@ -632,11 +655,37 @@ def validate_story_settings(settings: Any) -> dict[str, Any]:
             "story_settings 校验：act_plan 为空，运行时转幕/锚点判定将完全依赖 Director LLM。"
         )
     elif acts_without_required_anchor:
-        logger.warning(
-            "story_settings 校验：以下幕缺少 required 完成锚点，自动转幕兜底对其失效：%s",
-            "、".join(acts_without_required_anchor),
-        )
+        for warning in _required_anchor_warnings(acts_without_required_anchor):
+            logger.warning("story_settings 校验：%s", warning)
     return story
+
+
+def story_settings_warnings(settings: Any) -> list[str]:
+    """返回可展示给作者/导入者的结构护栏警告。
+
+    不 raise、不修改剧本；用于把原本只进日志的弱剧本风险透出到导入/生成响应。
+    """
+    story = normalize_story_settings(settings)
+    acts = _records(story.get("act_plan"))
+    if not acts:
+        return ["act_plan 为空：运行时没有幕计划、完成锚点和自动转幕护栏。"]
+    acts_without_required_anchor: list[str] = []
+    for act in acts:
+        act_id = _act_identity(act) or "未命名幕"
+        has_required_anchor = any(
+            _bool(anchor.get("required"), True)
+            for anchor in _records(act.get("completion_anchors"))
+        )
+        if not has_required_anchor:
+            acts_without_required_anchor.append(act_id)
+    return _required_anchor_warnings(acts_without_required_anchor)
+
+
+def _required_anchor_warnings(act_ids: list[str]) -> list[str]:
+    return [
+        "以下幕缺少 required 完成锚点，act_pacing 和自动转幕护栏会变弱："
+        + "、".join(act_ids)
+    ] if act_ids else []
 
 
 def _runtime_current_act_id(story: dict[str, Any], progress: dict[str, Any]) -> str:
@@ -713,10 +762,19 @@ def _anchor(item: dict[str, Any], act_id: str, index: int) -> dict[str, Any]:
             "id": _text(item.get("id")) or f"{act_id}_anchor_{index + 1}",
             "title": _text(item.get("title") or item.get("name")) or "未命名锚点",
             "required": _bool(item.get("required"), True),
+            "alternative_group": _anchor_alternative_group(item),
             "description": _text(item.get("description") or item.get("goal")),
             "completion_signal": _text(item.get("completion_signal") or item.get("signal")),
         },
         item,
+    )
+
+
+def _anchor_alternative_group(anchor: dict[str, Any]) -> str:
+    return _text(
+        anchor.get("alternative_group")
+        or anchor.get("alt_group")
+        or anchor.get("alternativeGroup")
     )
 
 

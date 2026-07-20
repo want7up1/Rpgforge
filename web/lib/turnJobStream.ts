@@ -55,7 +55,7 @@ export function createInitialTurnProcess(
     stage: "prepare_context",
     stage_label: "准备上下文",
     stage_index: 1,
-    stage_total: 7,
+    stage_total: 6,
     stage_started_at: null,
     maintenance_status: "pending",
     maintenance_stage: "state_extract",

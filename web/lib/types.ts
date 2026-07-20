@@ -336,6 +336,7 @@ export type GeneratorFinalizeJobRead = {
   id: string;
   status: GeneratorFinalizeJobStatus;
   config: GeneratedGameConfig | null;
+  warnings: string[];
   model_used: string | null;
   error_message: string | null;
   reasoning_content: string;
@@ -343,6 +344,12 @@ export type GeneratorFinalizeJobRead = {
   progress_message: string | null;
   stream_started_at: string | null;
   last_event_at: string | null;
+};
+
+export type GeneratorFinalizeResponse = {
+  config: GeneratedGameConfig;
+  model_used: string;
+  warnings: string[];
 };
 
 export type GeneratorJobStreamEvent = {

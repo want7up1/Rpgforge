@@ -1,12 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { ChatDock } from "@/components/generator/ChatDock";
-import { ChatHistorySheet } from "@/components/generator/ChatHistorySheet";
 import { GenerationProgress, type ProgressItem } from "@/components/generator/GenerationProgress";
 import { SettingsBoard } from "@/components/board/SettingsBoard";
 import { ModuleMergePanel } from "@/components/workshop/ModuleMergePanel";
@@ -15,7 +13,9 @@ import {
   createGeneratorChatJob,
   createGeneratorFinalizeJob,
   getActiveGeneratorChatJob,
-  getActiveGeneratorFinalizeJob
+  getActiveGeneratorFinalizeJob,
+  getAuthoringKit,
+  importScript
 } from "@/lib/api";
 import {
   BOARD_CATEGORIES,
@@ -62,11 +62,15 @@ export default function NewGamePage() {
   const [generatedConfig, setGeneratedConfig] = useState<GeneratedGameConfig | null>(null);
   const [lockedIds, setLockedIds] = useState<string[]>([]);
   const [lastDiff, setLastDiff] = useState<BoardDiff>(EMPTY_DIFF);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [chatProcess, setChatProcess] = useState<GeneratorChatJobRead | null>(null);
   const [finalizeProcess, setFinalizeProcess] = useState<GeneratorFinalizeJobRead | null>(null);
+  const [generatedConfigSource, setGeneratedConfigSource] = useState<"ai" | "import" | null>(null);
+  // 创建方式：ai = AI 访谈生成；import = 导入外部 AI 写的剧本 JSON。
+  const [mode, setMode] = useState<"ai" | "import">("ai");
+  const [scriptText, setScriptText] = useState("");
+  const [scriptWarnings, setScriptWarnings] = useState<string[]>([]);
 
   // 解锁时恢复 AI 原值用：最近一次 AI 产出的快照。
   const aiConfirmedRef = useRef<Record<string, unknown>>({});
@@ -98,6 +102,8 @@ export default function NewGamePage() {
           if (cancelled || !done.config) return;
           aiSettingsRef.current = done.config.story_settings;
           setGeneratedConfig(done.config);
+          setGeneratedConfigSource("ai");
+          setScriptWarnings(done.warnings ?? []);
           setPendingAction(null);
           return;
         }
@@ -126,6 +132,7 @@ export default function NewGamePage() {
   async function handleChat() {
     if (!chatInput.trim()) return;
     setError(null);
+    setScriptWarnings([]);
     baselineRef.current = model;
     setPendingAction("chat");
     const lockedConfirmed = lockedIds.filter((id) => CONFIRMED_FIELD_IDS.includes(id));
@@ -166,6 +173,7 @@ export default function NewGamePage() {
 
   async function handleFinalize() {
     setError(null);
+    setScriptWarnings([]);
     baselineRef.current = model;
     setPendingAction("finalize");
     try {
@@ -180,6 +188,8 @@ export default function NewGamePage() {
       aiSettingsRef.current = done.config.story_settings;
       setLockedIds([]); // 进入 settings 阶段，confirmed 阶段的锁定 id 不再适用
       setGeneratedConfig(done.config);
+      setGeneratedConfigSource("ai");
+      setScriptWarnings(done.warnings ?? []);
       const next = buildBoardModel({ source: "settings", settings: done.config.story_settings });
       setLastDiff(diffBoard(baselineRef.current, next));
     } catch (caught) {
@@ -240,9 +250,59 @@ export default function NewGamePage() {
     setPendingAction("create-generated");
     try {
       const response = await createGeneratedGame(generatedConfig);
-      router.push(`/games/${response.game.id}`);
+      router.push(`/games/${response.game.id}/play`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "创建冒险失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function handleDownloadKit() {
+    setError(null);
+    try {
+      const { blob, filename } = await getAuthoringKit();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename || "RPGForge-剧本创作包.md";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "下载创作包失败。");
+    }
+  }
+
+  async function handleImportScript() {
+    setError(null);
+    setScriptWarnings([]);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(scriptText);
+    } catch {
+      setError("剧本 JSON 解析失败：请确认粘贴的是合法 JSON。");
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      setError("剧本必须是一个 JSON 对象。");
+      return;
+    }
+    baselineRef.current = model;
+    setPendingAction("import");
+    try {
+      const { config, warnings } = await importScript(parsed);
+      aiSettingsRef.current = config.story_settings;
+      setLockedIds([]);
+      setConfirmed({});
+      setGeneratedConfig(config);
+      setGeneratedConfigSource("import");
+      setScriptWarnings(warnings ?? []);
+      const next = buildBoardModel({ source: "settings", settings: config.story_settings });
+      setLastDiff(diffBoard(baselineRef.current, next));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "剧本导入失败。");
     } finally {
       setPendingAction(null);
     }
@@ -258,56 +318,160 @@ export default function NewGamePage() {
   );
   const reasoning = (generatedConfig ? finalizeProcess : chatProcess)?.reasoning_content ?? "";
   const content = (generatedConfig ? finalizeProcess : chatProcess)?.content_buffer ?? "";
+  // 三幕进度：道路（选路径）→ 锻造（访谈/导入+看板）→ 启程（确认开玩）
+  const actIndex = generatedConfig ? 3 : history.length > 0 || mode === "import" || stage ? 2 : 1;
+  const latestReply = history.length ? history[history.length - 1].content : "";
 
   return (
     <AppShell>
-      <section className="game-page-hero">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <Link className="app-button mb-4 w-fit" href="/games">返回存档</Link>
-            <p className="game-page-eyebrow">Adventure Forge</p>
-            <h1 className="game-page-title">创建冒险</h1>
+      <section className="px-panel px-panel-strong px-panel-pad">
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+          <div className="min-w-0">
+            <p className="px-eyebrow">ADVENTURE FORGE</p>
+            <h1 className="px-heading mt-2 text-3xl">创造炉</h1>
+            <div className="forge-steps mt-3" aria-label="创建流程">
+              <ForgeStep index={1} label="道路" current={actIndex} />
+              <ForgeStep index={2} label="锻造" current={actIndex} />
+              <ForgeStep index={3} label="启程" current={actIndex} />
+            </div>
           </div>
-          <div className="flex gap-2">
+          <div className="grid w-full gap-2 sm:flex sm:w-fit sm:flex-wrap sm:justify-end">
             {canFinalize ? (
               <button
-                className="app-button app-button-primary"
+                className="px-btn px-btn-primary"
                 disabled={pendingAction !== null}
                 onClick={handleFinalize}
                 type="button"
               >
-                {pendingAction === "finalize" ? "生成世界中..." : "生成冒险世界"}
+                {pendingAction === "finalize" ? "锻造世界中..." : "⚒ 锻造冒险世界"}
               </button>
             ) : null}
             {generatedConfig ? (
               <>
                 <button
-                  className="app-button app-button-primary"
+                  className="px-btn px-btn-primary"
                   disabled={pendingAction !== null}
                   onClick={handleCreateGenerated}
                   type="button"
                 >
-                  {pendingAction === "create-generated" ? "创建中..." : "确认并开始冒险"}
+                  {pendingAction === "create-generated" ? "创建中..." : "▸ 确认并开始冒险"}
                 </button>
-                <button
-                  className="app-button"
-                  disabled={pendingAction !== null}
-                  onClick={handleFinalize}
-                  title="复用已确认设定重新生成一个世界"
-                  type="button"
-                >
-                  重新生成
-                </button>
+                {generatedConfigSource === "ai" ? (
+                  <button
+                    className="px-btn"
+                    disabled={pendingAction !== null}
+                    onClick={handleFinalize}
+                    title="复用已确认设定重新生成一个世界"
+                    type="button"
+                  >
+                    ↻ 重新锻造
+                  </button>
+                ) : null}
               </>
             ) : null}
           </div>
         </div>
       </section>
 
-      {error ? <section className="app-alert">{error}</section> : null}
+      {!generatedConfig ? (
+        <section className="grid gap-3 sm:grid-cols-2">
+          <button
+            className={`forge-door ${mode === "ai" ? "forge-door-active" : ""}`}
+            disabled={pendingAction !== null}
+            onClick={() => setMode("ai")}
+            type="button"
+          >
+            <span className="px-font text-lg text-[color:var(--amber)]">Ⅰ</span>
+            <span className="px-heading text-base">AI 访谈生成</span>
+            <span className="text-xs leading-5 text-[color:var(--muted)]">
+              和冒险引导对话，逐步确认世界观、基调与红线，再由 AI 锻造完整剧本。
+            </span>
+          </button>
+          <button
+            className={`forge-door ${mode === "import" ? "forge-door-active" : ""}`}
+            disabled={pendingAction !== null}
+            onClick={() => setMode("import")}
+            type="button"
+          >
+            <span className="px-font text-lg text-[color:var(--amber)]">Ⅱ</span>
+            <span className="px-heading text-base">导入剧本</span>
+            <span className="text-xs leading-5 text-[color:var(--muted)]">
+              在外部 AI 里按创作包写好剧本，粘贴 story_settings JSON 直接预览开玩。
+            </span>
+          </button>
+        </section>
+      ) : null}
+
+      {!generatedConfig && mode === "import" ? (
+        <section className="px-panel px-panel-pad grid gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="px-btn" onClick={handleDownloadKit} type="button">
+              ⇩ 下载创作包
+            </button>
+            <label className="px-btn cursor-pointer">
+              ⇧ 上传 .json
+              <input
+                accept=".json,application/json"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0];
+                  if (file) setScriptText(await file.text());
+                  event.target.value = "";
+                }}
+                type="file"
+              />
+            </label>
+            <span className="text-xs text-[color:var(--muted)]">
+              把创作包连同你的想法发给外部 AI，拿到 story_settings JSON 粘贴到下方。
+            </span>
+          </div>
+          <textarea
+            className="px-input min-h-[200px] resize-y font-mono text-sm leading-6"
+            onChange={(event) => setScriptText(event.target.value)}
+            placeholder="在此粘贴外部 AI 产出的 story_settings JSON…"
+            value={scriptText}
+          />
+          <div>
+            <button
+              className="px-btn px-btn-primary"
+              disabled={pendingAction !== null || !scriptText.trim()}
+              onClick={handleImportScript}
+              type="button"
+            >
+              {pendingAction === "import" ? "解析中..." : "▸ 解析预览"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {error ? <section className="px-alert">{error}</section> : null}
+      {scriptWarnings.length ? (
+        <section className="px-warning">
+          <p className="font-bold">⚠ 剧本结构提示</p>
+          <ul className="mt-2 grid gap-1 pl-5">
+            {scriptWarnings.map((warning) => (
+              <li className="list-disc" key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {pendingAction === "finalize" || (generatedConfig && content) ? (
         <GenerationProgress items={progressItems} reasoning={reasoning} content={content} />
+      ) : null}
+
+      {!generatedConfig && mode === "ai" && history.length > 0 ? (
+        <DialogueLog history={history} pending={pendingAction === "chat"} />
+      ) : null}
+
+      {!generatedConfig && mode === "ai" && history.length === 0 ? (
+        <section className="px-panel px-panel-pad">
+          <p className="px-label">冒险引导</p>
+          <p className="mt-2 text-sm leading-7 text-[color:var(--muted)]">
+            在底部命令行写下你的冒险想法（已预填一个示例，可直接发送或改写）。引导会追问细节，
+            右下方看板会随对话逐步填充；当它确认「材料齐备」后，顶部就会出现「锻造冒险世界」。
+          </p>
+        </section>
       ) : null}
 
       <SettingsBoard
@@ -327,15 +491,85 @@ export default function NewGamePage() {
         />
       ) : null}
 
-      <ChatDock
-        latestReply={history.length ? history[history.length - 1].content : ""}
-        input={chatInput}
-        disabled={pendingAction !== null}
-        onInput={setChatInput}
-        onSend={handleChat}
-        onToggleHistory={() => setHistoryOpen((v) => !v)}
-      />
-      <ChatHistorySheet open={historyOpen} history={history} onClose={() => setHistoryOpen(false)} />
+      {generatedConfig ? (
+        <section className="px-panel px-panel-strong px-panel-pad text-center">
+          <p className="px-label">第三幕 · 启程</p>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[color:var(--muted)]">
+            世界已锻造完成。确认看板无误后按下开始，系统会生成开场白并直接进入冒险。
+          </p>
+          <button
+            className="px-btn px-btn-primary mx-auto mt-4 min-w-56"
+            disabled={pendingAction !== null}
+            onClick={handleCreateGenerated}
+            type="button"
+          >
+            {pendingAction === "create-generated" ? "创建中..." : "▸ 开始冒险"}
+          </button>
+        </section>
+      ) : null}
+
+      {mode === "ai" && !generatedConfig ? (
+        <ChatDock
+          latestReply={latestReply}
+          input={chatInput}
+          disabled={pendingAction !== null}
+          onInput={setChatInput}
+          onSend={handleChat}
+        />
+      ) : null}
     </AppShell>
+  );
+}
+
+function ForgeStep({ index, label, current }: { index: number; label: string; current: number }) {
+  const state = current === index ? "active" : current > index ? "done" : "todo";
+  return (
+    <span
+      aria-current={state === "active" ? "step" : undefined}
+      className={
+        state === "active"
+          ? "forge-step forge-step-active"
+          : state === "done"
+            ? "forge-step forge-step-done"
+            : "forge-step"
+      }
+    >
+      {state === "done" ? "✓" : `${index}`} · {label}
+    </span>
+  );
+}
+
+function DialogueLog({
+  history,
+  pending
+}: {
+  history: GeneratorMessage[];
+  pending: boolean;
+}) {
+  return (
+    <section className="px-panel px-panel-pad">
+      <p className="px-label mb-3">访谈记录 · {history.length} 条</p>
+      <div className="max-h-[24rem] overflow-auto pr-1">
+        {history.map((message, index) => (
+          <div
+            className={message.role === "user" ? "dialogue-row dialogue-row-player" : "dialogue-row"}
+            key={`${message.role}-${index}`}
+          >
+            <span className="dialogue-name">
+              {message.role === "user" ? "▸ 你" : "▸ 冒险引导"}
+            </span>
+            <p className="dialogue-bubble">{message.content}</p>
+          </div>
+        ))}
+        {pending ? (
+          <div className="dialogue-row">
+            <span className="dialogue-name">▸ 冒险引导</span>
+            <p className="dialogue-bubble">
+              正在思考<span className="px-caret" aria-hidden="true" />
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }

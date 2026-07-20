@@ -36,7 +36,7 @@ export function BoardBlockGrid({
     return (
       <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="archive-card h-20 animate-pulse opacity-60" />
+          <div key={i} className="px-card h-20 animate-pulse opacity-60" />
         ))}
       </div>
     );
@@ -54,16 +54,16 @@ export function BoardBlockGrid({
             type="button"
             onClick={() => onOpen(block)}
             className={[
-              "archive-card text-left transition",
-              changed ? "ring-2 ring-[#4a9a6f] animate-[pulse_1s_ease-in-out_3]" : "",
+              "px-card text-left transition hover:border-[color:var(--border-strong)]",
+              changed ? "border-[color:var(--phosphor)] animate-[pulse_1s_ease-in-out_3]" : "",
               empty ? "opacity-50" : ""
             ].join(" ")}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="font-semibold">{block.icon} {block.title}</span>
+              <span className="font-bold">{block.icon} {block.title}</span>
               <span className="flex gap-1">
-                {locked ? <span className="app-pill">✏ 已改</span> : null}
-                {changed ? <span className="app-pill">刚更新</span> : null}
+                {locked ? <span className="px-badge px-badge-bright">✏ 已改</span> : null}
+                {changed ? <span className="px-badge px-badge-amber">刚更新</span> : null}
               </span>
             </div>
             <p className="mt-1 text-xs text-[color:var(--muted)]">{empty ? "未设置 · 点击填写" : block.summary}</p>
@@ -75,13 +75,15 @@ export function BoardBlockGrid({
           key={`add-${arrayKey}`}
           type="button"
           onClick={() => onAdd?.(arrayKey)}
-          className="archive-card border-dashed text-left text-[color:var(--accent-strong)]"
+          className="px-card border-dashed text-left text-[color:var(--phosphor)] hover:border-[color:var(--phosphor)]"
         >
           ＋ 新增{ARRAY_SPECS[arrayKey]?.label ?? "项"}
         </button>
       ))}
       {visible.length === 0 && addArrays.length === 0 ? (
-        <p className="surface-subtle">这一类暂无设定。{!showEmpty ? "（打开「显示空设定项」可填写空项）" : ""}</p>
+        <p className="text-sm text-[color:var(--muted)]">
+          这一类暂无设定。{!showEmpty ? "（打开「显示空设定项」可填写空项）" : ""}
+        </p>
       ) : null}
     </div>
   );

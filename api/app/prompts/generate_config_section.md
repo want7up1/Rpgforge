@@ -57,6 +57,7 @@ target_section = "act_plan"
           "id": "act_1_anchor_1",
           "title": "锚点标题",
           "required": true,
+          "alternative_group": "",
           "description": "完成这个锚点意味着什么剧情条件已经满足",
           "completion_signal": "GM 或状态提取器可识别的完成信号"
         }
@@ -69,7 +70,7 @@ target_section = "act_plan"
     }
   ]
 }
-限制：默认生成五幕。每幕 2-4 个 completion_anchors；锚点只属于本幕，不要把 act_2 锚点放进 act_1。最后一幕 transition_to_next_act 使用空对象。
+限制：默认生成五幕。每幕 2-4 个 completion_anchors；锚点只属于本幕，不要把 act_2 锚点放进 act_1。多个 required 锚点如果是“多选一完成路线”，写相同的 alternative_group；普通必须全部完成的锚点留空。最后一幕 transition_to_next_act 使用空对象。
 
 target_section = "main_quest_path"
 输出：
@@ -96,7 +97,7 @@ target_section = "core_mechanics"
       "id": "mechanic_1",
       "name": "机制名称",
       "rule": "必须长期遵守的玩法规则",
-      "progression": "阶段、数值或触发方式",
+      "progression": "阶段、触发方式或叙事代价",
       "visibility": "public|mixed|gm_only"
     }
   ]
@@ -182,18 +183,8 @@ target_section = "initial_state"
       "name": "",
       "identity": "",
       "appearance": "",
-      "portrait_prompt": "",
-      "attributes": {}
+      "portrait_prompt": ""
     },
-    "progression": {
-      "level": 1,
-      "xp": 0,
-      "next_level_xp": 100,
-      "total_xp": 0,
-      "xp_log": []
-    },
-    "skills": [],
-    "abilities": [],
     "conditions": [],
     "relationships": [],
     "inventory": [],
@@ -206,4 +197,4 @@ target_section = "initial_state"
     "open_threads": []
   }
 }
-限制：只写开局此刻已经成立的状态，不写完整世界背景或未来剧情计划。relationships 只包含玩家初始可见关系，数值 0-100。known_facts 只写玩家已知信息；hidden_facts 只写系统当前必须记住但玩家未知的事实。
+限制：只写开局此刻已经成立的状态，不写完整世界背景或未来剧情计划。不要输出等级、经验、属性、技能、能力、关系分数或其他数值机制。relationships 只包含玩家初始可见关系，用 status/note 等文字描述，不要用 trust/好感/冲突等分数。known_facts 只写玩家已知信息；hidden_facts 只写系统当前必须记住但玩家未知的事实。

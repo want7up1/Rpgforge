@@ -7,11 +7,9 @@ from app.models.turn import Turn
 from app.services.quantified_state import apply_quantified_state_events
 from app.services.state_v2 import normalize_state_v2
 from app.services.story_settings import (
-    completion_anchor_ids_for_act,
     story_settings_from_config,
     transition_target_for_act,
 )
-from app.services.survival_clock import apply_survival_clocks
 
 PLACEHOLDER_TEXTS = {"", "未定", "未知", "无名", "待定", "未命名角色", "未命名锚点"}
 ACTIVITY_MARKER_STOPWORDS = {
@@ -95,8 +93,6 @@ def apply_state_delta(
     _merge_relationship_aliases(state)
     apply_quantified_state_events(state, delta)
     _merge_relationship_aliases(state)
-    # B3+A3：压力时钟推进 + 危机条侵蚀（conditions 已应用、action_outcome 已并入 delta）。
-    apply_survival_clocks(state, delta)
     return normalize_state_v2(state, turn.turn_number)
 
 
@@ -679,33 +675,13 @@ def _preserve_name_aliases(existing: dict[str, Any], update: dict[str, Any]) -> 
 
 
 def _merge_relationship_record(target: dict[str, Any], incoming: dict[str, Any]) -> None:
-    for key in ("trust", "affection", "respect", "fear", "loyalty", "conflict"):
-        incoming_value = _numeric(incoming.get(key))
-        if incoming_value is None:
-            continue
-        # 取较新值（incoming 是 relationships 列表中较后、即较新回合添加的同人记录）而非 max；
-        # 否则别名合并后关系只升不降——和解后降低的 conflict 会被旧的高值覆盖（P2-11）。
-        target[key] = int(incoming_value)
-
+    # 纯叙事化：关系只有文字字段（status/note…）。别名合并取较新的非空值覆盖，
+    # 让"关系变化"（含降温）被保留，而不是旧值粘住。
     for key, value in incoming.items():
-        if key in {"trust", "affection", "respect", "fear", "loyalty", "conflict"}:
+        if key == "npc":
             continue
-        if key == "recent_events":
-            target[key] = _merge_recent_events(target.get(key), value)
-            continue
-        if _has_value(value) and not _has_value(target.get(key)):
+        if _has_value(value):
             target[key] = value
-
-
-def _merge_recent_events(left: Any, right: Any) -> list[Any]:
-    merged: list[Any] = []
-    for source in (left, right):
-        if not isinstance(source, list):
-            continue
-        for item in source:
-            if item not in merged:
-                merged.append(item)
-    return merged[-8:]
 
 
 def _configured_protagonist(config: Any) -> dict[str, Any]:
@@ -765,11 +741,15 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
     if completed_anchor:
         completed_anchors.append(completed_anchor)
     has_ready_update = "ready_for_next_act" in update
+    # 纯叙事化：失败结局不再靠危机条归零，由 extractor 语义判定终局失败时显式上报
+    # story_progress_update.defeat=true（布尔信号，镜像 campaign_complete）。
+    defeat_signal = update.get("defeat") is True or _text(update.get("defeat")).lower() == "true"
     if (
         not next_act
         and not pending_completed_acts
         and not completed_anchors
         and not has_ready_update
+        and not defeat_signal
     ):
         return
 
@@ -777,6 +757,10 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
     if not isinstance(progress, dict):
         progress = {}
         state["story_progress"] = progress
+
+    # 胜利优先于失败：已通关则不再标记 defeat。
+    if defeat_signal and not progress.get("campaign_complete"):
+        progress["defeat"] = True
 
     previous_act = _text(progress.get("current_act") or progress.get("act")) or (
         _configured_current_act(config)
@@ -901,24 +885,10 @@ def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: A
     evidence_units = _state_evidence_units(state)
     evidence = "\n".join(evidence_units)
     activity_evidence = _state_activity_text(state)
-    inferred = _inferred_completed_anchors(config, current_act, anchor_target, evidence_units)
-    if inferred:
-        progress["last_anchor_update_turn"] = turn.turn_number
-        anchor_history = progress.setdefault("anchor_history", [])
-        if not isinstance(anchor_history, list):
-            anchor_history = []
-            progress["anchor_history"] = anchor_history
-        for anchor_id, reason in inferred:
-            anchor_target.append(anchor_id)
-            anchor_history.append(
-                {
-                    "turn": turn.turn_number,
-                    "act": current_act,
-                    "anchor_id": anchor_id,
-                    "reason": reason,
-                }
-            )
-        del anchor_history[:-30]
+    # Round 49 外科拆 Phase A：锚点完成只信 LLM 显式 completed_anchors（extract_state_delta
+    # 规则 10，经 _apply_story_progress 白名单校验入库）；删脆弱文本推断（止八轮返工）。
+    # **注意**：删推断后有 required 锚点的幕转幕 100% 依赖 LLM 显式上报，无文本兜底——
+    # 漏报即卡幕（确定性兜底待 Phase B/C 评估）。
 
     computed_ready = _computed_ready_for_next_act(config, current_act, anchor_target)
     if computed_ready is not None:
@@ -950,12 +920,11 @@ def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: A
     # B —— 锚点进度按"当前幕"算（done/total），而非全局 completed_anchors 总数（含历史幕）；
     # A —— hidden 场景投影据 current_act + next_act 限定，给 GM 近期铺垫、不剧透远期幕。
     progress["next_act"] = transition_target_for_act(config, current_act)
-    required_ids = completion_anchor_ids_for_act(config, current_act, required_only=True)
-    done_ids = {_identity(anchor) for anchor in anchor_target if _identity(anchor)}
-    progress["current_act_anchor_progress"] = {
-        "done": sum(1 for aid in required_ids if aid in done_ids),
-        "total": len(required_ids),
-    }
+    progress["current_act_anchor_progress"] = _anchor_requirement_progress(
+        config,
+        current_act,
+        anchor_target,
+    )
     # C2 目标条：把当前幕标题/目标派生进 story_progress，供 state_v2 投影 + 前端 play 页固定展示。
     current_act_record = _act_record_for(config, current_act)
     progress["current_act_title"] = _text(current_act_record.get("title"))
@@ -1074,27 +1043,6 @@ def _sync_current_act_from_completed_anchors(
     return target_act
 
 
-def _inferred_completed_anchors(
-    config: Any,
-    current_act: str,
-    completed_anchors: list[Any],
-    evidence: Any,
-) -> list[tuple[str, str]]:
-    if not current_act:
-        return []
-    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    inferred: list[tuple[str, str]] = []
-    for anchor in _completion_anchor_records_for_act(config, current_act, required_only=True):
-        anchor_id = _text(anchor.get("id"))
-        if not anchor_id or anchor_id in completed:
-            continue
-        reason = _anchor_completion_reason(anchor, evidence)
-        if reason:
-            inferred.append((anchor_id, reason))
-            completed.add(anchor_id)
-    return inferred
-
-
 def _completion_anchor_records_for_act(
     config: Any,
     act_id: str,
@@ -1115,35 +1063,70 @@ def _completion_anchor_records_for_act(
     return []
 
 
-def _anchor_completion_reason(anchor: dict[str, Any], evidence: Any) -> str:
-    evidence_units = _evidence_units(evidence)
-    if not evidence_units:
-        return ""
+def _required_anchor_requirements_for_act(
+    config: Any,
+    act_id: str,
+) -> list[list[str]]:
+    requirements: list[list[str]] = []
+    grouped: dict[str, list[str]] = {}
+    for anchor in _completion_anchor_records_for_act(config, act_id, required_only=True):
+        anchor_id = _identity(anchor)
+        if not anchor_id:
+            continue
+        alternative_group = _anchor_alternative_group(anchor)
+        if alternative_group:
+            group = grouped.get(alternative_group)
+            if group is None:
+                group = []
+                grouped[alternative_group] = group
+                requirements.append(group)
+            group.append(anchor_id)
+            continue
+        requirements.append([anchor_id])
+    return [requirement for requirement in requirements if requirement]
 
-    anchor_text = "\n".join(
-        _text(anchor.get(key))
-        for key in ("id", "title", "description", "completion_signal")
+
+def _anchor_alternative_group(anchor: dict[str, Any]) -> str:
+    return _text(
+        anchor.get("alternative_group")
+        or anchor.get("alt_group")
+        or anchor.get("alternativeGroup")
     )
-    exact_matches = [
-        _text(anchor.get("completion_signal")),
-        _text(anchor.get("title")),
-        _text(anchor.get("description")),
-    ]
-    for unit in evidence_units:
-        for phrase in exact_matches:
-            if len(phrase) >= 6 and phrase != "未命名锚点" and phrase in unit:
-                return f"根据当前状态证据补全：{phrase}"
 
-    phrases = _meaningful_phrases(anchor_text)
-    for unit in evidence_units:
-        matched = [phrase for phrase in phrases if phrase in unit]
-        if len(matched) >= 2 and len(matched) >= max(2, len(phrases) // 2):
-            return f"根据当前状态证据补全：{'；'.join(matched[:3])}"
 
-    # Round 16 教训：不再用滑窗碎片/字符级模糊反推锚点完成（误判率高、会被当前角色名与
-    # 通用词触发）。锚点自动完成只信整串 completion_signal/title/description（≥6 字）+ 整短语
-    # 高精度命中；其余靠 LLM 显式 completed_anchors（extract_state_delta 规则 10）。
-    return ""
+def _anchor_requirement_progress(
+    config: Any,
+    current_act: str,
+    completed_anchors: list[Any],
+) -> dict[str, int]:
+    requirements = _required_anchor_requirements_for_act(config, current_act)
+    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
+    return {
+        "done": sum(
+            1
+            for requirement in requirements
+            if any(anchor_id in completed for anchor_id in requirement)
+        ),
+        "total": len(requirements),
+    }
+
+
+def _first_unsatisfied_required_anchor_for_act(
+    config: Any,
+    current_act: str,
+    completed_anchors: list[str],
+) -> dict[str, Any] | None:
+    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
+    records = _completion_anchor_records_for_act(config, current_act, required_only=True)
+    records_by_id = {_identity(anchor): anchor for anchor in records if _identity(anchor)}
+    for requirement in _required_anchor_requirements_for_act(config, current_act):
+        if any(anchor_id in completed for anchor_id in requirement):
+            continue
+        for anchor_id in requirement:
+            anchor = records_by_id.get(anchor_id)
+            if anchor is not None:
+                return anchor
+    return None
 
 
 def _compact_text(value: Any) -> str:
@@ -1336,27 +1319,27 @@ def _fallback_anchor_quest(
     current_act: str,
     completed_anchors: list[str],
 ) -> dict[str, Any] | None:
-    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    for anchor in _completion_anchor_records_for_act(config, current_act, required_only=True):
-        anchor_id = _text(anchor.get("id"))
-        if not anchor_id or anchor_id in completed:
-            continue
-        title = _anchor_quest_title(anchor, anchor_id)
-        completion_signal = _text(anchor.get("completion_signal"))
-        return {
-            "id": f"anchor_quest_{anchor_id}",
-            "name": title,
-            "title": title,
-            "act_id": current_act,
-            "status": "active",
-            "objective": completion_signal or title,
-            "description": "当前幕仍有必需剧情锚点未完成。",
-            "completion_signal": completion_signal,
-            "optional": False,
-            "source": "completion_anchor",
-            "anchor_id": anchor_id,
-        }
-    return None
+    anchor = _first_unsatisfied_required_anchor_for_act(config, current_act, completed_anchors)
+    if anchor is None:
+        return None
+    anchor_id = _text(anchor.get("id"))
+    if not anchor_id:
+        return None
+    title = _anchor_quest_title(anchor, anchor_id)
+    completion_signal = _text(anchor.get("completion_signal"))
+    return {
+        "id": f"anchor_quest_{anchor_id}",
+        "name": title,
+        "title": title,
+        "act_id": current_act,
+        "status": "active",
+        "objective": completion_signal or title,
+        "description": "当前幕仍有必需剧情锚点未完成。",
+        "completion_signal": completion_signal,
+        "optional": False,
+        "source": "completion_anchor",
+        "anchor_id": anchor_id,
+    }
 
 
 def _anchor_quest_title(anchor: dict[str, Any], anchor_id: str) -> str:
@@ -2019,11 +2002,14 @@ def _computed_ready_for_next_act(
     current_act: str,
     completed_anchors: list[Any],
 ) -> bool | None:
-    required_anchor_ids = completion_anchor_ids_for_act(config, current_act, required_only=True)
-    if not required_anchor_ids:
+    requirements = _required_anchor_requirements_for_act(config, current_act)
+    if not requirements:
         return None
     completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    return all(anchor_id in completed for anchor_id in required_anchor_ids)
+    return all(
+        any(anchor_id in completed for anchor_id in requirement)
+        for requirement in requirements
+    )
 
 
 def _can_advance_to_act(
@@ -2045,9 +2031,12 @@ def _can_advance_to_act(
     if not allowed_targets and _act_exists(config, previous_act):
         return False
 
-    required_anchor_ids = completion_anchor_ids_for_act(config, previous_act, required_only=True)
+    requirements = _required_anchor_requirements_for_act(config, previous_act)
     completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    return all(anchor_id in completed for anchor_id in required_anchor_ids)
+    return all(
+        any(anchor_id in completed for anchor_id in requirement)
+        for requirement in requirements
+    )
 
 
 def _allowed_transition_targets(config: Any, current_act: str) -> set[str]:

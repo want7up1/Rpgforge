@@ -84,9 +84,6 @@ class StateDeltaExtraction(BaseModel):
     new_known_facts: list[Any] = Field(default_factory=list)
     new_hidden_facts: list[Any] = Field(default_factory=list)
     open_thread_updates: list[Any] = Field(default_factory=list)
-    xp_events: list[Any] = Field(default_factory=list)
-    skill_events: list[Any] = Field(default_factory=list)
-    ability_updates: list[Any] = Field(default_factory=list)
     condition_updates: list[Any] = Field(default_factory=list)
     relationship_events: list[Any] = Field(default_factory=list)
     story_progress_update: dict[str, Any] = Field(default_factory=dict)
@@ -101,9 +98,6 @@ class StateDeltaExtraction(BaseModel):
         "new_known_facts",
         "new_hidden_facts",
         "open_thread_updates",
-        "xp_events",
-        "skill_events",
-        "ability_updates",
         "condition_updates",
         "relationship_events",
         mode="before",

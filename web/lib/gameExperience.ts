@@ -175,17 +175,14 @@ function buildBlueprintFromParts({
   };
 }
 
+// 纯叙事结算条：只汇总文字增量（关系/状态/线索/局面），无数字、无经验/技能、无行动判定后果。
 export function buildTurnSettlement(turn: TurnRead): TurnSettlementView {
   const delta = asRecord(turn.state_delta_json);
   const sections: TurnSettlementSection[] = [];
 
-  pushSection(sections, "xp", "经验", formatEventList(delta.xp_events));
-  pushSection(sections, "skills", "技能熟练度", [
-    ...formatEventList(delta.skill_events),
-    ...formatEventList(delta.ability_events)
-  ]);
   pushSection(sections, "relationships", "NPC 关系", formatEventList(delta.relationship_events));
-  pushSection(sections, "conditions", "条件与状态", [
+  pushSection(sections, "conditions", "状态", [
+    ...formatEventList(delta.condition_updates),
     ...formatEventList(delta.condition_events),
     ...formatEventList(delta.protagonist_updates)
   ]);
@@ -407,8 +404,6 @@ function formatEventList(value: unknown, prefix = ""): string[] {
   const name = pickString(record, [
     "name",
     "item",
-    "skill",
-    "ability",
     "npc",
     "target",
     "condition",
@@ -416,18 +411,10 @@ function formatEventList(value: unknown, prefix = ""): string[] {
     "title",
     "fact"
   ]);
-  const amount = record.amount ?? record.change ?? record.delta ?? record.value;
-  const axis = pickString(record, ["axis", "track", "type"]);
-  const status = pickString(record, ["status", "stage", "relationship", "attitude"]);
-  const reason = pickString(record, ["reason", "description", "detail", "summary", "note"]);
-  const pieces = compactList([
-    prefix,
-    name,
-    axis,
-    amount === undefined ? "" : String(amount),
-    status,
-    reason
-  ]);
+  // 纯叙事：只取文字字段（status/note/reason），不再渲染任何数值增量。
+  const status = pickString(record, ["status", "relationship", "attitude"]);
+  const reason = pickString(record, ["note", "reason", "description", "detail", "summary"]);
+  const pieces = compactList([prefix, name, status, reason]);
 
   if (pieces.length > 0) {
     return [pieces.join(" · ")];

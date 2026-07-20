@@ -45,6 +45,8 @@
 
 - **[P2-1] 证据池漏排除 `open_threads`/`known_facts` → 锚点误判完成证据** —— `STATE_EVIDENCE_EXCLUDED_KEYS`(`:135`)。实测把锚点 `description`（目标文本）喂给 `_anchor_completion_reason` 即返回「已完成」。**方向**：加入 `open_threads`；评估 `known_facts`；长期改白名单（见 P3-2）。
 - **[P2-2] 锚点完成阈值过低** —— `_anchor_completion_reason`(`:1107`) 任一 ≥6 字短语整串命中、或 ≥2 个短语命中即判完成。
+
+> **✅ P2-1 / P2-2 已于 Round 49（外科拆 state_applier Phase A）随 `_inferred_completed_anchors` + `_anchor_completion_reason` 整体删除而失效——锚点完成不再做任何文本推断，只信 LLM 显式 `completed_anchors`。**
 - **[P2-3] Round 16 已禁的滑窗子串匹配仍存活** —— `_anchor_key_terms`(`:1195`)+`_term_fragments`(`:1245`) 对 >8 字词生成 3-4 字滑动窗口片段，`_anchor_key_term_evident`(`:1222`) 做模糊匹配。实测 `act_1_bai_xiaoyu_devotion` 完成理由全是「念力控制/力控制+/米念力控」碎片。**方向**：删 `_term_fragments`+模糊匹配；锚点完成只信 LLM 显式 `completed_anchors` + 整串 `completion_signal` 高精度命中。
 - **[P2-4] `_quest_status_bucket` 否定句误判** —— `:1960` 用 `"完成" in text`：「未完成」「无法完成」→ completed，「放弃抵抗」→ failed。修好 R1 后此 bucket 立即成新误判源。**方向**：精确状态枚举 + 否定词前置检测。
 - **[P2-5] 未来幕「活动证据」靠 2 字片段 + 当前角色名误触发** —— `_act_activity_evident`(`:1703`)/`_activity_markers`(`:1861`)。实测 `act_2` 因当前角色「角色D」+ 通用词片段被判「世界中已在发生」。**方向**：排除当前已登场角色名；去 2-3 字后缀片段。

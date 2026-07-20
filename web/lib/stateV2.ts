@@ -1,49 +1,17 @@
 import type { GameDetail } from "@/lib/types";
 
-export type ProgressionState = {
-  level: number;
-  xp: number;
-  next_level_xp: number;
-  total_xp: number;
-  xp_log: Record<string, unknown>[];
-};
-
+// 纯叙事改造：主角档案只剩姓名/身份/处境文字，删除等级/经验/属性/技能/能力。
 export type ProtagonistSheet = {
   name: string;
   identity: string;
-  level: number;
-  xp: number;
-  next_level_xp: number;
-  total_xp: number;
-  attributes: Record<string, unknown>;
+  conditions: ConditionState[];
 };
 
-export type SkillState = {
-  name: string;
-  level: number;
-  xp: number;
-  next_level_xp: number;
-  mastery: number;
-  visibility: string;
-  recent_events: Record<string, unknown>[];
-};
-
-export type AbilityState = {
-  name: string;
-  level: number;
-  visibility: string;
-  description: string;
-  status: string;
-  resource_cost: string;
-  cooldown: string;
-  usage_note: string;
-};
-
+// 处境：全部文字，无 severity/duration 数字。
 export type ConditionState = {
   name: string;
   status: string;
-  severity: string;
-  duration: string;
+  note: string;
   source: string;
   visibility: string;
 };
@@ -103,6 +71,7 @@ export type StoryProgressState = {
   current_act_title: string;
   current_act_objective: string;
   campaign_complete: boolean;
+  defeat?: boolean;
   epilogue: string;
   act_history: {
     turn: number | null;
@@ -118,48 +87,18 @@ export type StoryProgressState = {
   }[];
 };
 
-export type RelationshipAxis =
-  | "trust"
-  | "affection"
-  | "respect"
-  | "fear"
-  | "loyalty"
-  | "conflict";
-
+// 关系：纯文字。status 是一句叙述（如"从猜忌转为并肩"），note 是可选补充。
 export type RelationshipTrack = {
   npc: string;
-  stage: string;
+  status: string;
+  note: string;
   visibility: string;
-  trust: number | null;
-  affection: number | null;
-  respect: number | null;
-  fear: number | null;
-  loyalty: number | null;
-  conflict: number | null;
-  relationship: string;
-  attitude: string;
-  recent_interaction: string;
-  recent_events: Record<string, unknown>[];
-};
-
-export type CrisisState = {
-  value: number;
-  max: number;
-};
-
-export type PressureClockState = {
-  value: number;
-  threshold: number;
-  triggers: number;
 };
 
 export type StateV2 = {
   version: number;
   active_scene: ActiveSceneState;
   protagonist_sheet: ProtagonistSheet;
-  progression: ProgressionState;
-  skills: SkillState[];
-  abilities: AbilityState[];
   conditions: ConditionState[];
   party: string[];
   npc_registry: NpcRegistryItem[];
@@ -167,18 +106,7 @@ export type StateV2 = {
   open_threads: ThreadLog;
   story_progress: StoryProgressState;
   relationship_tracks: RelationshipTrack[];
-  crisis: CrisisState;
-  pressure_clock: PressureClockState;
 };
-
-export const relationshipAxes: { key: RelationshipAxis; label: string }[] = [
-  { key: "trust", label: "信任" },
-  { key: "affection", label: "亲密" },
-  { key: "respect", label: "尊重" },
-  { key: "fear", label: "畏惧" },
-  { key: "loyalty", label: "忠诚" },
-  { key: "conflict", label: "冲突" }
-];
 
 export function getStateV2FromGame(game: GameDetail): StateV2 {
   return getStateV2(game.state?.state_json);
@@ -187,17 +115,14 @@ export function getStateV2FromGame(game: GameDetail): StateV2 {
 export function getStateV2(stateJson: Record<string, unknown> | null | undefined): StateV2 {
   const root = asRecord(stateJson);
   const rawV2 = asRecord(root.v2);
-  const progression = normalizeProgression(rawV2.progression, root.progression);
-  const protagonist = normalizeProtagonist(rawV2.protagonist_sheet, root.protagonist, progression);
+  const conditions = normalizeConditions(rawV2.conditions ?? root.conditions);
+  const protagonist = normalizeProtagonist(rawV2.protagonist_sheet, root.protagonist, conditions);
 
   return {
     version: asNumber(rawV2.version, 1),
     active_scene: normalizeActiveScene(rawV2.active_scene, root),
     protagonist_sheet: protagonist,
-    progression,
-    skills: normalizeSkills(rawV2.skills ?? root.skills),
-    abilities: normalizeAbilities(rawV2.abilities ?? root.abilities),
-    conditions: normalizeConditions(rawV2.conditions ?? root.conditions),
+    conditions,
     party: asStringList(rawV2.party ?? root.party),
     npc_registry: normalizeNpcRegistry(rawV2.npc_registry ?? root.npcs),
     quest_log: normalizeQuestLog(rawV2.quest_log, root.quests),
@@ -205,75 +130,21 @@ export function getStateV2(stateJson: Record<string, unknown> | null | undefined
     story_progress: normalizeStoryProgress(
       firstRecord([rawV2.story_progress, root.story_progress])
     ),
-    relationship_tracks: normalizeRelationships(rawV2.relationship_tracks ?? root.relationships),
-    crisis: normalizeCrisis(rawV2.crisis ?? root.crisis),
-    pressure_clock: normalizePressureClock(rawV2.pressure_clock ?? root.pressure_clock)
-  };
-}
-
-function normalizeCrisis(value: unknown): CrisisState {
-  const data = asRecord(value);
-  const max = positiveNumber(data.max, 100);
-  const raw = optionalNumber(data.value);
-  const current = raw === null ? max : raw;
-  return { value: clamp(current, 0, max), max };
-}
-
-function normalizePressureClock(value: unknown): PressureClockState {
-  const data = asRecord(value);
-  const threshold = positiveNumber(data.threshold, 10);
-  return {
-    value: clamp(optionalNumber(data.value) ?? 0, 0, threshold),
-    threshold,
-    triggers: Math.max(0, optionalNumber(data.triggers) ?? 0)
-  };
-}
-
-export function ratioPercent(value: number, max: number): number {
-  if (max <= 0) {
-    return 0;
-  }
-  return clamp(Math.round((value / max) * 100), 0, 100);
-}
-
-export function formatLogEntry(entry: Record<string, unknown>): string {
-  const reason = asString(entry.reason) || asString(entry.description);
-  const amount = entry.amount ?? entry.change;
-  const axis = asString(entry.axis);
-  const pieces = [reason, axis ? axisLabel(axis) : "", amount !== undefined ? `${amount}` : ""]
-    .filter(Boolean);
-  return pieces.join(" · ") || JSON.stringify(entry);
-}
-
-function normalizeProgression(...values: unknown[]): ProgressionState {
-  const source = firstRecord(values);
-  const level = positiveNumber(source.level, 1);
-  const xp = Math.max(0, asNumber(source.xp, 0));
-  const nextLevelXp = positiveNumber(source.next_level_xp, 100 + (level - 1) * 75);
-  return {
-    level,
-    xp,
-    next_level_xp: nextLevelXp,
-    total_xp: Math.max(xp, asNumber(source.total_xp, xp)),
-    xp_log: asRecordList(source.xp_log).slice(-20)
+    relationship_tracks: normalizeRelationships(rawV2.relationship_tracks ?? root.relationships)
   };
 }
 
 function normalizeProtagonist(
   rawSheet: unknown,
   rawProtagonist: unknown,
-  progression: ProgressionState
+  conditions: ConditionState[]
 ): ProtagonistSheet {
   const sheet = asRecord(rawSheet);
   const protagonist = asRecord(rawProtagonist);
   return {
     name: asString(sheet.name) || asString(protagonist.name),
     identity: asString(sheet.identity) || asString(protagonist.identity),
-    level: positiveNumber(sheet.level, progression.level),
-    xp: Math.max(0, asNumber(sheet.xp, progression.xp)),
-    next_level_xp: positiveNumber(sheet.next_level_xp, progression.next_level_xp),
-    total_xp: Math.max(0, asNumber(sheet.total_xp, progression.total_xp)),
-    attributes: firstRecord([sheet.attributes, protagonist.attributes])
+    conditions: conditions.length > 0 ? conditions : normalizeConditions(sheet.conditions)
   };
 }
 
@@ -294,47 +165,12 @@ function normalizeActiveScene(rawScene: unknown, root: Record<string, unknown>):
   };
 }
 
-function normalizeSkills(value: unknown): SkillState[] {
-  return asRecordList(value)
-    .map((item) => {
-      const level = positiveNumber(item.level, 1);
-      const xp = Math.max(0, asNumber(item.xp, 0));
-      const nextLevelXp = positiveNumber(item.next_level_xp, 80 + (level - 1) * 40);
-      return {
-        name: identity(item),
-        level,
-        xp,
-        next_level_xp: nextLevelXp,
-        mastery: clamp(asNumber(item.mastery, ratioPercent(xp, nextLevelXp)), 0, 100),
-        visibility: asString(item.visibility) || "known",
-        recent_events: asRecordList(item.recent_events).slice(-8)
-      };
-    })
-    .filter((skill) => skill.name);
-}
-
-function normalizeAbilities(value: unknown): AbilityState[] {
-  return asRecordList(value)
-    .map((item) => ({
-      name: identity(item),
-      level: positiveNumber(item.level, 1),
-      visibility: asString(item.visibility) || "known",
-      description: asString(item.description),
-      status: asString(item.status) || "active",
-      resource_cost: asString(item.resource_cost),
-      cooldown: asString(item.cooldown),
-      usage_note: asString(item.usage_note)
-    }))
-    .filter((ability) => ability.name);
-}
-
 function normalizeConditions(value: unknown): ConditionState[] {
   return asRecordList(value)
     .map((item) => ({
       name: identity(item),
       status: asString(item.status) || "active",
-      severity: asString(item.severity) || "medium",
-      duration: asString(item.duration),
+      note: asString(item.note),
       source: asString(item.source),
       visibility: asString(item.visibility) || "known"
     }))
@@ -442,6 +278,7 @@ function normalizeStoryProgress(value: unknown): StoryProgressState {
     current_act_title: asString(progress.current_act_title),
     current_act_objective: asString(progress.current_act_objective),
     campaign_complete: asBoolean(progress.campaign_complete, false),
+    defeat: asBoolean(progress.defeat, false),
     epilogue: asString(progress.epilogue),
     act_history: asRecordList(progress.act_history)
       .map((item) => ({
@@ -468,37 +305,16 @@ function normalizeRelationships(value: unknown): RelationshipTrack[] {
   return asRecordList(value)
     .map((item) => ({
       npc: asString(item.npc) || identity(item),
-      stage: asString(item.stage),
-      visibility: asString(item.visibility) || "known",
-      trust: axisValue(item.trust),
-      affection: axisValue(item.affection),
-      respect: axisValue(item.respect),
-      fear: axisValue(item.fear),
-      loyalty: axisValue(item.loyalty),
-      conflict: axisValue(item.conflict),
-      relationship: asString(item.relationship),
-      attitude: asString(item.attitude),
-      recent_interaction: asString(item.recent_interaction),
-      recent_events: asRecordList(item.recent_events).slice(-8)
+      // status 是一句叙述文字；兼容旧字段名（relationship/stage/attitude）作回退。
+      status:
+        asString(item.status) ||
+        asString(item.relationship) ||
+        asString(item.stage) ||
+        asString(item.attitude),
+      note: asString(item.note) || asString(item.recent_interaction),
+      visibility: asString(item.visibility) || "known"
     }))
     .filter((track) => track.npc);
-}
-
-function axisValue(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return clamp(Math.round(value), 0, 100);
-  }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return clamp(Math.round(parsed), 0, 100);
-    }
-  }
-  return null;
-}
-
-function axisLabel(axis: string): string {
-  return relationshipAxes.find((item) => item.key === axis)?.label || axis;
 }
 
 // 线索 status 的中文映射。后端可能写入英文枚举（active/resolved…），直显会泄露原始值。
@@ -604,12 +420,4 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
     }
   }
   return fallback;
-}
-
-function positiveNumber(value: unknown, fallback: number): number {
-  return Math.max(1, asNumber(value, fallback));
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }

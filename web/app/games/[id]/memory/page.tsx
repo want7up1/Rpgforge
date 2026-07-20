@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { ChangeEvent, ReactNode, useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { GamePageHeader } from "@/components/GamePageHeader";
+import { GameSubpageShell } from "@/components/GameMenu";
 import { JsonBlock } from "@/components/JsonBlock";
 import {
   getContextDiagnostic,
@@ -119,13 +119,13 @@ export default function GameMemoryPage() {
   }
 
   return (
-    <AppShell>
+    <AppShell variant="focus">
       {state.status === "loading" ? (
-        <section className="app-card app-card-pad text-sm text-[color:var(--muted)]">
-          正在读取剧本资料...
+        <section className="px-panel px-panel-pad text-sm text-[color:var(--muted)]">
+          <span className="px-caret" aria-hidden="true" /> 正在读取记忆水晶…
         </section>
       ) : state.status === "error" ? (
-        <section className="app-alert">{state.message}</section>
+        <section className="px-alert">{state.message}</section>
       ) : (
         <MemoryView
           actionError={actionError}
@@ -191,39 +191,38 @@ function MemoryView({
   }
 
   return (
-    <div className="grid gap-4 sm:gap-5">
-      <GamePageHeader
-        active="memory"
-        eyebrow="资料"
-        gameId={memory.game.id}
-        primaryAction={
-          <div className="grid w-full gap-2 sm:flex sm:w-fit sm:flex-wrap sm:justify-end">
-            <button
-              className="app-button w-full sm:w-fit"
-              disabled={exportingScript}
-              onClick={handleScriptExport}
-              type="button"
-            >
-              {exportingScript ? "导出中..." : "导出剧本"}
-            </button>
-            <Link
-              className="app-button app-button-primary w-full sm:w-fit"
-              href={`/games/${memory.game.id}/play`}
-            >
-              继续冒险
-            </Link>
-          </div>
-        }
-        subtitle={
-          <>
-            当前回合 {memory.current_turn} · 历史 {memory.turn_count} 回 · 剧本素材{" "}
-            {materialCount} 条 · 摘要 {memory.summaries.length} 条
-          </>
-        }
-        title={memory.game.title}
-      />
-      {exportStatus ? <p className="app-status">{exportStatus}</p> : null}
-      {exportError ? <p className="app-alert">{exportError}</p> : null}
+    <GameSubpageShell
+      active="memory"
+      eyebrow="MEMO · 记忆"
+      gameId={memory.game.id}
+      primaryAction={
+        <div className="grid w-full gap-2 sm:flex sm:w-fit sm:flex-wrap sm:justify-end">
+          <button
+            className="px-btn w-full sm:w-fit"
+            disabled={exportingScript}
+            onClick={handleScriptExport}
+            type="button"
+          >
+            {exportingScript ? "导出中..." : "⇩ 导出剧本"}
+          </button>
+          <Link
+            className="px-btn px-btn-primary w-full sm:w-fit"
+            href={`/games/${memory.game.id}/play`}
+          >
+            ▸ 继续冒险
+          </Link>
+        </div>
+      }
+      subtitle={
+        <>
+          当前回合 {memory.current_turn} · 历史 {memory.turn_count} 回 · 剧本素材{" "}
+          {materialCount} 条 · 摘要 {memory.summaries.length} 条
+        </>
+      }
+      title={memory.game.title}
+    >
+      {exportStatus ? <p className="px-status">{exportStatus}</p> : null}
+      {exportError ? <p className="px-alert">{exportError}</p> : null}
 
       <section className="grid grid-cols-3 gap-2 sm:gap-3">
         <Metric label="回合" value={memory.current_turn} />
@@ -231,9 +230,9 @@ function MemoryView({
         <Metric label="摘要" value={memory.summaries.length} />
       </section>
 
-      <details className="surface-panel">
-        <summary className="cursor-pointer surface-title">维护与运行诊断</summary>
-        <div className="mt-4 grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+      <details className="px-fold">
+        <summary>维护与运行诊断</summary>
+        <div className="grid gap-5 border-t-2 border-[color:var(--border)] pt-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
           <MaintenancePanel
             actionError={actionError}
             actionStatus={actionStatus}
@@ -250,7 +249,7 @@ function MemoryView({
       </details>
 
       <SummarySection buckets={summaryBuckets} />
-    </div>
+    </GameSubpageShell>
   );
 }
 
@@ -266,21 +265,21 @@ function MaintenancePanel({
   onRebuildSummaries: () => void;
 }) {
   return (
-    <section className="grid gap-3">
+    <section className="grid content-start gap-3">
       <SectionHeader
         title="维护"
         subtitle="这里处理上下文摘要等运行辅助数据，不会修改 story_settings。"
       />
       <button
-        className="app-button w-fit"
+        className="px-btn w-fit"
         disabled={busyAction === "summaries"}
         onClick={onRebuildSummaries}
         type="button"
       >
-        {busyAction === "summaries" ? "重建中..." : "重建上下文摘要"}
+        {busyAction === "summaries" ? "重建中..." : "⟳ 重建上下文摘要"}
       </button>
-      {actionStatus ? <p className="app-status">{actionStatus}</p> : null}
-      {actionError ? <p className="app-alert">{actionError}</p> : null}
+      {actionStatus ? <p className="px-status">{actionStatus}</p> : null}
+      {actionError ? <p className="px-alert">{actionError}</p> : null}
     </section>
   );
 }
@@ -297,9 +296,9 @@ function DiagnosticSection({
   turns: TurnRead[];
 }) {
   return (
-    <section className="grid gap-4">
+    <section className="grid content-start gap-4">
       <SectionHeader
-        title="运行诊断"
+        title="窥镜 · 运行诊断"
         subtitle="查看某一回合实际注入 GM 的 story_settings 派生视图。"
       />
       <label className="grid gap-1 text-sm font-medium">
@@ -307,7 +306,7 @@ function DiagnosticSection({
           help="选择一个历史回合后，可以查看当时 GM 收到的当前幕、行动风格、召回素材和摘要。"
           label="诊断回合"
         />
-        <select className="app-input" onChange={onTurnChange} value={selectedTurnId}>
+        <select className="px-input" onChange={onTurnChange} value={selectedTurnId}>
           <option value="">选择回合</option>
           {turns.map((turn) => (
             <option key={turn.id} value={turn.id}>
@@ -348,7 +347,7 @@ function DiagnosticSection({
 
 function SummarySection({ buckets }: { buckets: Record<string, SummaryRead[]> }) {
   return (
-    <section className="surface-panel">
+    <section className="px-panel px-panel-pad">
       <SectionHeader
         title="记忆摘要"
         subtitle="摘要是运行缓存，不属于剧本设定源；它用于压缩上下文和降低 token 消耗。"
@@ -358,21 +357,21 @@ function SummarySection({ buckets }: { buckets: Record<string, SummaryRead[]> })
           <p className="text-sm text-[color:var(--muted)]">暂无摘要。</p>
         ) : (
           Object.entries(buckets).map(([type, summaries]) => (
-            <details className="rounded border border-[color:var(--border)] p-3" key={type}>
-              <summary className="cursor-pointer text-sm font-semibold">
+            <details className="px-fold" key={type}>
+              <summary>
                 {type} · {summaries.length} 条
               </summary>
-              <div className="mt-3 grid gap-2">
+              <div className="grid gap-2 border-t-2 border-[color:var(--border)] pt-3">
                 {summaries.map((summary) => (
                   <article
-                    className="rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] p-3 text-sm"
+                    className="px-card text-sm"
                     key={summary.id}
                   >
                     <p className="whitespace-pre-wrap text-[color:var(--foreground)]">
                       {summary.content}
                     </p>
                     {Object.keys(summary.important_facts).length > 0 ? (
-                      <div className="mt-2 max-h-64 overflow-auto rounded border border-[color:var(--border)]">
+                      <div className="mt-2 max-h-64 overflow-auto">
                         <JsonBlock data={summary.important_facts} />
                       </div>
                     ) : null}
@@ -397,12 +396,12 @@ function InfoBlock({
   value: unknown;
 }) {
   return (
-    <article className="rounded border border-[color:var(--border)] bg-[color:var(--soft-panel)] p-3">
+    <article className="px-card">
       <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="text-sm font-bold">{title}</h3>
         <HelpMark text={help} />
       </div>
-      <div className="mt-2 max-h-96 overflow-auto rounded border border-[color:var(--border)]">
+      <div className="mt-2 max-h-96 overflow-auto">
         <JsonBlock data={value} />
       </div>
     </article>
@@ -418,7 +417,7 @@ function SectionHeader({
 }) {
   return (
     <header>
-      <h2 className="surface-title">{title}</h2>
+      <h2 className="px-heading text-base">{title}</h2>
       {subtitle ? <p className="mt-1 text-sm text-[color:var(--muted)]">{subtitle}</p> : null}
     </header>
   );
@@ -426,9 +425,9 @@ function SectionHeader({
 
 function Metric({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="app-card app-card-pad">
-      <p className="text-xs text-[color:var(--muted)]">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
+    <div className="px-metric">
+      <p className="px-metric-label">{label}</p>
+      <p className="px-metric-value">{value}</p>
     </div>
   );
 }
@@ -447,12 +446,12 @@ function HelpMark({ text }: { text: string }) {
     <span className="group relative inline-flex">
       <button
         aria-label={text}
-        className="flex h-5 w-5 items-center justify-center rounded-full border border-[color:var(--border)] text-xs font-semibold text-[color:var(--muted)] outline-none transition focus:border-[color:var(--accent)] focus:text-[color:var(--accent)] group-hover:border-[color:var(--accent)] group-hover:text-[color:var(--accent)]"
+        className="flex h-5 w-5 items-center justify-center border-2 border-[color:var(--border)] text-xs font-bold text-[color:var(--muted)] outline-none transition focus:border-[color:var(--phosphor)] focus:text-[color:var(--phosphor)] group-hover:border-[color:var(--phosphor)] group-hover:text-[color:var(--phosphor)]"
         type="button"
       >
         !
       </button>
-      <span className="pointer-events-none absolute left-1/2 top-7 z-20 hidden w-72 -translate-x-1/2 rounded border border-[color:var(--border)] bg-[color:var(--panel)] p-3 text-left text-xs font-normal leading-5 text-[color:var(--foreground)] shadow-xl group-focus-within:block group-hover:block">
+      <span className="pointer-events-none absolute left-1/2 top-7 z-20 hidden w-72 -translate-x-1/2 border-2 border-[color:var(--border-strong)] bg-[color:var(--panel-strong)] p-3 text-left text-xs font-normal leading-5 text-[color:var(--foreground)] shadow-xl group-focus-within:block group-hover:block">
         {text}
       </span>
     </span>

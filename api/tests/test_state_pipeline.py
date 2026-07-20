@@ -9,7 +9,7 @@ from app.services.context_compressor import ContextCompressor, _trim_text
 from app.services.deepseek_client import ChatCompletionResult
 from app.services.game_creator import create_game_from_config
 from app.services.model_router import ModelRouter
-from app.services.state_extractor import StateExtractor
+from app.services.state_extractor import StateDeltaExtraction, StateExtractor
 from tests.story_settings_fixtures import build_generated_config
 
 # ---------- context_compressor 纯逻辑 ----------
@@ -45,6 +45,15 @@ def test_fallback_summary_builds_from_delta() -> None:
 
 
 # ---------- state_extractor hints 注入 ----------
+
+
+def test_state_delta_extraction_omits_removed_numeric_mechanics() -> None:
+    """纯叙事化：delta 契约不再暴露 XP/技能/能力旧字段。"""
+    delta = StateDeltaExtraction.model_validate({}).model_dump()
+
+    assert "xp_events" not in delta
+    assert "skill_events" not in delta
+    assert "ability_updates" not in delta
 
 class _CapturingClient:
     def __init__(self, payload: dict) -> None:

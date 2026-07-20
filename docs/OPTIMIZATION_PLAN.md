@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 39 — 看板成为完整设定编辑面：字段数据派生全覆盖（home_base/worldview facts/完成锚点等）+ 字段类型系统(number/bool/objectList/keyValue/json) + 空块折叠开关 + 手动新增数组项（纯前端） |
-| 完成日期 | 2026-06-04 |
+| 最近一轮 | Round 58 — 前端 UI 全面重做：像素磷光绿终端风 + 信息架构重组（功能 100% 保留） |
+| 完成日期 | 2026-07-20 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **2026-06-04 一轮大型前端建设（Round 36–39）**：围绕「story_settings 可视化编辑」建了一套**设定看板**子系统，并落地三件事——① 生成页重设计（Round 36）② 设定页 + 信息架构去重（Round 37）③ **剧本炼金工坊**（Round 38，setting_modules 模块库 + 提取/并入 + AI 本地优化）④ 看板成为完整设定编辑面（Round 39，全字段数据驱动 + 字段类型系统 + 手动新增项）。详见各 Round 与下方「设计文档」。 |
@@ -26,6 +26,287 @@
 ---
 
 ## 1. 已完成
+
+### Round 58 (2026-07-18) — 前端 UI 全面重做：像素磷光绿终端风 + 信息架构重组
+
+**背景**：用户要求 UI 彻底重做（功能冻结、不参考旧布局/风格），方向为「文字类游戏 × 像素风 × 磷光绿终端」。交付前已先输出新信息架构与「功能→界面映射表」并经用户确认（接受 `/games/[id]` 概览页改重定向 play、选定磷光绿主题）。
+
+**信息架构（新）**：壳外 = 标题画面 `/`（主菜单 + CONTINUE 最近存档 + SLOT 最近存档 + API LED）→ `/games` 存档槽位 → `/games/new` 创造炉三幕向导（道路/锻造/启程）→ `/workshop`、`/settings`、`/admin`。壳内 = play 主游戏画面为绝对中心 + 唤出式菜单（STATUS/PARTY/LOG/MEMO/SCRIPT/CAMP）。**路由变化**：`/games/[id]` 307 重定向到 `/play`；原概览页内容（指标/设定概览/状态快照/进度存档/导出/危险操作）整体迁入新路由 `/games/[id]/camp`（营地）。其余子页 URL 不变。
+
+**play 重构**：三栏布局 → 单栏剧情卷轴 + 顶部紧凑顶栏（撤销/手账/菜单）+ 底部命令行（`>` 提示符 + 四种模式拨片 + Enter 发送/Shift+Enter 换行）；左侧栏与右侧 Inspector 收进「手账」右滑抽屉与「菜单」展开条；建议选项改 A/B/C/D 抉择卡；结局全屏像素卡；进度改 8-bit 分段「施法条」；新手引导/维护提示/结算卡/洞察折叠全部保留。
+
+**技术落地**：`globals.css` 全量重写为 `.px-*` 设计系统（阶梯切角、CRT 扫描线+暗角、磷光绿 token、LED、px-btn/input/badge/fold/table 等；保留 story-* 阅读层衬线与 reduced-motion/focus-visible 无障碍）；字体 Press Start 2P（英文像素）+ Geist Mono；新增 `PixelDialog`（Promise 化 confirm/prompt，替代 window.confirm/prompt 于 games/camp/workshop）、`GameMenu`（局内菜单栏 + GameSubpageShell）；`GamePageHeader`/`ChatHistorySheet` 删除（功能分别并入 GameSubpageShell 与内联 DialogueLog）；board 看板/工坊/设置组件逻辑零改动仅皮肤化；`web/lib` 全部未动。api.ts 中未暴露方法保持原样不增删。
+
+**验证**：`eslint .` 0/0、`tsc --noEmit` 0、vitest 52 passed、`next build` 全路由通过；本地 dev 全路由 200 + `/games/[id]` 307。远端运行环境：rsync 同步（另手动删除远端两个已删组件文件），`docker compose up -d --build web`（api 因依赖被顺带重启、worker 未动）；全服务 healthy；web 日志无异常；壳外 6 页 + 真实存档 7 个局内页全部 200、概览 307、`/health` ok。
+
+**遗留**：Press Start 2P 仅拉丁字符，中文铬件靠等宽+字距模拟像素感；CRT 扫描线如需关闭可在 globals.css 的 body::before 调整。
+
+**2026-07-20 移动端复查补充**：用 Playwright（iPhone 13 设备模拟 + 360/375px）对全页面做溢出扫描与截图核验后修复——① AppShell gameplay 高度加 `h-screen` 回退（`h-[100dvh]` 在不支持 dvh 的 WebView 里会塌高、底部命令行被推出视口）；② `.px-modal`/`.title-screen` 同步加 vh→dvh 回退；③ 命令行输入框字号 0.95rem→1rem（消除 iOS 聚焦自动缩放）；④ 角色页立绘列改移动端双列紧凑网格（原单列全宽立绘占满屏幕）；⑤ CharacterModal 立绘移动端限宽 w-32；⑥ CharacterPortrait 占位框改容器查询（cqw）自适应，修复小尺寸头像（在场 chips/手账）首字竖排溢出；⑦ play 底部命令行默认折叠为「自定义行动」按钮，点击后才展开模式与输入框，提交即收起、失败时恢复输入。复验：12 页面 × 360/375/390 三档宽度零横向溢出，弹窗/抽屉/命令行均可见可用；自定义行动折叠/展开另以 555×600 和 375×600 实机页面验证通过。
+
+### Round 57 (2026-07-06) — 游玩方向修复：非数值代价闭环 + 替代锚点组/多路径转幕
+
+**背景**：承接 2026-07-06 游玩方向审查，先修两项直接影响可玩性的低风险问题：纯叙事化后失败/代价容易只停留在正文气氛里；幕推进只支持所有 required 锚点全完成，缺少“多条路线任选其一”的转幕表达。
+
+**改动**：
+- 非数值代价闭环：`gm_runtime.md` 要求风险/代价写成后续能被状态提取器持续承接的具体后果；`extract_state_delta.md` 要求在 GM 输出明确发生时代入 `condition_updates` / `relationship_events` / `open_thread_updates` / `quest_updates`，且不得因 risk_note/cost_if_fails 本身虚构代价。
+- 替代锚点组：`completion_anchors[].alternative_group` 成为可选字段。同一幕多个 required 锚点填相同组名时，完成任意一个即可满足该组；未配置该字段的旧剧本继续按全部 required 锚点完成计算。
+- 运行时链路同步：`build_runtime_story` 隐藏已满足替代组的兄弟锚点；`state_applier` 的 ready/advance/current_act_anchor_progress/fallback anchor quest 均按“要求组”计算；`act_pacing` 的 open_required_count 与 next_required_anchor 同步支持替代组。
+- 作者入口同步：设定填写说明、authoring kit、生成 act_plan section prompt 补充 `alternative_group` 说明；审查台账见 `docs/REVIEW_FINDINGS.md`。
+- 历史日志：`docs/history/OPTIMIZATION_LOG_2026-07.md`。
+
+**验证**：
+- `cd api && PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests/test_markdown_contracts.py tests/test_act_pacing.py tests/test_games.py::test_settings_guide_documents_every_normalized_field tests/test_gameplay.py::test_runtime_story_filters_satisfied_alternative_anchor_group tests/test_gameplay.py::test_state_delta_advances_after_alternative_anchor_group_and_required_anchor`：15 passed。
+- `cd api && python3 -m ruff check app tests`：All checks passed。
+- 远端运行环境：最小同步后重建 `api` / `worker`；`docker compose ps` 显示 `api` healthy、`worker` running；`GET /health` 返回 `status=ok`；容器内同一组目标 pytest：15 passed；`api` / `worker` 启动日志无异常。
+- 本机带 `db_session` 的旧目标测试因本地 Postgres 连接 `postgres:5432` 被关闭而未跑通。
+
+**遗留风险**：代价闭环仍依赖 GM/Extractor 遵守 prompt 合同，需用真实模型回合观察是否稳定产生并承接 conditions/open_threads/relationships；替代组需要后续在新剧本生成实机样本里观察是否会被合理使用。
+
+### Round 56 (2026-07-03) — 远端 Docker 部署验证：Round 55 修复上线 + migration 落库
+
+**背景**：Round 55 已完成纯叙事化契约收口，但尚未部署。本轮将该修复部署到远端 Docker 运行环境，并验证数据库 migration、容器健康和关键业务读接口。
+
+**部署前保护**：部署前已创建 PostgreSQL dump 压缩备份，作为本次 migration 的回滚点；未删除或重建 Postgres/Redis 数据卷，未覆盖远端 `.env` 或运行态数据。
+
+**部署动作**：
+- 采用文件清单方式同步本轮变更文件和新 Alembic migration，避免整目录 `--delete` 触碰运行态文件。
+- 仅重建并重启 `api` / `worker`，`postgres` / `redis` 保持原数据卷运行，`web` 本轮无运行时代码变更未重建。
+- API 启动时自动执行 `alembic upgrade head`，迁移到 `20260703_0030`。
+
+**远端验证**：
+- `docker compose ps`：`api` / `postgres` / `redis` healthy，`worker` running，`web` running。
+- `alembic current`：`20260703_0030 (head)`。
+- 数据库 `turn_jobs.stage_total` column default：`6`。
+- `GET /health`：返回 `status=ok`，环境为 production。
+- `GET /`：HTTP 200。
+- `GET /api/games`：返回 list，业务读路由经 web 代理可达。
+- `GET /api/settings/deepseek`：返回脱敏设置字段，未输出密钥。
+- 容器内 `PYTHONPATH=. pytest tests/test_state_pipeline.py::test_state_delta_extraction_omits_removed_numeric_mechanics tests/test_gameplay.py::test_turn_job_stages_exclude_drift_validation tests/test_gameplay.py::test_turn_job_stage_total_defaults_match_runtime_stage_count tests/test_act_pacing.py -q`：11 passed。
+- 容器内 `PYTHONPATH=. pytest tests/test_markdown_contracts.py -q`：2 passed。
+- 容器内 `ruff check .`：All checks passed。
+- 抽查关键文件 SHA-256：本地与远端一致。
+
+**遗留风险**：本轮未消耗模型额度做真实生成/真实回合 E2E；`npm audit` 依赖漏洞与同步 generator endpoint timeout 仍留待下一轮。
+
+### Round 55 (2026-07-03) — 纯叙事化契约收口：delta 去旧数值字段 + stage_total 默认值归一 + 公开文档同步
+
+**背景**：全面审查后先修第一批低风险、确定性问题：Round 53 已转向纯叙事化，但状态提取 schema 仍残留旧 XP/技能/能力 delta 字段；turn job 新建态默认阶段数与真实运行阶段数不一致；README/AI 运行指南仍有部分旧机制表述。
+
+**改动**：
+- `StateDeltaExtraction` 删除 `xp_events` / `skill_events` / `ability_updates`，并补测试锁住“纯叙事 delta 不再暴露旧数值字段”的契约。
+- `TurnJob.stage_total` ORM 默认、server default、`TurnJobRead` schema 默认统一为 6，并新增 Alembic migration `20260703_0030_turn_job_stage_total_default.py`。
+- `README.md` / `README.zh-CN.md` / `docs/AI_STORY_RUNTIME_GUIDE.md` 同步为当前纯叙事化运行说明：状态延续靠文字化 conditions/relationships、导演层、节奏信号、输出观测和异步审计，不再宣传 XP/属性/技能/危机条等旧机制。
+
+**验证**：
+- `cd api && PYTHONPATH=. pytest tests/test_state_pipeline.py::test_state_delta_extraction_omits_removed_numeric_mechanics tests/test_gameplay.py::test_turn_job_stages_exclude_drift_validation tests/test_gameplay.py::test_turn_job_stage_total_defaults_match_runtime_stage_count tests/test_act_pacing.py -q`：11 passed。
+- `cd api && PYTHONPATH=. pytest tests/test_markdown_contracts.py -q`：2 passed。
+- `cd api && ruff check .`：All checks passed。
+- `bash ~/GitHub-Projects/_deploy/check-secrets.sh /Users/want7up/GitHub-Projects/Rpgforge`：未发现内网真值。
+- 公开文档旧字段扫描仅剩 `docs/AI_STORY_RUNTIME_GUIDE.md` 顶部“系统不再维护……”的反向说明，属于刻意保留的迁移语义。
+
+**部署**：本轮未部署；涉及数据库默认值变更，下次部署需执行 Alembic upgrade 到 `20260703_0030`。
+
+**遗留风险**：全量后端 pytest 依赖本地 compose/Postgres，当前未纳入本轮验证；`npm audit` 依赖漏洞与同步 generator endpoint timeout 问题未纳入本轮，留待下一批修复。
+
+### Round 54 (2026-06-22) — 尺度中立化：解耦「写得像小说」与「文学得体审查」
+
+**背景**：用户反馈实机感觉尺度被系统压。审计结论——系统 prompt/代码层**无任何硬编码内容审查**（宪法层全部来自剧本 story_settings；篇幅层 `prompt_builder.py:391` 还明确"剧本要求详细描写时让位"；模型调用层无 moderation 参数）。但 Round 44/45 为"让输出更像小说"加的**硬编码文学品味框定**，会被安全调教过的模型联想成"要得体、别露骨"，是系统侧唯一可调的软性收口来源。
+
+**改动（纯 prompt，三处尺度中立化，不削弱"像小说"）**：
+- `gm_runtime.md` 顶部叙事工艺段**新增一条**：「『像小说』指工艺（逻辑/人物/画面），**不是审查**；内容强度、露骨/黑暗/暴力/性描写尺度一律以本剧本设定（hard_rules/core_mechanics/story_core/tone_do）为准，不用主流文学得体惯例自我收口或淡化」。
+- `gm_runtime.md` **节奏规则**（"事件少时克制、点到为止"）限定到**信息/事件密度**，明示"短"不等于淡化或回避剧本要求的内容强度。
+- `prompt_builder.py:_narrative_craft_directives` 工艺层 wrapper（system 高优先级、与合规同等优先）加同款尺度中立化说明。
+
+**为什么不删"你首先是小说家"**：它是文笔质量的来源，删了得不偿失；改为**显式解耦**——保留"像小说"的工艺要求，同时切断它与"得体审查"的联想。
+
+**仍诚实保留的判断**：尺度最顽固的地板是**基座模型 DeepSeek 自身 RLHF**（模型层、prompt 难覆盖），以及**剧本自己的 must_not/tone_dont/forbidden_drift**（可能是 AI 生成时推断填的保守项，在设定页可改）。本轮只动系统侧软性收口，模型层杠杆仍是方案 C（换正文模型）。**效果须实机 A/B 验证**。
+
+**验证**：`ruff check` 干净；`_narrative_craft_directives` 空态仍返回 ""（新增文案在非空分支内，不破 `test_gameplay.py` 既有断言）。
+
+### Round 53 (2026-06-22) — 纯叙事化改造：删除全部量化数值，转小说向 RPG
+
+**用户决策（方向性大改）**：删掉游戏内**所有玩家可见数值**（等级/经验/六维属性/技能及熟练度/NPC 关系分数），连带删 d20 判定层、行动后果卡、危机条 crisis、压力时钟 pressure_clock，把状态完全用**文字**维持，做成彻底的叙事向 RPG。设计 spec 见 [`docs/superpowers/specs/2026-06-22-pure-narrative-rpg-design.md`](superpowers/specs/2026-06-22-pure-narrative-rpg-design.md)。核心心法：**不是"删数字"，是"把每个数字原来在干的活改写成一条叙事机制"**——删了不补=退化，补对了=升级（方案 B）。
+
+**删除（后端）**：`action_resolver.py`（d20 判定层）、`survival_clock.py`（crisis+pressure_clock+crisis→defeat）整文件删；`quantified_state.py` 删 xp/skill/ability/升级/熟练度/关系打分（391→125 行），只留 conditions/relationships 两个**文字化**结构；`gameplay.py` 删 `_resolve_action_outcome`+action_outcome 全链路；`state_v2.py` 删 progression/skills/abilities/crisis/pressure 投影、`protagonist_sheet` 收敛为 name/identity/conditions、conditions 去 severity、relationship_tracks 去全部数值改文字 status；`game_creator`/`game_generator` 删数值种子；`schemas/turn.py`+`routers/gameplay.py` 删 action_outcome。
+
+**保留并去数字化**：conditions=`{name,status,note,source,visibility}`、relationships=`{npc,status,note}`（结构化存**文字**，保长局一致性、玩家侧零数字）；`act_pacing` 幕后节奏信号保留（D4，防 Round 51 "推不动"复发）；`active_scene.pressure` 是文字非数字，保留。
+
+**失败出口改叙事驱动（D5）**：crisis→0 的 defeat 没了 → extractor 语义判定终局失败上报 `story_progress_update.defeat=true`（布尔信号，镜像 campaign_complete，经 `_apply_story_progress` 白名单入库）；失败结局机器（epilogue）保留、只换触发源。
+
+**无数字版张力设计 + 文笔升级（prompt，规则编号变更）**：
+- `gm_runtime.md`：**规则 33** 从"判定结果是硬约束"改写为**「是，但…／否，但…」框架**（消费 Director 的定性赌注 risk_note/cost_if_fails，成功带代价、失败留转机，明令"别滑向有求必应"）；**规则 34** 去掉 crisis/pressure_clock 数值，改"危险靠情境演不靠数值"；顶部叙事工艺段新增正向锚点"代价与失败是好戏的一部分"。
+- `story_director.md`：**规则 12** 从 action_check（d20+属性/技能）改为**定性赌注**（risk_note + cost_if_fails，无骰子无数值）；输出结构去 action_check、加 risk_note/cost_if_fails。
+- `extract_state_delta.md`：**规则 7/8** 去数值化（关系/状态只产出文字）；**新增规则 23**（终局失败 defeat 语义上报）；输出结构删 xp_events/skill_events/ability_updates、condition/relationship 去数字、加 defeat。
+- `generate_epilogue.md`：defeat 描述去"危机条归零"，改叙事/锚点驱动。
+
+**迁移**：无破坏性迁移，旧存档数值字段（skills/xp/progression/crisis/relationship-score）自然休眠（同 Round 47/49）。诚实取舍：旧存档 rebuild 后无 crisis→危机驱动 defeat 不复现（改叙事 defeat，旧局默认不 defeat、更宽容、不崩）。
+
+**前端（子 Agent 执行，纯叙事化清理）**：`stateV2.ts` 删 ProgressionState/skills/abilities/crisis/pressure 类型、protagonist_sheet 收敛、relationship/condition 改文字；`gameExperience.ts` 删 ActionOutcomeView/extractActionOutcome + 经验/技能结算段、结算条改文字增量；play/status/[id]/characters 页删等级/经验/属性/危机条/技能/关系数值展示，改文字渲染，defeat/通关加结局 pill；`globals.css` 删 crisis-bar/turn-outcome 样式；`api.ts` 删 TurnInsights.action_outcome。
+
+**验证**：后端容器内 `ruff check .` 干净 + **pytest 245 passed**（268→245，删 action_resolver/survival_clock 两个测试文件共 23 用例；其余受影响测试改成文字契约：关系文字 status、defeat 链路、投影去数值）。前端 `eslint .` 0 + `tsc --noEmit` 0 + `vitest 52 passed` + `next build` 通过；残留数值字段引用扫描仅剩误命中（workshop 合并冲突 `e.conflict`）。Docker api/worker/web 三镜像均已重建重启、容器 healthy、worker 启动无异常。整体 diff：32 文件、+230/−1416（净删 ~1200 行）。
+
+**最大风险（须真实游玩验证）**：无骰子后 GM 可能滑向"有求必应、张力软掉"——靠 yes-but 框架 + Director 定性赌注 + gm_runtime 正向化压住，规则遵守度纯函数测不了，待实机观察。**后续选项（方案 C，本次不做）**：GM 正文换更强模型（天花板最高、有成本）。
+
+### Round 52 (2026-06-22) — 剧本遵循护栏：高压锚点停滞监控 + 导入剧本 required 锚点警告
+
+承接 Round 51 的 `act_pacing`：本轮不新增 LLM、不自动补锚点、不恢复同步 drift，只做两条确定性监控/护栏，防止"信号已经进 Director/GM，但真实运行仍看不到推进"和"弱剧本导入后天然缺转幕抓手"静默发生。
+
+**① 高压锚点停滞监控（post-state，低误报）**：
+- `act_pacing.py` 新增 `ANCHOR_PACING_STALL_TURNS_AFTER_HIGH = 3` 与 `observe_act_pacing_stall()`。当 `pressure=high` 后再持续 3 回合仍无 required 锚点进展，返回 `act_pacing_stalled` flag；只读 state/runtime_story，不做文本语义判断、不写状态。
+- `turn_maintenance_jobs._apply_delta` 在状态提取、应用、rebuild 之后计算停滞观测，并合并进 `turn_runtime_inputs.output_observation.flags` 与 `output_observation.act_pacing`。选择 post-state 是为了避免误报"本回合其实完成锚点但 extractor 尚未入库"。
+- 前端本回合详情已展示 `observation.flags`，无需新增 UI 即可看到停滞告警。
+
+**② 导入/生成剧本结构警告（不阻断旧兼容）**：
+- `story_settings.py` 新增 `story_settings_warnings()`：当 `act_plan` 中某幕没有任何 `required=true` 完成锚点时，返回作者可见 warning；`validate_story_settings` 仍保持只 log 不 raise，避免破坏旧存档/手动空剧本兼容。
+- `GeneratorFinalizeResponse` / `GeneratorFinalizeJobRead` 增加 `warnings`。`/api/generator/import-script`、同步 finalize、异步 finalize job snapshot/read 都透出 warnings。
+- `games/new` 页面新增 `scriptWarnings` 展示区，导入或生成完成后在看板上方显示结构提示；不阻止继续编辑或创建。
+
+**验证中顺手修复**：`web/Dockerfile` 给 Next 运行时 `.next/cache` 预建并授权给 `node`，避免 web 容器在页面资源缓存时出现 `EACCES` 日志。
+
+**验证**：TDD RED→GREEN；容器内目标后端测试 **19 passed**（`test_act_pacing`、`test_act_pacing_wiring`、`test_import_script`、维护集成用例）；全量后端 `pytest tests/` **268 passed**；`ruff check app tests` 干净。前端 `eslint .`、`tsc --noEmit`、`vitest` **52 passed**、`next build` 通过。Docker 已重建并重启 api/worker/web，api/web/worker 状态与日志正常；浏览器验证 `/games/new` 导入弱剧本会显示 `剧本结构提示`。
+
+### Round 51 (2026-06-20) — 锚点驱动节奏压力：治"不跟剧本 / 推不动 / 选项全是原地打转"
+
+**实证诊断（用户反馈"剧本遵循性差 + 剧情推进有问题"）**：查真实存档 agent_traces（某真实存档一局约 28 回合，剧本内容脱敏不复述），铁证——第一幕 4 个 required 锚点**只完成 1 个**，`ready_for_next_act` 始终 false、**从未转幕**；导演 scene_objective 连续十几回合反复设"准备型 / 训练型 / 加固型"小目标，**从不真正触发当幕的关键锚点戏**（甚至出现"避免提前触发"的目标）；crisis 全程满血 100（危险从未兑现）。排除两个误区：剧本内容**完整进了 GM payload**（Round 48 重构没丢）、抽查 GM **严格跟了导演指令**。根因落在**导演层缺节奏压力**——它每回合只反应式服务玩家当下行动、无"本幕停留多久 / 距上次锚点进展多久"信号，于是在玩家不断选择停留型行动时被"再准备一次"无限拖住。**且 GM 给的 A/B/C/D 也全落在"准备"框里**（连续 5 回合实测，无一可推进），死循环自我强化。
+
+**为什么"修改之后"才明显（钟摆过度矫正）**：Round 44/46/49 为治"生硬/像规则报告"集中松绑了所有向前驱动——Round 44 把 gm_instruction/scene_objective 降成软提示+删素材清单、Round 46 删同步"拽回主线"、Round 49 删锚点文本兜底（转幕 100% 靠 LLM 显式上报）。一个旁证：更早一局（Round 44 前）能逐幕推进、触发过转幕；本轮诊断的那局（Round 44 后）28 回合困在第一幕。**Round 49 §"已知中间态"里早埋的 TODO**（"停留超 M 回合无锚点进展→给 Director 软提示"）本轮兑现。
+
+**改动（纯导演 + GM 选项层，确定性信号、零新增 state、rebuild 安全、无迁移）**：
+- **新增 `app/services/act_pacing.py`**：`compute_act_pacing(state_v2, runtime_story)` 纯函数。用现成字段算 `turns_since_anchor`（`current_turn − last_anchor_update_turn`，缺省回退 `last_advance_turn`/0）→ `pressure`：无未完成 required→`ready`；`≥ANCHOR_PACING_HIGH_TURNS(8)`→`high`；`≥ANCHOR_PACING_RISING_TURNS(4)`→`rising`；否则`low`。`next_required_anchor` = 当幕第一条未完成 required 锚点 `{id,title,completion_signal}`（`required` 默认 True，与 story_settings/state_applier 对齐）。回合号读 `state_v2_view` 的 `active_scene.turn`（兼容裸 state 的 `current_turn`）。
+- **注入两处 payload**：`story_director._payload` 顶层加 `act_pacing`；`prompt_builder.build_runtime_messages` 在**尾段**（`current_act_open_anchors` 旁、缓存断裂点之后）加 `act_pacing`——**不破 Round 48 的 prefix cache**（字节前缀测试仍过）。
+- **`story_director.md` 新增规则 13**：按 pressure 调 scene_objective——`high` 时**必须**把戏推到 `next_required_anchor.completion_signal` 兑现的临界点（锚点本回合就发生/启动，不再"准备一次"），仍承接玩家行动；`ready` 不硬推。
+- **`gm_runtime.md` 新增规则 36**：pressure 为 rising/high 时，A/B/C/D **至少一条**是推向 `next_required_anchor` 的前进选项，**禁止四个全是休整/加固/原地重复**；其余仍可谨慎/探索/关系向（不与规则 5/6 冲突、仍是建议非强制）。
+
+**明确不做（避免把"生硬"请回来）**：不改 GM 文笔/字数、不重启同步 drift。pacing 只走导演决策与"选项至少留一条出路"，HOW 写仍由 GM 自主。
+
+**已知局限（诚实记录）**：① Round 44 把 gm_instruction 降为软提示——若上线后监控到 high 压力下 GM 仍拖延（导演已要求收束、GM 仍只回应玩家小动作），下一轮再给 GM 加一条呼应规则。② `turns_since_anchor` 在完成任一锚点时重置——多 required 锚点的幕里，完成一个会给喘息再爬升，属预期设计。③ 阈值 8/4 为 observation-driven 初值，待上线看真实 pressure 分布再调。
+
+**验证（TDD：RED→GREEN）**：容器内 `ruff check` 干净 + `pytest tests/` **264 passed**（+8：`test_act_pacing` 6 个纯函数 low/rising/high/ready/开局边界/required默认 + `test_act_pacing_wiring` 2 个导演&GM payload 注入）。**部署**：api/worker 镜像已重建重启（无 web、无迁移）。**行为效果待真实游玩验证**（LLM 是否在 high 压力下真把戏推向锚点、是否真给出前进选项）——纯函数与信号注入已测，规则遵守度只能实机观察。
+
+### Round 50 (2026-06-19) — 导入自定义剧本（外部 AI 写 → 粘贴 JSON → 看板预览 → 建游戏）
+
+新功能：玩家在外部 AI（Claude/ChatGPT）里按 RPGForge 结构写好剧本，粘贴 JSON 即可新建一个"契合自己想法"的可玩游戏。设计 spec 见 `docs/superpowers/specs/2026-06-19-import-custom-script-design.md`。
+
+**复用为主、零新增 LLM 链路**：`games/new` 现有流水线本就是 `generatedConfig → buildBoardModel → SettingsBoard 分块预览 → create-game`；本轮只给它加一个"喂入口"，下游预览/编辑/建游戏/开场白全复用。
+
+**后端**（2 端点，`api/app/routers/generator.py`）：
+- `GET /api/generator/authoring-kit`：下载"剧本创作包" Markdown = 现成 v2 指南（`export_settings_guide_markdown`）+ 完整范例剧本 + AI 指令。新模块 `app/services/authoring_kit_exporter.py`，范例 `AUTHORING_KIT_EXAMPLE`（全新编写的侦探题材，**不碰任何真实存档**）由测试守护必须能过 `validate_story_settings`。
+- `POST /api/generator/import-script`：吃粘贴 JSON → `build_imported_game_config`（`game_creator.py`）校验+归一化 → 返回 `GeneratorFinalizeResponse`（与 finalize 同构，`model_used="import"`）；不建游戏、不落库。
+
+**关键坑 + 兜底**：① 给 AI 的指南必须用 **story_settings v2** 真实 schema，`docs/AI_STORY_RUNTIME_GUIDE.md` 那份旧结构（script_outline/campaign_contract）**不可导入**。② `normalize_story_settings` 会把任意输入静默纠成合法空壳（title 缺省「未命名游戏」、format_version 纠回），故 `validate` 挡不住垃圾粘贴 → 新增 `_story_has_content` 防线：标题/世界观/角色/幕/故事核心全空则 400。③ `_extract_story_settings` 兼容裸对象 / settings-export 包裹体 / 前端再包一层。
+
+**前端**（`web/app/games/new/page.tsx` + `web/lib/api.ts`）：顶部加「AI 访谈生成 | 导入剧本」模式切换；导入面板 = 下载创作包 + 粘贴 textarea + `.json` 上传 + 解析预览；解析成功 `setGeneratedConfig` → 复用现成看板预览 → 「确认并开始冒险」。
+
+**过 Round 44 前端门**：这不是给冻结的 SettingsBoard/工坊加作者便利新功能，而是**给玩家核心循环加一条创建入口**——让玩家直接得到契合自己想法的可玩游戏（"读剧情→做选择→看后果"的前置）。触点是 `games/new` 创建流，非冻结看板。
+
+**安全验证**：TDD（6 个新测试，含空剧本拒绝走 RED→GREEN）；容器内 `ruff` 干净 + **pytest 255 passed**；前端 `eslint`/`tsc`/`vitest 52` 全过；重建 api/worker/web 后**真实端点冒烟**：范例→200、垃圾→400、极简真实剧本→200。
+
+**部署**：api/worker/web 镜像已重建重启（无迁移）。
+
+### Round 49 (2026-06-19) — T2 外科拆 state_applier Phase A：删锚点文本推断 backstop
+
+承接架构审计"state_applier 是全项目最烂巨石"的客观结论（2150 行、184 行脆弱中文子串匹配、Round 16/26/27/28/29/30/33/34 八轮返工同一病灶）。本轮做 Phase A——**外科式删掉锚点文本推断 backstop**（最易误判、最该砍的一层）。
+
+**删除**：`_inferred_completed_anchors`（原在 `_sync_story_progress_and_quests` 调用，用 narrative 证据整串/整短语匹配反推锚点完成）+ `_anchor_completion_reason`，共 **-67 行**（2150→2083）。共享 helper（`_completion_anchor_records_for_act`/`_meaningful_phrases`/`_evidence_units`）保留（任务推断等仍用）。
+
+**新契约**：锚点完成**只剩 LLM 显式 `completed_anchors`**（`extract_state_delta` 规则 10，经 `_apply_story_progress` 白名单校验入库）。转幕（`_computed_ready_for_next_act`）/通关（`campaign_complete`）本就只读 `completed_anchors` 列表、从不调被删函数 → 链路自洽。
+
+**安全验证**：① 容器内 `ruff` 干净 + `pytest tests/` **250 passed**（2 个断言推断的测试改成新契约：一个显式上报两锚点→转幕+派生；一个空 delta+证据→锚点不完成）；② **3 个真实存档 rebuild 零回退**（act/anchors/campaign_complete 完全不变）；③ **全存档扫描 0 条"推断来源锚点"**（`anchor_history.reason` 无"根据当前状态证据补全"）→ 删推断对所有现有数据零回退、**无需迁移**。
+
+**2-Agent 对抗性审查 + 采纳**（无 critical/high，2 minor-nits）：确认 `game.status=completed` 仅由 `campaign_complete`（末幕锚点）驱动、与 main_quest 零耦合 → **不会假通关**。采纳：① 修正注释（原写"确定性转幕兜底"代码里不存在，已改为明示"无文本兜底、漏报即卡幕"）；② `does_not_infer` 测试补回 `main_quest_10==completed` 断言，钉死"任务-锚点解耦"契约。
+
+**已知中间态 / 取舍（诚实记录）**：
+- **任务-锚点解耦**：`_quest_completion_evident`（任务文本推断）属 Phase B 未删 → main_quest 可经文本推断 `completed`，但其锚点不进 `completed_anchors`（玩家可能看到"主线任务已完成、剧情却不前进"）。Phase B 删任务推断后消解。
+- **转幕单点依赖**：删 backstop 后，有 required 锚点的幕转幕 **100% 依赖 LLM 显式上报**，无文本兜底——LLM 漏报锚点即卡幕。这是审计认可的取舍（"别用代码猜中文语义"），但属高敏感单点。**已做第一道缓解**：`extract_state_delta.md` **规则 10** 从被动（"只有…才…"）改为**主动逐条核对**——对当前幕每个未完成锚点判断 GM 本回合是否达成其 completion_signal，并明示"这是唯一来源、漏报即卡幕"（非脆弱、纯 LLM 语义判断，正是审计认可的层）。**仍待**：上线后监控漏报率（如"narrative 含某锚点整串 completion_signal 但 N 回合未上报"占比）；若偏高，再设计**确定性**转幕兜底（如停留超 M 回合无锚点进展→给 Director 软提示，是提示不是自动完成）。
+
+**Phase B（未做，更险）**：删任务/线索文本推断（`_quest_completion_evident`/`_activity_text_matches`/`_completed_topic_in_thread`，184 行里的大头）——synthesis 要求"先加 LLM 显式 resolve 路径，否则 un-fix Round 26 的线索 bug"。
+
+**部署**：api 镜像已重建重启（无 web 改动、无迁移）。
+
+### Round 48 (2026-06-19) — T1 prefix cache 多段切分（可缓存前缀 33%→84%）
+
+承接 Round 22c 的"宪法层字节固化"。审计指出 GM 上下文 prefix cache 命中率仅 ~4.5%——逐回合变化的内容混进了稳定前缀。本轮做真正的"多段切分"：把逐回合内容移出可缓存前缀。纯 GM payload 改动，drift/state-ops 各自 `build_runtime_story` 不受影响。
+
+**根因**：`build_runtime_story` 把 `current_act.completion_anchors` 过滤为"未完成项"（随完成逐回合缩短），它同时进了 ① system 幕级简报（断裂点）② user 的 `runtime_story`。且 `runtime_story` 还含逐回合的 `story_progress`、`selected_action_style`、`related_story_materials`——这一大块（含整局静态的 story_core/worldview/角色/机制/主线）因此被钉在断裂点之后、永不缓存。
+
+**改动**：
+- **system 幕内稳定**（`gm_hard_constraints`）：从幕级简报移除逐回合的未完成锚点，只留 objective/dramatic_question（幕内静态）。
+- **runtime_story 拆分**（`prompt_builder._split_runtime_story_for_cache`）：把 GM 的 runtime_story 拆成「静态」+「`current_act_open_anchors`」；抽走 `story_progress`（GM 从 current_state_v2 读）/`selected_action_style`/`related_story_materials`（尾段已单列）/`current_act.completion_anchors`。
+- **user payload 重排**：`game → generation_parameters → runtime_story(静态)` 进可缓存前缀；`current_act_open_anchors → current_state_v2 → 风格/素材/记忆/导演/recent_turns/player_input` 放逐回合尾段。
+- **`gm_runtime.md`**：规则 21（runtime_story 现为「静态设定视图」）、23（priority_order 是逻辑阅读序、非字面键路径）、30（锚点引用改指 `current_act_open_anchors`）。
+
+**实测**（真实存档）：可缓存稳定前缀 = system(9111) + game/gen + 静态 runtime_story(13500) = **84.0%** 总输入（改前仅 system ~33%；更早还断在锚点处）。按 ~1/10 缓存计价，命中时 input 成本约降 76%。缓存幕内有效、随幕推进（每~10回合）断一次。**注**：GM 流式调用不回 usage，无法直接测 live 命中；字节稳定前缀长度是命中的决定性代理指标（已用字节级测试钉死）。
+
+**3-Agent 对抗性审查 + 采纳**（1 OK + 2 minor-nits，无 critical/high）：确认无悬空引用（story_director/extractor/drift 仍引用 runtime_story.current_act.completion_anchors 是对的——它们各自 build 完整未拆分版）、稳定前缀纯净、无别处消费方。采纳 LOW：规则30 删掉对 GM 不可见的"静态定义"措辞、`_split` 加 `isinstance(list)` 守卫、payload 测试升级为**字节前缀相等**、规则23 澄清 priority_order。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **250 passed**（+3：拆分纯函数 / 静态前缀字节稳定 / system 字节稳定）。**部署**：api/worker 镜像已重建重启（无 web 改动、无迁移）。
+
+### Round 47 (2026-06-19) — T1 属性 seeding：让 d20 判定真实生效（角色 build 影响成败）
+
+承接 T0 的「行动后果卡」——审计发现开局 `protagonist.attributes` 多为空 → `_compute_modifier` 的 attribute 加成恒 0 → 前中期判定纯靠运气、角色 build 不影响成败、后果卡的 `+modifier` 永远是 0。本轮让属性真正进入判定。纯后端，无迁移。
+
+**统一六维**：力量/敏捷/体质/智力/感知/魅力（D&D 式，10=常人均值，加成 `(值-10)//2`）。判定层 `_attribute_bonus` 大小写+子串匹配 `action_check.attribute`；Director（`story_director.md` 规则12）被要求"用 current_state_v2 里已有的名字"填 attribute → 同名即匹配，**属性名对齐天然成立**（六维或自定义属性都行）。
+
+- **生成侧**（`generate_config_section.md`）：`initial_state.protagonist.attributes` 模板由 `{}` 改为填满六维示例 + 规则"数值 8–16、按主角设定分配明显强弱（强项 13–16/弱项 8–9），不要全填 10 或留空"。→ 新游戏开局就有 build 差异。
+- **初始化兜底**（`game_creator`）：新增 `DEFAULT_PROTAGONIST_ATTRIBUTES`（六维全 10，定义在 `state_v2`）；`_fill_protagonist_from_story_settings` 在 configured 早返回**之前**，属性空则填默认（AI 未产出/手动建档也不空）。
+- **老存档零迁移**（`state_v2._protagonist_sheet`）：投影时属性仍空则懒注入默认六维。不动存档、rebuild 可复现。**注意**：仅影响后端 `state_v2_view`（判定层/Director/GM 投影）；前端 `getStateV2FromGame` 是独立客户端归一、读原始 state——故空属性老存档"判定用中性六维生效、但前端状态页仍显示空"，属轻微展示侧不一致、非 bug（新游戏两端一致）。
+- **DC**：本轮**不动**（观察驱动）。中性默认让老存档/非专长行动难度不变；专长行动变易是"build 该起作用"的正确表现；hard(16)/extreme(20) 在典型 +3~+5 修正下仍有真实不确定性（hard 需 roll≥11~13）。盲目通胀 DC 会变 grindy——上线后看真实掷骰分布再定。
+- **可见度**：行动后果卡（Round 44）已在阅读流展示 outcome_label + 骰面；只露结果不露 breakdown（防泄露关系/隐藏值）。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **247 passed**（+4：懒投影默认/真值保留/game_creator 填充/填充不覆盖生成值）；真实老存档 rebuild 实测属性原样保留、空属性投影得默认六维。**部署**：api/worker 镜像已重建重启（无 web 改动、无迁移）。
+
+### Round 46 (2026-06-18) — T1 Drift 改异步事后审计（去延迟尖峰 + 不再压制能动性）
+
+承接路线图 T1，把"偏离校验(drift)"从玩家同步路径改成异步事后审计。**§2.1/§2.3/§2.5 链路表已变，下次维护文档时同步**（玩家路径少一层、stage_total 7→6）。
+
+**玩家路径（gameplay.py）**：删 `_should_run_drift_validation`（旧：首回合+每3回合+高风险词/forbidden 命中触发）与 `_validate_and_maybe_rewrite`（major/critical → 二次 Pro 重写）、`STAGE_DRIFT_VALIDATION`、gameplay 的 `DriftValidator` 依赖/构造参数。GM 写完 → 观测 → 返回。**净效果**：去掉每3回合的 90s 同步校验尖峰 + 命中重写的 360s 二次等待 + "偏离→重写拽回主线"对玩家发散探索的压制。
+
+**唯一事后剧透兜底（新增 `_redact_forbidden_reveals_if_hit`）**：读 `output_observer` 已算的 `forbidden_reveal_hits`（当前幕 `forbidden_reveals` **整串命中**、高精度低召回、零额外 LLM）；命中（罕见）才做一次定向重写"仅删提前揭露、其余保留"，重写失败/超时保留原稿。重写后复检残留命中 → `logger.warning` 告警；观测失败置 `output_observation={"observe_error":True}`，避免防线静默塌陷。
+
+**异步审计（turn_maintenance_jobs `_audit_drift`）**：observe-only，回填 `turn_jobs.drift_severity` 供 admin 看板监控"去同步控制后跑偏趋势"，**不触发任何重写**；任何异常只 `logger.exception`、绝不拖垮维护。session 内 eager-load（selectinload config/state）+ 重建 `GMRuntimeOutput`（需正好 4 个 A/B/C/D 选项，失败跳过）→ session 外调 `DriftValidator.validate`。
+
+**stage**：`TURN_JOB_STAGES` 去 drift 项 → `TURN_JOB_STAGE_TOTAL` 7→6；前端 `stageTotal` 读后端动态值（顺手把 `turnJobStream.ts:58` / `play/page.tsx` 两处陈旧 `|| 7` fallback 改 6）。
+
+**4-Agent 对抗性审查 + 采纳**（无 critical/high，3 minor-nits + 1 needs-fix=缺测试）：① **时序修正**：`_audit_drift` 从 `_apply_delta` 之后**移到之前**——否则幕转换回合 state 已推进、用新幕 runtime_story 配旧幕 director 判定 → drift_severity 在最高风险回合系统性误判；前移后用 pre-turn state、与旧同步链一致。② **稀疏采样**：审计加 `DRIFT_AUDIT_INTERVAL_TURNS=3`（首回合+每3回合），不每回合烧 Flash（剧透安全已由同步整串门负责）。③④ 见上（残留告警 / observe_error）。⑤ 前端陈旧 fallback。
+
+**已知取舍（诚实记录）**：① 运行时剧透防护收敛为**整串命中**——换措辞的概念性剧透不再被同步拦，交由异步 `drift_severity` 趋势监控（看板可对 `forbidden_reveals` 为空的幕 + severity 升高告警）。② `rewrite_triggered` 口径变为"仅剧透兜底重写"。③ `StateExtractor` 的 `drift_hints` 通道对当前回合失效（extract 先于异步审计跑）；审计结果只服务看板、不回流本回合 state 提取。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **243 passed**（+3 守护：stage_total=6 不含 drift / 剧透门无命中零 LLM 不置 rewrite_triggered / `_audit_drift` 缺 job 不抛）；前端 `eslint .` 0 + `tsc` 0 + `next build` 通过。**部署**：api/worker/web 三镜像均已重建重启（无迁移）。
+
+### Round 45 (2026-06-18) — T1 叙事工艺层 + recent_turns 梯度 + 叙事连续性摘要轨（再上一个台阶）
+
+承接 Round 44 T0，落地审计路线图 T1 中"最对症文笔"的两条（用户拍板「开始做这一轮」）。纯后端，无迁移，旧存档兼容（无 `type="narrative"` 摘要时优雅降级）。
+
+**① 叙事工艺层 → 提进 system 稳定前缀**：新增 `prompt_builder._narrative_craft_directives(runtime_story)`，从 `runtime_story.story_core` 抽**整局静态**的 `narrative_style`/`core_fantasy`/`emotional_arc`/`tone_do`/`tone_dont`/`pacing_rules`，渲染"=== 本剧本叙事工艺 ==="，在 `_build_system_content` 里插在「宪法层」与「篇幅指引」之间（稳定前缀、不碎裂 prefix cache；全空则 no-op）。`gm_runtime.md` 顶部新增**正向工艺锚点段**（承接优先/演而非讲/对白推进/节奏呼吸/人称一致）+ **新增规则 35**（`narrative_recap` 框定：前情提要、非复述清单）。不改负向规则 12/13/16/20。
+
+**② recent_turns 梯度**：`_turn_payload` 加 `full` 参数，最近 `_RECENT_FULL_TURNS=2` 回合下发 `gm_output` 完整正文（截 `_RECENT_FULL_CHARS=1800`）、不再发 `gm_output_excerpt`；更早回合仍只发 excerpt。让 GM 真能看到上一回合结尾去承接，根治"同地点每回合从头重述"。
+
+**③ 叙事连续性摘要轨**：`ContextCompressionOutput` 新增 `narrative_recap`；`compress_context.md` **新增规则 8** + 输出字段（承接语气的"前情提要"，≤300字软目标、不剧透、append-then-condense）；`update_after_turn` 在非空时 upsert `type="narrative"` 单行摘要；`load_prompt_summaries` 带出 `narrative_recap` → GM `memory_summaries`；`_fallback_summary` 维护它（保留尾部最近节拍、永不空白）。治"长局走味"。
+
+**对抗性审查（4-Agent 工作流）+ 采纳**：审查结论无 critical/high（2 OK + 2 minor-nits），确认 prefix-cache 中性偏改善、回归边界安全、剧透无新增风险、对文笔净正向。采纳其真问题：① 工艺 6 字段从 GM **user payload story_core 剥掉**（`_strip_craft_from_story_core`，原本 system+user 重复下发、费 token 且把基调显性化成清单）；② full 回合去掉冗余的 `gm_output_excerpt` 前缀子串；③ fallback recap 截断改保留尾部（原 `_trim_text` 截前缀会丢最新→长局停更）；④ 常量命名 + 本条记账。
+
+**验证**：容器内 `ruff check app/` 干净 + `pytest tests/` **240 passed**（+1 工艺层 no-op/渲染测试 + 更新 recent_turns 断言 + 工艺段排序/去重断言）。**部署**：api/worker 镜像已重建重启。**Telemetry 待观测**：recent_turns 完整正文每回合净增约 2×min(正文,1800) 字（不缓存），承接效果稳定后可评估收档到 `_RECENT_FULL_TURNS=1` 或更低 `_RECENT_FULL_CHARS`。
+
+### Round 44 (2026-06-18) — 架构级审计（35-Agent 工作流）+ T0 后端「去配额化/去清单化」止血叙事生硬
+
+**背景**：用户反馈实机输出"生硬、生搬硬套剧情和设定，不像小说"。先对真实存档做实证诊断（同地点反复重述/凑配额假加粗/低事件回合注水/机械塞素材/义务复述线索），再用多 Agent 工作流（8 维度并行审计 → 对抗性压力测试 → 战略综合，35 Agent / 250 万 token）做架构级审视。用户明确授权"重构到任何程度"。
+
+**审计核心结论**（详见个人记忆 `rpgforge-architecture-audit-2026-06`）：43 轮力气投在"防跑偏/防剧透"防御轴，地基（数据/迁移/队列/event-sourcing/防剧透宪法层）健康，但把唯一玩家可见产物 narrative 建模成"约束满足问题"而非"语言艺术"，GM 退化成履约机器=生硬。根因在**传递层**：`prompt_builder.py:122-147` 把合规+篇幅配额固化进 system 最高优先级，voice/情绪弧丢进被 state_v2 淹没的 user JSON；`gm_runtime.md` 34 条规则约 26 条是负向禁令。**对抗性压测点破**：DeepSeek `thinking=enabled` 时结构性丢弃 temperature（`deepseek_client.py:216`）→ 调温度松绑文笔无效，把"换正文模型"推到前台。
+
+**T0 落地（本轮，纯 prompt/参数 + 纯 UI，零安全风险，已验证部署）**——用户选定「T0三件套 + 后果卡」（模型盲测后弃），三件套全部落地。**后端（prompt/参数）**：
+- **软化字数下限 + 删 emphasis 配额**：`prompt_builder._generation_parameter_directives` 把"【硬下限】narrative 不少于 N 字、字数不足视为偷工"改为"【篇幅·按信息量自然成文】事件少可短而精、不为凑字数注水复述，仅 <~250 字地板防敷衍"；emphasis 从"min–max 配额"改"宁缺毋滥、没有就不加"。`gm_runtime.md` 规则 7/13 同步改写。（遗留小瑕疵：保留的【优先级】块尾部仍有"不得低于硬下限"措辞，因该块含敏感词无法安全 Edit，语义无害，下轮顺手清。）
+- **去清单化**：新增 `prompt_builder._gm_facing_director`，从 **GM payload** 删 `continuity_notes`/`active_material_titles`（最易被 GM 当"必须逐条用上并加粗"的填空清单）；这两项仍保留在 StateExtractor 的 director_hints（异步维护）。`gm_runtime.md` 规则 22（scene_objective/gm_instruction 降级为软提示，forbidden_reveals/pacing_limit 仍硬）、规则 24（素材改"私有一致性知识底座，不是填空题"）。
+- **裁判对齐**：`turn_judge.md` prose_quality 改"节奏自适应：短回合不扣分；为凑字数注水/堆砌/凑数加粗才扣分"，防 Judge 反向奖励凑配额。
+- **测试同步**：`test_gameplay.py` 篇幅断言由"不少于 700 字"改"按信息量自然成文"。
+
+**前端（纯 UI/信息架构，不碰防剧透/状态/schema/存档）**：
+- **bold 去亮金**：`globals.css` `.story-markdown strong` 由 `--gold`+`font-weight:850`（假加粗放大器）改正文同色 `--foreground`+`650`。
+- **判定后果卡提进阅读流**：新增 `gameExperience.ActionOutcomeView` + `extractActionOutcome`（从 `state_delta_json.action_outcome` 取 outcome_label/action/roll/modifier/dc，tone 映射 critical/success/partial/failure→great/good/partial/fail）；`TurnSettlementCard` 顶部渲染彩色「行动结果 · X」卡（掷骰明细次要），**无判定回合不显示（不伪造成功）**；从 `TurnInsightsPanel` debug 抽屉移除重复判定块；篇幅标签去掉"未达硬下限"（短回合不再标失败）。
+- **冻结设定编辑器**：项目 `CLAUDE.md` 工作约束加「前端工作门」——新前端工作须先服务玩家循环「读→选→看后果」或修正确性/可访问性，冻结看板/工坊作者便利新功能（投入轴纠偏）。
+
+**验证**：后端 `ruff check app/` 干净 + `pytest tests/` **239 passed**；前端 `eslint .` 0、`vitest` **52**、`tsc --noEmit` 0、`next build` 全路由通过。**部署**：api/worker/web 三镜像均已 `build`+`up -d`（纯 prompt+UI 改动，旧存档无需迁移）。
+
+**本轮未做（待续）**：① 模型盲测（DeepSeek vs Claude）——用户试玩后认为后端改动后文笔可接受，**决定跳过**（环境也无 Anthropic key）。② T1/T2（叙事工艺层提 system、Drift 改异步事后审计、属性 seeding+判定可见、prefix cache 多段切分、外科拆 state_applier、记忆层叙事连续性轨、锚点多路径+结局变体）见个人记忆 `rpgforge-architecture-audit-2026-06` 路线图，待用户逐层拍板。
 
 ### Round 43 (2026-06-05) — 前端 UI 审查 + P0 可访问性修复
 

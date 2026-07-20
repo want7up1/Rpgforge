@@ -18,9 +18,9 @@ It's currently in early public preview and built to be self-hosted with Docker.
 
 - **You bring the idea, the AI builds the world.** Answer a short interview and RPGForge generates a complete, playable game: setting, rules, factions, characters, and an opening scene.
 - **Every turn is real storytelling.** The AI writes the scene as it streams in, then offers you A/B/C/D choices — or just type whatever you want to do instead.
-- **Your character actually grows.** XP, abilities, skill proficiency, conditions, quests, and open story threads are tracked as real game state, not just flavor text.
+- **Your story state actually persists.** Conditions, relationships, quests, open threads, discovered facts, and act progress are tracked as narrative state, not just flavor text.
 - **NPCs remember you.** Relationships shift based on what you actually do, and the world keeps the receipts.
-- **The story stays on track.** Behind the scenes, a "story director" and a "drift validator" keep every turn faithful to the world and rules you started with — so the AI doesn't quietly forget the plot.
+- **The story stays coherent.** Behind the scenes, a story director, pacing signals, output observation, and async audits keep turns faithful to the world and rules you started with — without turning play into a visible numbers game.
 - **It remembers the long game.** Turn, chapter, and long-term memory layers let a single adventure run for a very long time without losing the thread.
 - **Play anywhere.** A mobile-friendly play screen, a desktop dashboard, character archives with portraits, and clean Markdown storytelling.
 
@@ -162,7 +162,7 @@ docker compose ps
 
 ### Observability & AI quality
 
-Every LLM call (story director, GM, drift validator, state extractor, context
+Every LLM call (story director, GM, async drift audit, state extractor, context
 compressor, judge, generator) is recorded in the `agent_traces` table with its
 full prompt, output, token usage, latency, and status. Per-turn telemetry flags
 (`director_used_fallback`, `drift_severity`, `rewrite_triggered`,

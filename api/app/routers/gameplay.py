@@ -162,15 +162,12 @@ def get_turn_insights(
     ).first()
 
     observation: dict | None = None
-    action_outcome: dict | None = None
     agents: list[TurnAgentCost] = []
     if turn_job is not None:
         runtime_inputs = turn_job.turn_runtime_inputs or {}
         if isinstance(runtime_inputs, dict):
             obs = runtime_inputs.get("output_observation")
             observation = obs if isinstance(obs, dict) else None
-            outcome = runtime_inputs.get("action_outcome")
-            action_outcome = outcome if isinstance(outcome, dict) else None
         traces = db.scalars(
             select(AgentTrace)
             .where(AgentTrace.job_kind == "turn", AgentTrace.job_id == turn_job.id)
@@ -199,7 +196,6 @@ def get_turn_insights(
     return TurnInsights(
         turn_id=turn_id,
         observation=observation,
-        action_outcome=action_outcome,
         agents=agents,
         total_tokens_input=total_in,
         total_tokens_output=total_out,

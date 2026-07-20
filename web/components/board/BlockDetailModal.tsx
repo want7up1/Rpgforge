@@ -102,26 +102,26 @@ export function BlockDetailModal({
       aria-modal="true"
       role="dialog"
       aria-label={block.title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="px-modal-overlay"
     >
       <button aria-label="关闭" className="absolute inset-0 cursor-default" type="button" onClick={onClose} />
       <div
         ref={dialogRef}
         onKeyDown={handleDialogKeyDown}
-        className="surface-panel surface-panel-strong relative max-h-[85vh] w-full max-w-2xl overflow-auto"
+        className="px-modal max-w-2xl"
       >
         <div className="flex items-center justify-between gap-2">
-          <h3 className="surface-title">
+          <h3 className="px-heading text-base">
             {block.icon} {block.title}
-            {locked ? <span className="app-pill ml-2">✏ 已手动修改</span> : null}
+            {locked ? <span className="px-badge px-badge-bright ml-2">✏ 已手动修改</span> : null}
           </h3>
-          <button ref={closeButtonRef} className="app-button" type="button" onClick={onClose}>关闭</button>
+          <button ref={closeButtonRef} className="px-btn" type="button" onClick={onClose}>关闭</button>
         </div>
 
         <div className="mt-4 grid gap-4">
           {block.fields.map((f) => (
             <label key={f.key} className="grid gap-1">
-              <span className="text-sm font-semibold">{f.label}</span>
+              <span className="px-label">{f.label}</span>
               <BoardFieldEditor
                 field={f}
                 value={drafts[f.key] ?? f.value}
@@ -131,24 +131,24 @@ export function BlockDetailModal({
           ))}
         </div>
 
-        {suggestError ? <p className="mt-3 text-sm text-[#e0533d]">{suggestError}</p> : null}
+        {suggestError ? <p className="mt-3 text-sm text-[#ff6b5e]">{suggestError}</p> : null}
         <div className="mt-5 flex flex-wrap gap-2">
           {aiSuggest ? (
-            <button className="app-button" type="button" onClick={handleSuggest} disabled={suggesting}>
-              {suggesting ? "AI 补全中…" : "✨ AI 补全"}
+            <button className="px-btn px-btn-amber" type="button" onClick={handleSuggest} disabled={suggesting}>
+              {suggesting ? "AI 补全中…" : "✦ AI 补全"}
             </button>
           ) : null}
-          <button className="app-button app-button-primary" type="button" onClick={handleSave}>保存</button>
+          <button className="px-btn px-btn-primary" type="button" onClick={handleSave}>保存</button>
           {locked && onUnlock ? (
-            <button className="app-button" type="button" onClick={onUnlock} title="恢复 AI 最近一次生成的值并解除锁定">
+            <button className="px-btn" type="button" onClick={onUnlock} title="恢复 AI 最近一次生成的值并解除锁定">
               🔓 解锁 / 恢复 AI 原值
             </button>
           ) : null}
           {block.deletable ? (
-            <button className="app-button" type="button" onClick={onDelete}>🗑 删除</button>
+            <button className="px-btn px-btn-danger" type="button" onClick={onDelete}>✕ 删除</button>
           ) : null}
           {onSaveAsModule ? (
-            <button className="app-button" type="button" onClick={onSaveAsModule} title="把这个设定存为可复用模块">
+            <button className="px-btn" type="button" onClick={onSaveAsModule} title="把这个设定存为可复用模块">
               ⚗ 存为模块
             </button>
           ) : null}

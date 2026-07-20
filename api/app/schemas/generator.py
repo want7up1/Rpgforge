@@ -83,6 +83,7 @@ class GeneratorFinalizeRequest(BaseModel):
 class GeneratorFinalizeResponse(BaseModel):
     config: GeneratedGameConfig
     model_used: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 class GeneratorFinalizeJobCreateResponse(BaseModel):
@@ -94,6 +95,7 @@ class GeneratorFinalizeJobRead(BaseModel):
     id: UUID
     status: GeneratorJobStatus
     config: GeneratedGameConfig | None = None
+    warnings: list[str] = Field(default_factory=list)
     model_used: str | None = None
     error_message: str | None = None
     reasoning_content: str = ""

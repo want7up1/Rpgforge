@@ -16,7 +16,7 @@ from app.services.deepseek_client import (
     ChatCompletionStreamChunk,
     DeepSeekClient,
 )
-from app.services.game_generator import GameGeneratorService
+from app.services.game_generator import GameGeneratorService, _initial_state
 from app.services.generator_jobs import run_finalize_job
 from app.services.job_queue import enqueue_chat_job, rq_job_id
 from app.services.model_router import ModelRouter
@@ -62,6 +62,33 @@ def test_generator_interview_uses_pro_with_high_thinking() -> None:
     assert result.confirmed_requirements["core_premise"] == "失忆镖师追查义庄旧案"
     assert calls[0]["task_type"] == "generator_interview"
     assert calls[0]["reasoning_effort"] == "high"
+
+
+def test_initial_state_drops_removed_numeric_mechanics() -> None:
+    """纯叙事化：即使模型仍吐旧字段，初始状态也不持久化数值机制。"""
+    state = _initial_state(
+        title="雁回镇旧案",
+        description="失忆镖师追查义庄旧案。",
+        characters=[{"role": "protagonist", "name": "沈砚", "identity": "失忆镖师"}],
+        initial_state={
+            "current_turn": 0,
+            "protagonist": {
+                "name": "",
+                "identity": "",
+                "attributes": {"力量": 14, "敏捷": 12},
+            },
+            "progression": {"level": 3, "xp": 40},
+            "skills": [{"name": "追踪", "level": 2}],
+            "abilities": [{"name": "听风辨位"}],
+            "relationships": [{"npc": "陆沉舟", "trust": 60}],
+        },
+    )
+
+    assert "attributes" not in state["protagonist"]
+    assert "progression" not in state
+    assert "skills" not in state
+    assert "abilities" not in state
+    assert "trust" not in state["relationships"][0]
 
 
 def test_generator_interview_stream_reports_reasoning_and_content() -> None:
@@ -633,15 +660,6 @@ def finalize_stream_payload(task_type: str) -> dict:
                 "time": {"current": "秋末雨夜"},
                 "location": {"current": "雁回镇义庄"},
                 "protagonist": {"name": "沈砚", "identity": "失忆镖师"},
-                "progression": {
-                    "level": 1,
-                    "xp": 0,
-                    "next_level_xp": 100,
-                    "total_xp": 0,
-                    "xp_log": [],
-                },
-                "skills": [],
-                "abilities": [],
                 "conditions": [],
                 "relationships": [],
                 "inventory": [],

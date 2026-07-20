@@ -74,8 +74,9 @@ export function CharacterModal({ character, onClose, runtimeView = null }: Chara
   return (
     <div
       aria-modal="true"
-      className="fixed inset-0 z-50 grid items-end bg-black/45 p-2 sm:place-items-center sm:p-4"
+      className="px-modal-overlay items-end sm:items-center"
       role="dialog"
+      aria-label={`角色档案：${character.name}`}
     >
       <button
         aria-label="关闭角色档案"
@@ -84,13 +85,13 @@ export function CharacterModal({ character, onClose, runtimeView = null }: Chara
         type="button"
       />
       <article
-        className="relative grid max-h-[92vh] w-full max-w-3xl overflow-auto rounded-lg border border-[color:var(--border)] bg-[color:var(--panel)] p-4 shadow-xl sm:grid-cols-[minmax(12rem,0.42fr)_minmax(0,0.58fr)] sm:gap-5 sm:p-5"
+        className="px-modal max-w-3xl sm:grid sm:grid-cols-[minmax(11rem,0.4fr)_minmax(0,0.6fr)] sm:gap-5"
         onKeyDown={handleDialogKeyDown}
         ref={dialogRef}
       >
         <button
           aria-label="关闭角色档案"
-          className="app-button absolute right-3 top-3 h-9 w-9 px-0"
+          className="px-btn absolute right-3 top-3 h-9 w-9 px-0"
           onClick={onClose}
           ref={closeButtonRef}
           type="button"
@@ -98,12 +99,14 @@ export function CharacterModal({ character, onClose, runtimeView = null }: Chara
           ×
         </button>
         <div className="mt-8 sm:mt-0">
-          <CharacterPortrait character={character} />
+          <div className="mx-auto w-32 sm:w-full sm:max-w-none">
+            <CharacterPortrait character={character} />
+          </div>
         </div>
         <div className="mt-4 min-w-0 sm:mt-0">
           <div className="flex flex-wrap items-center gap-2 pr-12">
-            <h2 className="break-words text-xl font-semibold">{character.name}</h2>
-            <span className="app-pill">{roleLabels[character.role]}</span>
+            <h2 className="px-heading break-words text-xl">{character.name}</h2>
+            <span className="px-badge px-badge-amber">{roleLabels[character.role]}</span>
           </div>
 
           <InfoBlock label="身份介绍" value={character.identity} />
@@ -119,8 +122,8 @@ export function CharacterModal({ character, onClose, runtimeView = null }: Chara
 function InfoBlock({ label, value }: { label: string; value: string | null }) {
   return (
     <section className="mt-4">
-      <h3 className="text-sm font-semibold">{label}</h3>
-      <p className="app-wrap-text mt-2 whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
+      <h3 className="px-label">{label}</h3>
+      <p className="px-wrap mt-2 whitespace-pre-wrap text-sm leading-6 text-[color:var(--muted)]">
         {value || "暂无。"}
       </p>
     </section>
@@ -131,31 +134,22 @@ function RuntimeBlock({ runtimeView }: { runtimeView: CharacterRuntimeView }) {
   const facts = [
     runtimeView.location ? `位置：${runtimeView.location}` : "",
     runtimeView.status ? `状态：${runtimeView.status}` : "",
-    runtimeView.stage ? `关系阶段：${runtimeView.stage}` : "",
     runtimeView.relationship ? `关系：${runtimeView.relationship}` : "",
-    runtimeView.attitude ? `态度：${runtimeView.attitude}` : "",
-    runtimeView.recent ? `最近互动：${runtimeView.recent}` : ""
+    runtimeView.note ? `补充：${runtimeView.note}` : ""
   ].filter(Boolean);
+
+  if (facts.length === 0) {
+    return null;
+  }
 
   return (
     <section className="mt-4">
-      <h3 className="text-sm font-semibold">当前关系状态</h3>
-      {facts.length > 0 ? (
-        <ul className="app-wrap-text mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
-          {facts.map((fact) => (
-            <li key={fact}>{fact}</li>
-          ))}
-        </ul>
-      ) : null}
-      {runtimeView.axes.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {runtimeView.axes.map((axis) => (
-            <span className="app-pill" key={axis.key}>
-              {axis.label} {axis.value}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <h3 className="px-label">当前关系状态</h3>
+      <ul className="px-wrap mt-2 grid gap-1 text-sm leading-6 text-[color:var(--muted)]">
+        {facts.map((fact) => (
+          <li key={fact}>{fact}</li>
+        ))}
+      </ul>
     </section>
   );
 }

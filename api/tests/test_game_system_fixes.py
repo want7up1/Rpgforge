@@ -179,18 +179,21 @@ def test_inventory_remove_matches_across_item_and_name_keys() -> None:
     assert state["inventory"] == []
 
 
-def test_relationship_unknown_axis_skipped() -> None:
-    """未知关系轴不默认计入 trust（修 P2-10）。"""
+def test_relationship_event_stores_text_status_no_numbers() -> None:
+    """纯叙事化：relationship_event 只存文字 status，不产生任何数值字段。"""
     from app.services.quantified_state import apply_quantified_state_events
 
     state: dict = {}
     apply_quantified_state_events(
         state,
-        {"relationship_events": [{"npc": "测试NPC", "axis": "romance", "intensity": "major"}]},
+        {"relationship_events": [{"npc": "测试NPC", "status": "从猜忌转为信任"}]},
     )
-    assert all(
-        r.get("trust", 0) == 0 for r in state.get("relationships", []) if isinstance(r, dict)
-    )
+    rels = state.get("relationships", [])
+    assert len(rels) == 1
+    assert rels[0]["npc"] == "测试NPC"
+    assert rels[0]["status"] == "从猜忌转为信任"
+    # 不应出现任何关系数值。
+    assert all(k not in rels[0] for k in ("trust", "affection", "respect", "stage", "conflict"))
 
 
 # ---------- 第一批：GM hidden 投影（8.1）+ 关系合并取最新（6.1/P2-11）----------
@@ -212,15 +215,14 @@ def test_scene_projection_keeps_hidden_quests_for_gm() -> None:
     assert ql["hidden"] == [{"title": "隐藏目标X", "objective": "未来揭示Y"}]
 
 
-def test_relationship_alias_merge_takes_latest_not_max() -> None:
-    """别名合并关系数值取较新（incoming）而非 max，保留"关系下降"（6.1 / P2-11）。"""
+def test_relationship_alias_merge_takes_latest_text_status() -> None:
+    """别名合并取较新的文字 status（保留"关系变化"，含降温）。"""
     from app.services.state_applier import _merge_relationship_record
 
-    target = {"npc": "角色D", "trust": 80, "conflict": 50}
-    incoming = {"npc": "角色D", "trust": 60, "conflict": 5}  # 较新：和解后 conflict 降
+    target = {"npc": "角色D", "status": "并肩同行"}
+    incoming = {"npc": "角色D", "status": "因背叛而决裂"}  # 较新：关系降温
     _merge_relationship_record(target, incoming)
-    assert target["trust"] == 60  # 不再取 max(80,60)=80
-    assert target["conflict"] == 5  # 关系下降被保留，而非旧高值 50
+    assert target["status"] == "因背叛而决裂"  # 较新值覆盖，而非粘住旧值
 
 
 # ---------- bug 修复：hidden 投影越界（A）+ 锚点进度展示（B）----------

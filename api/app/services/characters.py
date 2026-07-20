@@ -234,9 +234,11 @@ def extract_profiles_from_state(state: dict[str, Any]) -> list[CharacterProfile]
                 CharacterProfile(
                     name=name,
                     role="npc",
-                    identity=clean_text(relation_map.get("stage")),
+                    identity=clean_text(relation_map.get("status") or relation_map.get("stage")),
                     description=clean_text(
-                        relation_map.get("relationship")
+                        relation_map.get("note")
+                        or relation_map.get("status")
+                        or relation_map.get("relationship")
                         or relation_map.get("attitude")
                         or relation_map.get("recent_interaction")
                     ),

@@ -19,7 +19,7 @@ export function CharacterPortrait({ character, className = "" }: CharacterPortra
     return (
       <Image
         alt={`${character.name} 立绘`}
-        className={`aspect-[3/4] w-full max-w-full self-start rounded-md border border-[color:var(--border)] object-cover ${className}`}
+        className={`aspect-[3/4] w-full max-w-full self-start border-2 border-[color:var(--border-strong)] object-cover ${className}`}
         height={640}
         src={portraitUrl}
         unoptimized
@@ -30,7 +30,7 @@ export function CharacterPortrait({ character, className = "" }: CharacterPortra
 
   return (
     <div
-      className={`character-portrait-placeholder grid aspect-[3/4] w-full max-w-full self-start place-items-center rounded-md border border-[color:var(--border)] bg-[color:var(--soft-panel)] ${className}`}
+      className={`character-portrait-placeholder grid aspect-[3/4] w-full max-w-full self-start place-items-center border-2 border-[color:var(--border)] bg-[color:var(--soft-panel)] ${className}`}
     >
       <div className="character-portrait-initials">
         {character.name.slice(0, 2)}

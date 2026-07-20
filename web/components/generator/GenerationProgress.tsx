@@ -16,33 +16,37 @@ export function GenerationProgress({
   content: string;
 }) {
   const done = items.filter((i) => i.status === "done").length;
+  const percent = Math.round((done / Math.max(items.length, 1)) * 100);
   return (
-    <div className="surface-panel">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="px-panel px-panel-pad">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="px-label">⚒ 锻造进度</p>
+        <p className="text-xs text-[color:var(--muted)]">已生成 {done}/{items.length} 类</p>
+      </div>
+      <div className="px-progress-track mt-2" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={items.length} aria-label="冒险世界锻造进度">
+        <div className="px-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {items.map((i) => (
           <span
             key={i.id}
-            className={[
-              "rounded-full border px-2 py-1 text-xs",
+            className={
               i.status === "done"
-                ? "border-[#4a9a6f] text-[#2b7a4b]"
+                ? "px-badge px-badge-bright"
                 : i.status === "running"
-                  ? "border-[#e0a23d] bg-[#fff7e8]"
-                  : "border-[color:var(--border)] text-[color:var(--muted)]"
-            ].join(" ")}
+                  ? "px-badge px-badge-amber"
+                  : "px-badge"
+            }
           >
-            {i.status === "done" ? "✓ " : i.status === "running" ? "⏳ " : ""}
+            {i.status === "done" ? "✓ " : i.status === "running" ? "… " : ""}
             {i.label}
           </span>
         ))}
       </div>
-      <p className="mt-2 text-xs text-[color:var(--muted)]">已生成 {done}/{items.length} 类</p>
       {reasoning || content ? (
-        <details className="mt-2 rounded border border-[color:var(--border)]">
-          <summary className="cursor-pointer px-3 py-2 text-xs text-[color:var(--muted)]">
-            🧠 查看 AI 思考过程
-          </summary>
-          <pre className="app-wrap-text max-h-64 overflow-auto whitespace-pre-wrap border-t border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
+        <details className="px-fold mt-3">
+          <summary>AI 内心独白（思考过程）</summary>
+          <pre className="px-wrap max-h-64 overflow-auto whitespace-pre-wrap border-t-2 border-[color:var(--border)] p-3 text-xs leading-5 text-[color:var(--muted)]">
             {reasoning || "（无思考流）"}
             {content ? `\n\n—— 正文 ——\n${content}` : ""}
           </pre>

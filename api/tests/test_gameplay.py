@@ -1,10 +1,18 @@
 import json
+from copy import deepcopy
+from types import SimpleNamespace
+from uuid import uuid4
 
 import anyio
 
 from app.models.generator_job import TurnJob
 from app.models.turn import Turn
-from app.services.deepseek_client import ChatCompletionResult
+from app.schemas.turn import GMRuntimeOutput, TurnJobRead
+from app.services.act_pacing import (
+    ANCHOR_PACING_HIGH_TURNS,
+    ANCHOR_PACING_STALL_TURNS_AFTER_HIGH,
+)
+from app.services.deepseek_client import ChatCompletionResult, DeepSeekError
 from app.services.game_creator import create_game_from_config
 from app.services.gameplay import GameplayService
 from app.services.prompt_builder import PromptBuilder
@@ -69,7 +77,9 @@ def test_prompt_injects_story_settings_runtime_view_and_materials(db_session) ->
     assert runtime_payload["selected_action_style"]["id"] == "investigation"
     assert [item["title"] for item in runtime_payload["related_story_materials"]][0] == "雁回镇义庄"
     assert runtime_payload["generation_parameters"]["recent_turn_excerpt_chars"] == 420
-    assert runtime_payload["recent_turns"][0]["gm_output_excerpt"].endswith("...")
+    # Round 45：最近回合改附完整正文（gm_output）供 GM 承接，不再下发冗余的 gm_output_excerpt 前缀。
+    assert runtime_payload["recent_turns"][0]["gm_output"].startswith("门槛内侧有新鲜泥痕。")
+    assert "gm_output_excerpt" not in runtime_payload["recent_turns"][0]
 
 
 def test_gm_prompt_redacts_future_act_spoilers(db_session) -> None:
@@ -139,10 +149,33 @@ def test_gm_system_prompt_elevates_hard_constraints(db_session) -> None:
     assert "不要修仙" in system_content
     # 当前幕 forbidden_reveals
     assert "账册真凶" in system_content
-    # Round 21：generation_parameters 篇幅指引提进 system（下限硬、上限软且让位于剧本）
+    # Round 44：篇幅指引改为软目标（去硬下限/去 emphasis 配额，防注水/假加粗）
     assert "本回合输出篇幅指引" in system_content
-    assert "不少于 700 字" in system_content  # 硬下限保留
-    assert "让位于剧本" in system_content  # 上限让位于详细描写要求
+    assert "按信息量自然成文" in system_content  # 篇幅按事件量自然成文
+    assert "让位于剧本" in system_content  # 详细描写场景仍优先写完整
+
+    # Round 45：叙事工艺层提进 system，且排在「当前幕简报」（唯一缓存断裂点）之前 → 稳定前缀。
+    assert "本剧本叙事工艺" in system_content
+    assert "叙事文风" in system_content
+    assert system_content.index("本剧本叙事工艺") < system_content.index("当前幕简报")
+    # 工艺字段已在 system，不在 user payload 的 story_core 重复下发（去重省 token）。
+    user_story_core = json.loads(messages[1]["content"])["runtime_story"]["story_core"]
+    assert "narrative_style" not in user_story_core
+    assert user_story_core["main_goal"]  # 非工艺字段仍保留
+
+
+def test_narrative_craft_directives_render_and_noop() -> None:
+    """工艺层：有字段时渲染、全空时 no-op（不污染 system / prefix cache）。"""
+    from app.services.prompt_builder import _narrative_craft_directives
+
+    rendered = _narrative_craft_directives(
+        {"story_core": {"narrative_style": "冷峻克制", "tone_do": ["留白", "克制"]}}
+    )
+    assert "本剧本叙事工艺" in rendered
+    assert "冷峻克制" in rendered
+    assert "留白" in rendered
+    assert _narrative_craft_directives({"story_core": {}}) == ""
+    assert _narrative_craft_directives({}) == ""
 
 
 def test_state_ops_projection_keeps_minimal_drops_writing_fields() -> None:
@@ -242,6 +275,43 @@ def test_runtime_story_only_exposes_current_act_open_anchors(db_session) -> None
     ]
 
 
+def test_runtime_story_filters_satisfied_alternative_anchor_group() -> None:
+    config = build_two_act_config()
+    config.story_settings["act_plan"][0]["completion_anchors"] = [
+        {
+            "id": "act_1_sneak_entry",
+            "title": "潜入后门",
+            "required": True,
+            "alternative_group": "entry_path",
+            "completion_signal": "主角从后门潜入据点。",
+        },
+        {
+            "id": "act_1_talk_entry",
+            "title": "说服守卫",
+            "required": True,
+            "alternative_group": "entry_path",
+            "completion_signal": "守卫放行主角进入据点。",
+        },
+        {
+            "id": "act_1_find_ledger",
+            "title": "找到账册",
+            "required": True,
+            "completion_signal": "主角拿到账册。",
+        },
+    ]
+
+    state = deepcopy(config.initial_state)
+    state["story_progress"] = {
+        **state["story_progress"],
+        "completed_anchors": ["act_1_sneak_entry"],
+    }
+    runtime_story = build_runtime_story(config, state)
+
+    assert [anchor["id"] for anchor in runtime_story["current_act"]["completion_anchors"]] == [
+        "act_1_find_ledger"
+    ]
+
+
 def test_state_delta_advances_act_only_after_required_anchors(db_session) -> None:
     game = create_game_from_config(db_session, build_two_act_config())
     state = game.state
@@ -283,7 +353,93 @@ def test_state_delta_advances_act_only_after_required_anchors(db_session) -> Non
     assert second_state["story_progress"]["last_advance_turn"] == 2
 
 
-def test_state_delta_backfills_required_anchor_and_derives_main_quests(db_session) -> None:
+def test_state_delta_advances_after_alternative_anchor_group_and_required_anchor() -> None:
+    config = build_generated_config()
+    config.story_settings["act_plan"] = [
+        {
+            "id": "act_1",
+            "title": "进入据点",
+            "objective": "进入据点并拿到账册。",
+            "completion_anchors": [
+                {
+                    "id": "act_1_sneak_entry",
+                    "title": "潜入后门",
+                    "required": True,
+                    "alternative_group": "entry_path",
+                    "completion_signal": "主角从后门潜入据点。",
+                },
+                {
+                    "id": "act_1_talk_entry",
+                    "title": "说服守卫",
+                    "required": True,
+                    "alternative_group": "entry_path",
+                    "completion_signal": "守卫放行主角进入据点。",
+                },
+                {
+                    "id": "act_1_find_ledger",
+                    "title": "找到账册",
+                    "required": True,
+                    "completion_signal": "主角拿到账册。",
+                },
+            ],
+            "transition_to_next_act": {"target_act": "act_2"},
+        },
+        {
+            "id": "act_2",
+            "title": "追查旧账",
+            "objective": "沿账册追查下一条线索。",
+            "completion_anchors": [],
+        },
+    ]
+    config.story_settings["main_quest_path"] = []
+    game = SimpleNamespace(id=uuid4(), config=config)
+    state = SimpleNamespace(state_json=deepcopy(config.initial_state), game=game)
+
+    first_state = apply_state_delta(
+        state,
+        Turn(game_id=game.id, turn_number=1, player_input="", gm_output=""),
+        {
+            "story_progress_update": {
+                "completed_anchor": "act_1_sneak_entry",
+                "completed_act": "act_1",
+                "next_act": "act_2",
+                "reason": "已通过潜入路线进入据点。",
+            }
+        },
+    )
+
+    assert first_state["story_progress"]["current_act"] == "act_1"
+    assert first_state["story_progress"]["ready_for_next_act"] is False
+    assert first_state["story_progress"]["completed_acts"] == []
+    assert first_state["story_progress"]["current_act_anchor_progress"] == {
+        "done": 1,
+        "total": 2,
+    }
+
+    state.state_json = first_state
+    second_state = apply_state_delta(
+        state,
+        Turn(game_id=game.id, turn_number=2, player_input="", gm_output=""),
+        {
+            "story_progress_update": {
+                "completed_anchor": "act_1_find_ledger",
+                "completed_act": "act_1",
+                "next_act": "act_2",
+                "reason": "已经进入据点并拿到账册。",
+            }
+        },
+    )
+
+    progress = second_state["story_progress"]
+    assert progress["current_act"] == "act_2"
+    assert progress["completed_acts"] == ["act_1"]
+    assert set(progress["completed_anchors"]) == {
+        "act_1_sneak_entry",
+        "act_1_find_ledger",
+    }
+
+
+def test_state_delta_completes_required_anchors_and_derives_main_quests(db_session) -> None:
     config = build_generated_config()
     config.story_settings["act_plan"] = [
         {
@@ -365,9 +521,10 @@ def test_state_delta_backfills_required_anchor_and_derives_main_quests(db_sessio
         state,
         Turn(game_id=game.id, turn_number=3, player_input="", gm_output=""),
         {
+            # Round 49：锚点完成只走 LLM 显式上报（删推断后两个 required 锚点都需显式报）。
             "story_progress_update": {
-                "completed_anchor": "act_1_supply_secured",
-                "reason": "基地三月食物储备达成。",
+                "completed_anchors": ["act_1_base_secured", "act_1_supply_secured"],
+                "reason": "清剿完成 + 物资储备达成。",
             }
         },
     )
@@ -585,9 +742,10 @@ def test_state_delta_uses_configured_anchor_evidence_across_genres(
     assert next_state["story_progress"]["ready_for_next_act"] is False
 
 
-def test_state_delta_infers_anchor_from_completion_signal_phrase(
+def test_state_delta_does_not_infer_anchor_without_explicit_report(
     db_session,
 ) -> None:
+    """Round 49 外科拆 Phase A：narrative 证据不再自动完成锚点，只信 LLM 显式 completed_anchors。"""
     config = build_generated_config()
     config.story_settings["act_plan"] = [
         {
@@ -680,12 +838,16 @@ def test_state_delta_infers_anchor_from_completion_signal_phrase(
     )
 
     completed_anchors = next_state["story_progress"]["completed_anchors"]
-    assert "act_4_ye_found" in completed_anchors
+    # 删锚点推断后：即使 narrative 含 completion_signal，空 delta（无显式上报）也不完成锚点。
+    assert "act_4_ye_found" not in completed_anchors
     assert "act_4_ye_awakening" not in completed_anchors
     assert next_state["story_progress"]["current_act"] == "act_4"
     assert next_state["story_progress"]["ready_for_next_act"] is False
 
     quests = {quest["id"]: quest for quest in next_state["quests"] if isinstance(quest, dict)}
+    # 任务-锚点解耦（Round 49 Phase A 中间态）：main_quest_10 仍可经任务文本推断
+    # （_quest_completion_evident，Phase B 未删）完成，但其锚点不进 completed_anchors。
+    # 钉死该契约，防 Phase B 改动后无人察觉。
     assert quests["main_quest_10"]["status"] == "completed"
     assert quests["main_quest_11"]["status"] == "active"
 
@@ -1497,8 +1659,7 @@ def test_state_delta_normalizes_runtime_character_state(db_session) -> None:
             {
                 "npc": "无名女性幸存者",
                 "name": "无名女性幸存者",
-                "trust": 3,
-                "recent_events": [{"reason": "初次安抚"}],
+                "status": "初次安抚后稍有缓和",
             }
         ],
         "inventory": [
@@ -1523,10 +1684,7 @@ def test_state_delta_normalizes_runtime_character_state(db_session) -> None:
             "relationship_events": [
                 {
                     "npc": "陈雨桐",
-                    "axis": "trust",
-                    "direction": "increase",
-                    "intensity": "minor",
-                    "reason": "自报姓名并接受庇护",
+                    "status": "自报姓名后信任初建",
                 }
             ],
             "inventory_add": [
@@ -1543,7 +1701,7 @@ def test_state_delta_normalizes_runtime_character_state(db_session) -> None:
     assert "无名女性幸存者" in next_state["npcs"][0]["aliases"]
     assert next_state["v2"]["npc_registry"][0]["name"] == "陈雨桐"
     assert next_state["relationships"][0]["npc"] == "陈雨桐"
-    assert next_state["relationships"][0]["trust"] == 6
+    assert next_state["relationships"][0]["status"] == "自报姓名后信任初建"
     assert len(next_state["relationships"]) == 1
     assert {"item": "罐头", "unit": "罐", "quantity": 10} in next_state["inventory"]
     assert {"item": "绷带", "quantity": 3} in next_state["inventory"]
@@ -2026,6 +2184,48 @@ def test_turn_maintenance_success_clears_previous_extractor_failed_flag(db_sessi
     assert saved_turn.state_delta_json["new_known_facts"] == ["门槛内侧有新鲜泥痕。"]
 
 
+def test_turn_maintenance_records_act_pacing_stall_flag(db_session) -> None:
+    game = create_game_from_config(db_session, build_generated_config())
+    turn_number = ANCHOR_PACING_HIGH_TURNS + ANCHOR_PACING_STALL_TURNS_AFTER_HIGH
+    turn = Turn(
+        game_id=game.id,
+        turn_number=turn_number,
+        player_input="我继续在原地休整。",
+        gm_output="主角继续整理装备，但没有推进当前幕关键锚点。",
+        visible_summary="继续休整。",
+        hidden_summary=None,
+        state_delta_json={},
+        action_options_json=[],
+        model_used="deepseek-v4-pro-test",
+    )
+    db_session.add(turn)
+    db_session.flush()
+    job = TurnJob(
+        game_id=game.id,
+        status="completed",
+        request_json={"player_input": turn.player_input},
+        turn_id=turn.id,
+        turn_runtime_inputs={
+            "output_observation": {
+                "flags": ["既有观测"],
+                "forbidden_reveal_hits": [],
+            }
+        },
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    _apply_delta(job.id, {})
+
+    db_session.expire_all()
+    saved_job = db_session.get(TurnJob, job.id)
+    assert saved_job is not None
+    observation = saved_job.turn_runtime_inputs["output_observation"]
+    assert "既有观测" in observation["flags"]
+    assert any("act_pacing_stalled" in flag for flag in observation["flags"])
+    assert observation["act_pacing"]["stalled"] is True
+
+
 def test_story_director_fallback_reads_runtime_story_current_act(db_session) -> None:
     class FailingRouter:
         async def use_flash(self, *args, **kwargs):
@@ -2330,3 +2530,182 @@ def test_state_extractor_backfills_location_from_common_npc_location(
         "角色F",
         "主角",
     }
+
+
+def test_turn_job_stages_exclude_drift_validation() -> None:
+    """Round 46：偏离校验移出玩家路径——stage_total=6、不含 drift。"""
+    from app.services.turn_jobs import TURN_JOB_STAGE_TOTAL, TURN_JOB_STAGES
+
+    stages = [stage for stage, _label in TURN_JOB_STAGES]
+    assert TURN_JOB_STAGE_TOTAL == 6
+    assert "drift_validation" not in stages
+    assert stages.index("gm_runtime") + 1 == stages.index("persist_turn")
+
+
+def test_turn_job_stage_total_defaults_match_runtime_stage_count() -> None:
+    """新建/待运行 job 的默认 stage_total 也必须与运行阶段数一致。"""
+    from app.services.turn_jobs import TURN_JOB_STAGE_TOTAL
+
+    assert TurnJob.__table__.c.stage_total.default.arg == TURN_JOB_STAGE_TOTAL
+    assert TurnJobRead.model_fields["stage_total"].default == TURN_JOB_STAGE_TOTAL
+
+
+def test_redact_forbidden_reveals_no_hit_is_zero_cost() -> None:
+    """剧透兜底（唯一防线）：无整串命中时零 LLM、原稿返回、不置 rewrite_triggered。"""
+    from types import SimpleNamespace
+
+    class _NoCallRouter:
+        async def use_pro(self, *args, **kwargs):
+            raise AssertionError("无命中时不应调用 GM 重写。")
+
+        async def use_flash(self, *args, **kwargs):
+            raise AssertionError("无命中时不应调用任何 LLM。")
+
+    service = GameplayService(router=_NoCallRouter())
+    telemetry = SimpleNamespace(
+        output_observation={"forbidden_reveal_hits": []}, rewrite_triggered=False
+    )
+    context = SimpleNamespace(telemetry=telemetry, game=SimpleNamespace(id="g"))
+    runtime_output = object()
+
+    async def _run():
+        return await service._redact_forbidden_reveals_if_hit(
+            context=context,
+            director_decision=None,
+            runtime_output=runtime_output,
+            model_used="deepseek-v4-pro-test",
+        )
+
+    result, model = anyio.run(_run)
+    assert result is runtime_output
+    assert model == "deepseek-v4-pro-test"
+    assert telemetry.rewrite_triggered is False
+
+
+def test_redact_forbidden_reveals_keeps_original_on_deepseek_error() -> None:
+    """剧透兜底重写的模型/API 失败不应中断已经生成好的回合。"""
+    from types import SimpleNamespace
+
+    class _FailingRouter:
+        async def use_pro(self, *args, **kwargs):
+            raise DeepSeekError("rewrite api unavailable")
+
+        async def use_flash(self, *args, **kwargs):
+            raise AssertionError("剧透重写不应调用 flash。")
+
+    service = GameplayService(router=_FailingRouter())
+    service._build_contextual_runtime_messages = lambda **_: [
+        {"role": "user", "content": "rewrite"}
+    ]
+    telemetry = SimpleNamespace(
+        output_observation={"forbidden_reveal_hits": ["账册真凶"]},
+        rewrite_triggered=False,
+    )
+    context = SimpleNamespace(telemetry=telemetry, game=SimpleNamespace(id="g"))
+    runtime_output = GMRuntimeOutput(
+        narrative="雨声里，账册真凶的名字几乎要从门缝后漏出来。",
+        visible_clues=[],
+        action_options=[
+            {"key": "A", "label": "追问门后的人"},
+            {"key": "B", "label": "先查看账册"},
+            {"key": "C", "label": "退到院中观察"},
+            {"key": "D", "label": "叫同伴守住后门"},
+        ],
+    )
+
+    async def _run():
+        return await service._redact_forbidden_reveals_if_hit(
+            context=context,
+            director_decision=None,
+            runtime_output=runtime_output,
+            model_used="deepseek-v4-pro-test",
+        )
+
+    result, model = anyio.run(_run)
+    assert result is runtime_output
+    assert model == "deepseek-v4-pro-test"
+    assert telemetry.rewrite_triggered is True
+
+
+def test_audit_drift_no_throw_on_missing_job(db_session) -> None:
+    """异步偏离审计绝不拖垮维护：job 不存在时优雅跳过、不抛异常。"""
+    from uuid import uuid4
+
+    from app.services.turn_maintenance_jobs import _audit_drift
+
+    anyio.run(_audit_drift, uuid4())  # 不抛即通过
+
+
+def test_system_content_byte_stable_across_anchor_completion(db_session) -> None:
+    """Round 48 prefix cache：同一幕内锚点完成进度不同时，system 消息必须字节一致——
+    逐回合变化的未完成锚点不得混进 system 稳定前缀，否则碎裂 DeepSeek prefix cache。"""
+    from app.services.prompt_builder import PromptBuilder
+    from app.services.story_settings import build_runtime_story, generation_parameters_from_config
+
+    game = create_game_from_config(db_session, build_generated_config())
+    gp = generation_parameters_from_config(game.config)
+    state_a = {"story_progress": {"current_act": "act_1", "completed_anchors": []}}
+    state_b = {
+        "story_progress": {"current_act": "act_1", "completed_anchors": ["act_1_find_mud"]}
+    }
+    sys_a = PromptBuilder._build_system_content(build_runtime_story(game.config, state_a), gp)
+    sys_b = PromptBuilder._build_system_content(build_runtime_story(game.config, state_b), gp)
+    assert sys_a == sys_b  # 稳定前缀不随锚点完成而变
+    assert "本幕目标：" in sys_a  # 幕目标（幕内静态）仍在 system
+    assert "找到门槛泥痕" not in sys_a  # 逐回合的锚点不再进 system
+
+
+def test_split_runtime_story_extracts_volatile_and_anchors() -> None:
+    """Round 48：runtime_story 拆分——逐回合键与未完成锚点被抽出，静态部分保留。"""
+    from app.services.prompt_builder import _split_runtime_story_for_cache
+
+    rs = {
+        "story_core": {"main_goal": "查案"},
+        "story_progress": {"completed_anchors": ["a"]},
+        "selected_action_style": {"id": "s"},
+        "related_story_materials": [{"title": "m"}],
+        "current_act": {"objective": "目标", "completion_anchors": [{"id": "a1"}, {"id": "a2"}]},
+    }
+    static, open_anchors = _split_runtime_story_for_cache(rs)
+    assert "story_progress" not in static
+    assert "selected_action_style" not in static
+    assert "related_story_materials" not in static
+    assert "completion_anchors" not in static["current_act"]
+    assert static["current_act"]["objective"] == "目标"
+    assert static["story_core"]["main_goal"] == "查案"
+    assert open_anchors == [{"id": "a1"}, {"id": "a2"}]
+
+
+def test_runtime_story_static_prefix_stable_across_anchor_completion(db_session) -> None:
+    """Round 48 多段切分：静态 runtime_story 幕内字节稳定；未完成锚点单列且逐回合变。"""
+    import json
+
+    from app.services.story_settings import build_runtime_story
+
+    game = create_game_from_config(db_session, build_generated_config())
+    state_a = {"story_progress": {"current_act": "act_1", "completed_anchors": []}}
+    state_b = {
+        "story_progress": {"current_act": "act_1", "completed_anchors": ["act_1_find_mud"]}
+    }
+
+    def _content(state: dict) -> str:
+        messages = PromptBuilder().build_runtime_messages(
+            game=game,
+            player_input="我观察四周。",
+            selected_action_style=None,
+            recent_turns=[],
+            runtime_story=build_runtime_story(game.config, state),
+            state_v2={},
+        )
+        return messages[1]["content"]
+
+    ca, cb = _content(state_a), _content(state_b)
+    pa, pb = json.loads(ca), json.loads(cb)
+    assert pa["runtime_story"] == pb["runtime_story"]  # 静态 runtime_story 不随锚点完成而变
+    assert "completion_anchors" not in pa["runtime_story"]["current_act"]  # 锚点已抽出
+    assert "story_progress" not in pa["runtime_story"]  # 逐回合 story_progress 已抽出
+    # 字节级：序列化前缀（到第一个逐回合键之前）完全一致 → DeepSeek prefix cache 可命中。
+    marker = '"current_act_open_anchors"'
+    assert ca[: ca.index(marker)] == cb[: cb.index(marker)]
+    # 未完成锚点单列在尾段、且逐回合变化（完成一个后变少）。
+    assert len(pa["current_act_open_anchors"]) > len(pb["current_act_open_anchors"])

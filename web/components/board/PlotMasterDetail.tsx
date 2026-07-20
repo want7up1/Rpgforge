@@ -60,8 +60,8 @@ export function PlotMasterDetail({
   return (
     <div className="mt-3">
       {/* 顶部：剧情纲领总览 */}
-      <section className="surface-panel mb-4">
-        <h4 className="surface-title mb-2">🎯 剧情纲领总览</h4>
+      <section className="px-panel px-panel-pad mb-4">
+        <h4 className="px-heading text-sm mb-2">🎯 剧情纲领总览</h4>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {overview.map((b) => (
             <button
@@ -69,11 +69,11 @@ export function PlotMasterDetail({
               type="button"
               onClick={() => setOpenBlock(b)}
               className={[
-                "rounded-lg border p-3 text-left transition hover:border-[color:var(--foreground)]",
-                changed(b.id) ? "border-[#e0533d]" : "border-[color:var(--border)]"
+                "border-2 p-3 text-left transition hover:border-[color:var(--phosphor)]",
+                changed(b.id) ? "border-[#ff6b5e]" : "border-[color:var(--border)]"
               ].join(" ")}
             >
-              <div className="text-xs opacity-60">{b.title}</div>
+              <div className="px-label">{b.title}</div>
               <div className="mt-1 text-sm">
                 {preview(b, b.fields[0]?.key ?? "") || <span className="opacity-40">（空，点击填写）</span>}
               </div>
@@ -85,7 +85,7 @@ export function PlotMasterDetail({
       <div className="flex flex-col gap-4 md:flex-row md:items-start">
         {/* 左：幕大纲 */}
         <div className="md:w-1/3">
-          <div className="mb-2 text-sm font-semibold">幕大纲</div>
+          <div className="px-label mb-2">幕大纲</div>
           <div className="grid gap-2">
             {acts.map((a) => {
               const key = actKeyOf(a.actBlock);
@@ -96,12 +96,12 @@ export function PlotMasterDetail({
                   type="button"
                   onClick={() => setSelectedKey(key)}
                   className={[
-                    "rounded-lg border p-3 text-left transition",
-                    isSel ? "border-[#e0a23d] bg-[#e0a23d]/10" : "border-[color:var(--border)]",
-                    changed(a.actBlock.id) ? "ring-1 ring-[#e0533d]" : ""
+                    "border-2 p-3 text-left transition",
+                    isSel ? "border-[color:var(--amber)] bg-[rgba(255,179,71,0.08)]" : "border-[color:var(--border)]",
+                    changed(a.actBlock.id) ? "ring-2 ring-[#ff6b5e]" : ""
                   ].join(" ")}
                 >
-                  <div className="font-semibold">{a.actBlock.title}</div>
+                  <div className="font-bold">{a.actBlock.title}</div>
                   <div className="mt-1 text-xs opacity-60">{a.nodes.length} 节点</div>
                 </button>
               );
@@ -111,7 +111,7 @@ export function PlotMasterDetail({
               <button
                 type="button"
                 onClick={() => setAdding("act")}
-                className="rounded-lg border border-dashed border-[color:var(--border)] p-2 text-sm opacity-70 hover:opacity-100"
+                className="border-2 border-dashed border-[color:var(--border)] p-2 text-sm text-[color:var(--phosphor)] opacity-80 hover:opacity-100"
               >
                 ＋ 新增幕
               </button>
@@ -122,18 +122,18 @@ export function PlotMasterDetail({
         {/* 右：选中幕详情 */}
         <div className="flex-1">
           {selectedAct ? (
-            <div className="surface-panel">
+            <div className="px-panel px-panel-pad">
               <div className="flex items-center justify-between gap-2">
-                <h4 className="surface-title">{selectedAct.actBlock.title}</h4>
-                <button className="app-button" type="button" onClick={() => setOpenBlock(selectedAct.actBlock)}>
+                <h4 className="px-heading text-sm">{selectedAct.actBlock.title}</h4>
+                <button className="px-btn" type="button" onClick={() => setOpenBlock(selectedAct.actBlock)}>
                   编辑此幕
                 </button>
               </div>
-              <p className="mt-1 text-sm opacity-70">
+              <p className="mt-1 text-sm text-[color:var(--muted)]">
                 {preview(selectedAct.actBlock, "objective") || "（未填目标）"}
               </p>
 
-              <div className="mb-2 mt-4 text-sm font-semibold">主线节点（{selectedAct.nodes.length}）</div>
+              <div className="px-label mb-2 mt-4">主线节点（{selectedAct.nodes.length}）</div>
               <div className="grid gap-2">
                 {selectedAct.nodes.map((n) => (
                   <button
@@ -141,11 +141,11 @@ export function PlotMasterDetail({
                     type="button"
                     onClick={() => setOpenBlock(n)}
                     className={[
-                      "rounded-lg border p-3 text-left transition hover:border-[color:var(--foreground)]",
-                      changed(n.id) ? "border-[#e0533d]" : "border-[color:var(--border)]"
+                      "border-2 p-3 text-left transition hover:border-[color:var(--phosphor)]",
+                      changed(n.id) ? "border-[#ff6b5e]" : "border-[color:var(--border)]"
                     ].join(" ")}
                   >
-                    <div className="font-semibold">{n.title}</div>
+                    <div className="font-bold">{n.title}</div>
                     <div className="mt-1 text-xs opacity-60">{preview(n, "objective")}</div>
                   </button>
                 ))}
@@ -156,7 +156,7 @@ export function PlotMasterDetail({
                   <button
                     type="button"
                     onClick={() => setAdding("node")}
-                    className="rounded-lg border border-dashed border-[color:var(--border)] p-2 text-sm opacity-70 hover:opacity-100"
+                    className="border-2 border-dashed border-[color:var(--border)] p-2 text-sm text-[color:var(--phosphor)] opacity-80 hover:opacity-100"
                   >
                     ＋ 新增主线节点
                   </button>
@@ -169,17 +169,17 @@ export function PlotMasterDetail({
 
           {/* 未分配节点 */}
           {unassignedNodes.length > 0 ? (
-            <div className="surface-panel mt-4 border-[#e0a23d]">
-              <div className="mb-2 text-sm font-semibold">⚠ 未分配节点（act_id 无对应幕）</div>
+            <div className="px-panel px-panel-pad mt-4 border-[#8a6420]">
+              <div className="px-label mb-2 text-[color:var(--amber)]">⚠ 未分配节点（act_id 无对应幕）</div>
               <div className="grid gap-2">
                 {unassignedNodes.map((n) => (
                   <button
                     key={n.id}
                     type="button"
                     onClick={() => setOpenBlock(n)}
-                    className="rounded-lg border border-[color:var(--border)] p-3 text-left"
+                    className="border-2 border-[color:var(--border)] p-3 text-left"
                   >
-                    <div className="font-semibold">{n.title}</div>
+                    <div className="font-bold">{n.title}</div>
                     <div className="mt-1 text-xs opacity-60">act_id: {preview(n, "act_id") || "（空）"}</div>
                   </button>
                 ))}

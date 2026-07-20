@@ -125,19 +125,22 @@ export default function AdminPage() {
 
   return (
     <AppShell>
-      <main className="mx-auto max-w-5xl px-4 py-8 text-sm">
-        <h1 className="text-2xl font-semibold mb-2">AI 链路监控</h1>
-        <p className="text-gray-500 mb-6">
-          最近 {limit} 个已完成回合的 telemetry、评分、trace。所有数据来自 agent_traces / turn_jobs / turn_evaluations。
-        </p>
+      <main className="mx-auto grid w-full max-w-5xl gap-5 text-sm">
+        <section className="px-panel px-panel-strong px-panel-pad">
+          <p className="px-eyebrow">OBSERVATORY</p>
+          <h1 className="px-heading mt-2 text-2xl">AI 链路监控</h1>
+          <p className="mt-2 text-[color:var(--muted)]">
+            最近 {limit} 个已完成回合的 telemetry、评分、trace。所有数据来自 agent_traces / turn_jobs / turn_evaluations。
+          </p>
+        </section>
 
-        <section className="mb-6 rounded-lg border border-gray-200 p-4">
-          <div className="flex items-end gap-2">
-            <div className="flex-1">
-              <label className="block text-xs text-gray-500 mb-1">管理 Token</label>
+        <section className="px-panel px-panel-pad">
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-48 flex-1">
+              <label className="px-label mb-1 block">管理 Token</label>
               <input
                 type="password"
-                className="w-full rounded border border-gray-300 px-2 py-1"
+                className="px-input"
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
                 placeholder="SETTINGS_ADMIN_TOKEN"
@@ -146,24 +149,24 @@ export default function AdminPage() {
             <button
               type="button"
               onClick={handleSaveToken}
-              className="rounded bg-gray-900 px-3 py-1 text-white"
+              className="px-btn px-btn-primary"
             >
               保存
             </button>
             <button
               type="button"
               onClick={handleRefresh}
-              className="rounded border border-gray-300 px-3 py-1"
+              className="px-btn"
               disabled={state === "loading"}
             >
               刷新
             </button>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">样本量</label>
+              <label className="px-label mb-1 block">样本量</label>
               <select
                 value={limit}
                 onChange={(e) => setLimit(Number(e.target.value))}
-                className="rounded border border-gray-300 px-2 py-1"
+                className="px-input"
               >
                 <option value={50}>50</option>
                 <option value={100}>100</option>
@@ -174,11 +177,11 @@ export default function AdminPage() {
           </div>
         </section>
 
-        {state === "loading" && <p className="text-gray-500">加载中…</p>}
-        {state === "error" && <p className="text-red-600">错误：{error}</p>}
+        {state === "loading" && <p className="px-status">加载中…</p>}
+        {state === "error" && <p className="px-alert">错误：{error}</p>}
 
         {stats && (
-          <section className="grid grid-cols-2 gap-4 md:grid-cols-4 mb-8">
+          <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Card
               label="样本回合数"
               value={String(stats.sample_size)}
@@ -216,13 +219,13 @@ export default function AdminPage() {
               value=""
               hint=""
               extra={
-                <div className="text-xs space-y-0.5">
+                <div className="mt-1 grid gap-0.5 text-xs">
                   {Object.entries(stats.drift_severity_distribution)
                     .sort((a, b) => b[1] - a[1])
                     .map(([sev, n]) => (
                       <div key={sev} className="flex justify-between">
-                        <span className="text-gray-500">{sev}</span>
-                        <span className="font-mono">{n}</span>
+                        <span className="text-[color:var(--muted)]">{sev}</span>
+                        <span className="font-mono text-[color:var(--phosphor)]">{n}</span>
                       </div>
                     ))}
                 </div>
@@ -233,13 +236,13 @@ export default function AdminPage() {
               value=""
               hint=""
               extra={
-                <div className="text-xs space-y-0.5">
+                <div className="mt-1 grid gap-0.5 text-xs">
                   {Object.entries(stats.avg_latency_ms_by_agent)
                     .sort((a, b) => b[1] - a[1])
                     .map(([agent, ms]) => (
                       <div key={agent} className="flex justify-between">
-                        <span className="text-gray-500">{agent}</span>
-                        <span className="font-mono">{Math.round(ms)} ms</span>
+                        <span className="text-[color:var(--muted)]">{agent}</span>
+                        <span className="font-mono text-[color:var(--phosphor)]">{Math.round(ms)} ms</span>
                       </div>
                     ))}
                 </div>
@@ -249,19 +252,19 @@ export default function AdminPage() {
         )}
 
         {traces.length > 0 && (
-          <section>
-            <h2 className="mb-2 text-lg font-semibold">最近 30 条 LLM 调用</h2>
-            <div className="overflow-x-auto rounded border border-gray-200">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 text-left">
+          <section className="px-panel px-panel-pad">
+            <h2 className="px-heading text-base">最近 30 条 LLM 调用</h2>
+            <div className="px-table-wrap mt-3">
+              <table className="px-table">
+                <thead>
                   <tr>
-                    <th className="px-2 py-1">时间</th>
-                    <th className="px-2 py-1">Agent</th>
-                    <th className="px-2 py-1">模型</th>
-                    <th className="px-2 py-1">状态</th>
-                    <th className="px-2 py-1">tokens (in/out)</th>
-                    <th className="px-2 py-1">latency</th>
-                    <th className="px-2 py-1">job</th>
+                    <th>时间</th>
+                    <th>Agent</th>
+                    <th>模型</th>
+                    <th>状态</th>
+                    <th>tokens (in/out)</th>
+                    <th>latency</th>
+                    <th>job</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -269,21 +272,19 @@ export default function AdminPage() {
                     <tr
                       key={t.id}
                       onClick={() => void handleOpenTrace(t.id)}
-                      className={`cursor-pointer hover:bg-gray-100 ${
-                        t.status === "success" ? "" : "bg-red-50 text-red-700"
-                      } ${detail?.id === t.id ? "bg-blue-50" : ""}`}
+                      className={t.status === "success" ? "" : "row-danger"}
                     >
-                      <td className="px-2 py-1 font-mono">
+                      <td className="font-mono">
                         {new Date(t.created_at).toLocaleTimeString()}
                       </td>
-                      <td className="px-2 py-1">{t.agent}</td>
-                      <td className="px-2 py-1 font-mono">{t.model ?? "—"}</td>
-                      <td className="px-2 py-1">{t.status}</td>
-                      <td className="px-2 py-1 font-mono">
+                      <td>{t.agent}</td>
+                      <td className="font-mono">{t.model ?? "—"}</td>
+                      <td>{t.status}</td>
+                      <td className="font-mono">
                         {t.tokens_input ?? "—"} / {t.tokens_output ?? "—"}
                       </td>
-                      <td className="px-2 py-1 font-mono">{t.latency_ms} ms</td>
-                      <td className="px-2 py-1 font-mono">
+                      <td className="font-mono">{t.latency_ms} ms</td>
+                      <td className="font-mono">
                         {t.job_kind ? `${t.job_kind}/${(t.job_id ?? "").slice(0, 8)}` : "—"}
                       </td>
                     </tr>
@@ -291,45 +292,45 @@ export default function AdminPage() {
                 </tbody>
               </table>
             </div>
-            <p className="mt-1 text-xs text-gray-400">点击任意行查看完整 prompt / output。</p>
+            <p className="mt-2 text-xs text-[color:var(--faint)]">点击任意行查看完整 prompt / output。</p>
           </section>
         )}
 
         {(detailLoading || detailError || detail) && (
-          <section className="mt-6">
-            <h2 className="mb-2 text-lg font-semibold">Trace 详情</h2>
-            {detailLoading && <p className="text-gray-500">加载中…</p>}
-            {detailError && <p className="text-red-600">错误：{detailError}</p>}
+          <section className="px-panel px-panel-pad">
+            <h2 className="px-heading text-base">Trace 详情</h2>
+            {detailLoading && <p className="mt-2 text-[color:var(--muted)]">加载中…</p>}
+            {detailError && <p className="px-alert mt-2">错误：{detailError}</p>}
             {detail && (
-              <div className="space-y-4 rounded border border-gray-200 p-4">
-                <div className="text-xs text-gray-500">
+              <div className="mt-3 grid gap-4">
+                <div className="text-xs text-[color:var(--muted)]">
                   <span className="font-mono">{detail.id}</span> · {detail.agent} ·{" "}
                   {detail.model ?? "—"} · {detail.status} · {detail.latency_ms} ms
                   {detail.error_message ? (
-                    <span className="text-red-600"> · {detail.error_message}</span>
+                    <span className="text-[color:var(--danger)]"> · {detail.error_message}</span>
                   ) : null}
                 </div>
                 {(detail.prompt_messages ?? []).map((m, i) => (
                   <div key={i}>
-                    <div className="text-xs font-semibold text-gray-500">
+                    <div className="px-label">
                       message[{i}] · {m.role}
                     </div>
-                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
+                    <pre className="px-scroll-text mt-1 max-h-64 font-mono text-xs">
                       {m.content}
                     </pre>
                   </div>
                 ))}
                 {detail.reasoning_text ? (
                   <div>
-                    <div className="text-xs font-semibold text-gray-500">reasoning</div>
-                    <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-amber-50 p-2 text-xs">
+                    <div className="px-label">reasoning</div>
+                    <pre className="px-scroll-text mt-1 max-h-48 border-[#8a6420] font-mono text-xs text-[color:var(--amber)]">
                       {detail.reasoning_text}
                     </pre>
                   </div>
                 ) : null}
                 <div>
-                  <div className="text-xs font-semibold text-gray-500">output</div>
-                  <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs">
+                  <div className="px-label">output</div>
+                  <pre className="px-scroll-text mt-1 max-h-96 font-mono text-xs">
                     {detail.output_text ?? "(empty)"}
                   </pre>
                 </div>
@@ -338,14 +339,14 @@ export default function AdminPage() {
           </section>
         )}
 
-        <section className="mt-8">
-          <h2 className="mb-2 text-lg font-semibold">Judge 评分查询</h2>
-          <div className="mb-3 flex items-end gap-2">
-            <div className="flex-1">
-              <label className="block text-xs text-gray-500 mb-1">Game ID</label>
+        <section className="px-panel px-panel-pad">
+          <h2 className="px-heading text-base">Judge 评分查询</h2>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="min-w-48 flex-1">
+              <label className="px-label mb-1 block">Game ID</label>
               <input
                 type="text"
-                className="w-full rounded border border-gray-300 px-2 py-1 font-mono"
+                className="px-input font-mono"
                 value={evalGameId}
                 onChange={(e) => setEvalGameId(e.target.value)}
                 placeholder="游戏 UUID"
@@ -354,48 +355,48 @@ export default function AdminPage() {
             <button
               type="button"
               onClick={() => void handleLoadEvals()}
-              className="rounded border border-gray-300 px-3 py-1"
+              className="px-btn"
               disabled={evalLoading}
             >
               查询
             </button>
           </div>
-          {evalError && <p className="text-amber-600 text-xs">{evalError}</p>}
+          {evalError && <p className="px-warning mt-2 text-xs">{evalError}</p>}
           {evals.length > 0 && (
-            <div className="overflow-x-auto rounded border border-gray-200">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 text-left">
+            <div className="px-table-wrap mt-3">
+              <table className="px-table">
+                <thead>
                   <tr>
-                    <th className="px-2 py-1">时间</th>
-                    <th className="px-2 py-1">overall</th>
-                    <th className="px-2 py-1">忠实</th>
-                    <th className="px-2 py-1">状态一致</th>
-                    <th className="px-2 py-1">节奏</th>
-                    <th className="px-2 py-1">文笔</th>
-                    <th className="px-2 py-1">新意</th>
-                    <th className="px-2 py-1">安全</th>
-                    <th className="px-2 py-1">状态</th>
+                    <th>时间</th>
+                    <th>overall</th>
+                    <th>忠实</th>
+                    <th>状态一致</th>
+                    <th>节奏</th>
+                    <th>文笔</th>
+                    <th>新意</th>
+                    <th>安全</th>
+                    <th>状态</th>
                   </tr>
                 </thead>
                 <tbody>
                   {evals.map((ev) => (
                     <tr
                       key={ev.id}
-                      className={ev.status === "success" ? "" : "bg-red-50 text-red-700"}
+                      className={ev.status === "success" ? "" : "row-danger"}
                     >
-                      <td className="px-2 py-1 font-mono">
+                      <td className="font-mono">
                         {new Date(ev.created_at).toLocaleString()}
                       </td>
-                      <td className="px-2 py-1 font-mono font-semibold">
+                      <td className="font-mono font-bold text-[color:var(--phosphor)]">
                         {ev.overall_score ?? "—"}
                       </td>
-                      <td className="px-2 py-1 font-mono">{ev.canon_fidelity ?? "—"}</td>
-                      <td className="px-2 py-1 font-mono">{ev.state_consistency ?? "—"}</td>
-                      <td className="px-2 py-1 font-mono">{ev.pacing ?? "—"}</td>
-                      <td className="px-2 py-1 font-mono">{ev.prose_quality ?? "—"}</td>
-                      <td className="px-2 py-1 font-mono">{ev.freshness ?? "—"}</td>
-                      <td className="px-2 py-1 font-mono">{ev.safety ?? "—"}</td>
-                      <td className="px-2 py-1">{ev.status}</td>
+                      <td className="font-mono">{ev.canon_fidelity ?? "—"}</td>
+                      <td className="font-mono">{ev.state_consistency ?? "—"}</td>
+                      <td className="font-mono">{ev.pacing ?? "—"}</td>
+                      <td className="font-mono">{ev.prose_quality ?? "—"}</td>
+                      <td className="font-mono">{ev.freshness ?? "—"}</td>
+                      <td className="font-mono">{ev.safety ?? "—"}</td>
+                      <td>{ev.status}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -421,13 +422,11 @@ function Card({
   tone?: "ok" | "warn";
   extra?: React.ReactNode;
 }) {
-  const toneClass =
-    tone === "warn" ? "border-amber-300 bg-amber-50" : "border-gray-200";
   return (
-    <div className={`rounded-lg border ${toneClass} p-3`}>
-      <div className="text-xs text-gray-500">{label}</div>
-      {value && <div className="text-xl font-semibold mt-1">{value}</div>}
-      {hint && <div className="text-xs text-gray-500 mt-1">{hint}</div>}
+    <div className={`px-metric ${tone === "warn" ? "border-[#8a6420]" : ""}`}>
+      <div className="px-metric-label">{label}</div>
+      {value && <div className={`mt-1 text-xl font-black ${tone === "warn" ? "text-[#ffb347]" : "text-[color:var(--phosphor)]"}`}>{value}</div>}
+      {hint && <div className="mt-1 text-xs text-[color:var(--muted)]">{hint}</div>}
       {extra}
     </div>
   );

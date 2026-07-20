@@ -21,11 +21,11 @@ export function BackButton({ fallbackHref, label = "返回上一级" }: BackButt
 
   return (
     <button
-      className="app-button"
+      className="px-btn"
       onClick={goBack}
       type="button"
     >
-      {label}
+      ◂ {label}
     </button>
   );
 }

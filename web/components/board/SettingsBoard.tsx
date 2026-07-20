@@ -47,7 +47,7 @@ export function SettingsBoard({
   const current = model.categories.find((c) => c.id === activeTab) ?? model.categories[0];
 
   return (
-    <section className="surface-panel surface-panel-strong">
+    <section className="px-panel px-panel-strong px-panel-pad">
       <ChangeSummaryBar model={model} diff={diff} onJump={setActiveTab} />
       <BoardTabs
         categories={model.categories}
