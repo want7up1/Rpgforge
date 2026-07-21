@@ -827,6 +827,7 @@ input[type="radio"]:checked::after {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
 }
@@ -1000,28 +1001,42 @@ input[type="radio"]:checked::after {
   line-height: 1.6;
 }
 
-/* 在场角色 chips */
-.present-chip {
-  display: grid;
-  grid-template-columns: 2.6rem minmax(0, 1fr);
-  gap: 0.6rem;
-  align-items: center;
-  width: 100%;
+/* 在场角色姓名条 */
+.present-strip {
+  overflow: hidden;
+  border: 2px solid #8a6420;
+  background: var(--panel);
+  padding: 0.5rem;
+}
+
+.present-name-list {
+  display: flex;
   min-width: 0;
+  gap: 0.5rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+}
+
+.present-name-chip {
+  min-height: 2rem;
+  flex: 0 0 auto;
   border: 2px solid var(--border);
   background: rgba(201, 242, 214, 0.04);
   color: var(--foreground);
   cursor: pointer;
-  padding: 0.5rem;
-  text-align: left;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
   transition: border-color 140ms ease;
 }
 
-.present-chip:hover:not(:disabled) {
+.present-name-chip:hover:not(:disabled) {
   border-color: var(--amber);
 }
 
-.present-chip:disabled {
+.present-name-chip:disabled {
   cursor: default;
 }
 

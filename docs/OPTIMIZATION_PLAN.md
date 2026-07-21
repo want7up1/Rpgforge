@@ -13,8 +13,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 最近一轮 | Round 58 — 前端 UI 全面重做：像素磷光绿终端风 + 信息架构重组（功能 100% 保留） |
-| 完成日期 | 2026-07-20 |
+| 最近一轮 | Round 59 — 移动端右侧溢出与记忆页帮助气泡修复 |
+| 完成日期 | 2026-07-21 |
 | 游戏方向 | 2026-06-02 新开「游戏方向」专项（可玩性/机制/叙事/体验，区别于 GAME_SYSTEM_AUDIT 审的状态正确性）。核心判断：剧情遵循已过度投入，缺**博弈/失败/结局**三大根本，继续加固防跑偏为负收益。路线图见 [`GAME_DIRECTION_AUDIT.md`](GAME_DIRECTION_AUDIT.md) §4 |
 | 文档卫生 | 2026-05-29 更新：§0/§3/§7/§9 对齐到 Round 24 现状（此前停在 Round 1–15）。架构蓝图见 `PROMPT_ARCHITECTURE_REDESIGN.md` |
 | 当前阶段 | **2026-06-04 一轮大型前端建设（Round 36–39）**：围绕「story_settings 可视化编辑」建了一套**设定看板**子系统，并落地三件事——① 生成页重设计（Round 36）② 设定页 + 信息架构去重（Round 37）③ **剧本炼金工坊**（Round 38，setting_modules 模块库 + 提取/并入 + AI 本地优化）④ 看板成为完整设定编辑面（Round 39，全字段数据驱动 + 字段类型系统 + 手动新增项）。详见各 Round 与下方「设计文档」。 |
@@ -26,6 +26,14 @@
 ---
 
 ## 1. 已完成
+
+### Round 59 (2026-07-21) — 移动端右侧溢出与记忆页帮助气泡修复
+
+**背景**：Round 58 的移动端复查覆盖 360/375/390px，但真实存档在更窄视口及特定顶部内容组合下仍会偶发右侧推出；本轮只处理已复现的两项响应式问题，不调整 UI 信息架构或业务行为。
+
+**改动**：① `.game-screen` 增加 `grid-template-columns: minmax(0, 1fr)`，阻止隐式 `auto` 列被顶栏最小内容宽度撑到视口之外；② 记忆页 `HelpMark` 在移动端改为视口底部安全区提示层，`sm` 以上保留原图标下方气泡；③ 保留在场角色姓名条的受控局部横向滚动及本轮开始前已有的未提交改动。
+
+**验证与部署**：本地 `git diff --check`、ESLint、TypeScript、vitest 52 项、Next.js 生产构建全过；仅同步两个前端文件并以 `--no-deps` 重建远端 `web`，API/worker/PostgreSQL/Redis 未重建、持久数据未触碰。线上 Playwright 完成 65 组路由、28 组真实存档宽度、4 个动态状态和 20 次气泡检查，溢出问题均为 0；320px 视觉截图通过，浏览器控制台 0 error，Web HTTP 200、API health 正常。详细记录见 [`docs/history/OPTIMIZATION_LOG_2026-07.md`](history/OPTIMIZATION_LOG_2026-07.md)，问题台账见 [`docs/REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md)。
 
 ### Round 58 (2026-07-18) — 前端 UI 全面重做：像素磷光绿终端风 + 信息架构重组
 

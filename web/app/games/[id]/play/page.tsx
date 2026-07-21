@@ -775,9 +775,7 @@ function PresentCharactersStrip({
       );
       return {
         character,
-        identity: character?.identity || npcState?.identity || character?.description || "在场角色",
-        name: character?.name || npcState?.name || name,
-        status: npcState?.status || npcState?.relationship || npcState?.attitude || ""
+        name: character?.name || npcState?.name || name
       };
     })
     .filter((entry, index, list) =>
@@ -792,15 +790,11 @@ function PresentCharactersStrip({
   }
 
   return (
-    <section className="mb-4 border-2 border-[#8a6420] bg-[color:var(--panel)] p-3" aria-label="当前在场角色">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="story-label">在场者</span>
-        <span className="px-badge">{present.length}</span>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
+    <section className="present-strip mb-4" aria-label="当前在场角色">
+      <div className="present-name-list">
         {present.map((entry) => (
           <button
-            className="present-chip"
+            className="present-name-chip"
             disabled={!entry.character}
             key={entry.name}
             onClick={() => {
@@ -810,19 +804,7 @@ function PresentCharactersStrip({
             }}
             type="button"
           >
-            {entry.character ? (
-              <CharacterPortrait character={entry.character} />
-            ) : (
-              <span className="grid h-10 w-10 place-items-center border-2 border-[#8a6420] bg-[rgba(255,179,71,0.1)] font-black text-[color:var(--amber)]">
-                {entry.name.slice(0, 1)}
-              </span>
-            )}
-            <span className="min-w-0">
-              <strong className="block truncate text-sm">{entry.name}</strong>
-              <span className="block truncate text-xs text-[color:var(--muted)]">
-                {[entry.identity, entry.status].filter(Boolean).join(" · ")}
-              </span>
-            </span>
+            {entry.name}
           </button>
         ))}
       </div>

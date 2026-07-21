@@ -1,5 +1,45 @@
 # Optimization Log 2026-07
 
+## 2026-07-21 — Round 59：移动端右侧溢出与帮助气泡修复
+
+### 背景与根因
+
+- 用户反馈移动端界面偶尔从右侧溢出。只读审查确认初始路由在 360px 以上稳定，但一个真实存档在 320px 下出现 `.game-screen clientWidth=320 / scrollWidth=342`。
+- `.game-screen` 只定义三行，唯一隐式列仍为 `auto`；顶栏标题与“撤销/手账/菜单”的最小内容宽度会把整列撑宽。根节点隐藏横向滚动，因此表现为偶发推出或裁切，而非稳定滚动条。
+- 记忆页 `HelpMark` 使用固定 288px 气泡并相对小图标居中，在 320–430px 下会越过左边界。
+- 在场角色姓名条的 `overflow-x: auto` 是受控的局部滚动，不是页面级根因。
+
+### 改动
+
+- `web/app/globals.css`：为 `.game-screen` 增加 `grid-template-columns: minmax(0, 1fr)`。
+- `web/app/games/[id]/memory/page.tsx`：帮助气泡在移动端固定到视口底部安全区，左右各留 0.75rem；`sm` 以上恢复绝对定位、图标下方居中和 288px 宽度。
+- 未改动业务逻辑、API、数据库、Docker 配置或持久化数据；保留本轮开始前 `play/page.tsx` 与 `globals.css` 的已有未提交改动。
+
+### 本地验证
+
+- `git diff --check`：通过。
+- `cd web && npm run lint`：通过。
+- `cd web && npx tsc --noEmit`：通过。
+- `cd web && npm test`：3 个测试文件、52 项全部通过。
+- `cd web && npm run build`：Next.js 16.2.6 生产构建及全部路由生成通过。
+
+### 远端部署与实页验证
+
+- 部署前校验远端两个目标文件与审查基线 SHA-256 一致；只同步 `globals.css` 与记忆页文件。
+- `docker compose up -d --build --no-deps web`：镜像构建成功，仅重新创建 `rpgforge-web-1`；API、worker、PostgreSQL、Redis 运行时长保持不变。
+- `docker compose ps`：服务全部运行，API/PostgreSQL/Redis healthy；Web 日志显示 Next.js Ready，无异常。
+- Web `/`：HTTP 200；API `/health`：`status=ok`、environment=production。
+- Playwright（Chrome + iPhone 13 设备模拟）：
+  - 13 个路由 × 320/360/375/390/430px，共 65 组初始状态，无横向溢出。
+  - 4 个真实存档 × 280/300/320/330/360/390/430px，共 28 组，无文档级或 `.game-screen` 溢出。
+  - 320px 下菜单、手账、展开命令行、角色弹窗 4 个动态状态均通过。
+  - 5 个帮助入口 × 320/360/390/430px，共 20 次聚焦检查均位于视口内。
+  - 320px 游玩页与帮助气泡视觉截图通过；浏览器控制台 0 error。
+
+### 验证边界
+
+- 本机未安装 Playwright WebKit 浏览器组件，为保持依赖边界未临时安装；自动化验收使用现有 Chrome 的 iPhone 13 设备模拟。修复仅使用标准 CSS Grid、响应式定位和安全区变量。
+
 ## 2026-07-06 — Round 57：非数值代价闭环 + 替代锚点组
 
 ### 背景

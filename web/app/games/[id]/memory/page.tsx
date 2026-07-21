@@ -451,7 +451,7 @@ function HelpMark({ text }: { text: string }) {
       >
         !
       </button>
-      <span className="pointer-events-none absolute left-1/2 top-7 z-20 hidden w-72 -translate-x-1/2 border-2 border-[color:var(--border-strong)] bg-[color:var(--panel-strong)] p-3 text-left text-xs font-normal leading-5 text-[color:var(--foreground)] shadow-xl group-focus-within:block group-hover:block">
+      <span className="pointer-events-none fixed inset-x-3 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-20 hidden w-auto translate-x-0 border-2 border-[color:var(--border-strong)] bg-[color:var(--panel-strong)] p-3 text-left text-xs font-normal leading-5 text-[color:var(--foreground)] shadow-xl group-focus-within:block group-hover:block sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-7 sm:w-72 sm:-translate-x-1/2">
         {text}
       </span>
     </span>
