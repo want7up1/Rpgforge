@@ -67,6 +67,25 @@ Turn jobs expose incremental narrative progress so the play page can update whil
 
 - `GET /api/settings/deepseek`
 - `PATCH /api/settings/deepseek`
+- `POST /api/settings/deepseek/models`
 
-When `SETTINGS_ADMIN_TOKEN` is set, saving settings requires the token. In production mode,
-saving settings is rejected if the token is missing.
+Settings and telemetry APIs do not require an application management token. The legacy
+`settings_protected` response field remains `false` for older clients.
+
+Model discovery accepts optional `base_url` and `api_key` draft values. An omitted/empty
+key reuses the current key only for the same provider origin. A changed origin requires
+an explicitly entered key. Discovery does not save settings or run chat completions.
+
+Example response:
+
+```json
+{
+  "models": [{"id": "provider-flash"}, {"id": "provider-pro"}],
+  "flash_model": "provider-flash",
+  "pro_model": "provider-pro"
+}
+```
+
+Recommendations always use returned IDs. Errors distinguish invalid input, authentication,
+unsupported model-list endpoints, malformed/empty lists and timeouts, without returning
+credentials or an upstream error body.

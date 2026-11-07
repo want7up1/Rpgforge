@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import {
@@ -14,20 +14,12 @@ import {
   type TurnEvaluationRead
 } from "@/lib/api";
 
-// 与 /settings 页面共用同一个 token，方便用户只配一次。
-const adminTokenStorageKey = "rpgforge.settingsAdminToken";
-
 type LoadState = "idle" | "loading" | "ok" | "error";
 
 export default function AdminPage() {
-  // lazy initializer 从 localStorage 读，避免在 effect 内同步 setState。
-  const initialToken =
-    typeof window === "undefined" ? "" : localStorage.getItem(adminTokenStorageKey) ?? "";
-  const [token, setToken] = useState<string>(initialToken);
-  const [tokenInput, setTokenInput] = useState<string>(initialToken);
   const [stats, setStats] = useState<RecentTurnStats | null>(null);
   const [traces, setTraces] = useState<AgentTraceSummary[]>([]);
-  const [state, setState] = useState<LoadState>("idle");
+  const [state, setState] = useState<LoadState>("loading");
   const [error, setError] = useState<string>("");
   const [limit, setLimit] = useState<number>(100);
   // 手动刷新的计数器：bump 一下触发重新加载。
@@ -42,19 +34,20 @@ export default function AdminPage() {
   const [evalLoading, setEvalLoading] = useState(false);
   const [evalError, setEvalError] = useState("");
 
+  const detailRequest = useRef<AbortController | null>(null);
+  const evalRequest = useRef<AbortController | null>(null);
+
   // 加载逻辑放进 effect 内部的 async 函数，所有 setState 都在 await 之后，
   // 避免 react-hooks/set-state-in-effect 警告。
   useEffect(() => {
-    if (!token) {
-      return;
-    }
     const controller = new AbortController();
+    try { localStorage.removeItem("rpgforge.settingsAdminToken"); } catch { /* 清理旧版凭据缓存 */ }
 
-    async function load(currentToken: string) {
+    async function load() {
       try {
         const [statsData, traceData] = await Promise.all([
-          fetchRecentTurnStats(currentToken, limit),
-          fetchRecentTraces(currentToken, { limit: 30 })
+          fetchRecentTurnStats(limit, controller.signal),
+          fetchRecentTraces({ limit: 30 }, controller.signal)
         ]);
         if (controller.signal.aborted) return;
         setStats(statsData);
@@ -68,58 +61,53 @@ export default function AdminPage() {
       }
     }
 
-    void load(token);
+    void load();
     return () => controller.abort();
-  }, [token, limit, reloadTick]);
+  }, [limit, reloadTick]);
 
-  function handleSaveToken() {
-    if (typeof window === "undefined") return;
-    const trimmed = tokenInput.trim();
-    localStorage.setItem(adminTokenStorageKey, trimmed);
-    setToken(trimmed);
-  }
+  useEffect(() => () => { detailRequest.current?.abort(); evalRequest.current?.abort(); }, []);
 
   function handleRefresh() {
-    if (!token) {
-      setError("请先在下方填写并保存管理 Token。");
-      setState("error");
-      return;
-    }
-    setReloadTick((n) => n + 1);
+    setState("loading");
+    setReloadTick(n => n + 1);
   }
 
   async function handleOpenTrace(traceId: string) {
-    if (!token) return;
+    detailRequest.current?.abort();
+    const controller = detailRequest.current = new AbortController();
     setDetailLoading(true);
     setDetailError("");
     setDetail(null);
     try {
-      const data = await fetchTraceDetail(token, traceId);
-      setDetail(data);
+      const data = await fetchTraceDetail(traceId, controller.signal);
+      if (!controller.signal.aborted) setDetail(data);
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : String(err));
+      if (!controller.signal.aborted) setDetailError(err instanceof Error ? err.message : String(err));
     } finally {
-      setDetailLoading(false);
+      if (!controller.signal.aborted) setDetailLoading(false);
     }
   }
 
   async function handleLoadEvals() {
-    if (!token || !evalGameId.trim()) {
-      setEvalError("请填写 token 和 game id。");
+    if (!evalGameId.trim()) {
+      setEvalError("请填写 Game ID。");
       return;
     }
+    evalRequest.current?.abort();
+    const controller = evalRequest.current = new AbortController();
     setEvalLoading(true);
     setEvalError("");
     try {
-      const data = await fetchGameEvaluations(token, evalGameId.trim());
+      const data = await fetchGameEvaluations(evalGameId.trim(), 100, controller.signal);
+      if (controller.signal.aborted) return;
       setEvals(data);
       if (data.length === 0) {
         setEvalError("该游戏暂无评分。可用 scripts/judge_turn.py 生成。");
       }
     } catch (err) {
-      setEvalError(err instanceof Error ? err.message : String(err));
+      if (!controller.signal.aborted) setEvalError(err instanceof Error ? err.message : String(err));
     } finally {
-      setEvalLoading(false);
+      if (!controller.signal.aborted) setEvalLoading(false);
     }
   }
 
@@ -136,23 +124,6 @@ export default function AdminPage() {
 
         <section className="px-panel px-panel-pad">
           <div className="flex flex-wrap items-end gap-2">
-            <div className="min-w-48 flex-1">
-              <label className="px-label mb-1 block">管理 Token</label>
-              <input
-                type="password"
-                className="px-input"
-                value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="SETTINGS_ADMIN_TOKEN"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={handleSaveToken}
-              className="px-btn px-btn-primary"
-            >
-              保存
-            </button>
             <button
               type="button"
               onClick={handleRefresh}
@@ -165,7 +136,7 @@ export default function AdminPage() {
               <label className="px-label mb-1 block">样本量</label>
               <select
                 value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
+                onChange={(e) => { setState("loading"); setLimit(Number(e.target.value)); }}
                 className="px-input"
               >
                 <option value={50}>50</option>

@@ -1,6 +1,4 @@
-"""Admin-only read endpoints.
-
-需要 `X-Settings-Admin-Token` header 才能访问（生产模式如果未配置 token 会拒绝）。
+"""Runtime trace and diagnostic endpoints.
 当前只暴露 LLM trace 查询，方便排查 AI 链路问题。
 
 注意：本模块**不要**加 `from __future__ import annotations`。它会让 FastAPI 依赖参数
@@ -22,13 +20,11 @@ from app.db.session import get_db
 from app.models.agent_trace import AgentTrace
 from app.models.generator_job import TurnJob
 from app.models.turn_evaluation import TurnEvaluation
-from app.routers.settings import verify_settings_token
 from app.services.turn_judge import TurnJudgeError, evaluate_turn
 
 router = APIRouter(
     prefix="/api/admin",
     tags=["admin"],
-    dependencies=[Depends(verify_settings_token)],
 )
 DB_DEPENDENCY = Depends(get_db)
 

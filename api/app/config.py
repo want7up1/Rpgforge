@@ -22,7 +22,6 @@ class Settings(BaseSettings):
         default="deepseek-v4-pro",
         alias="DEEPSEEK_PRO_MODEL",
     )
-    settings_admin_token: str = Field(default="", alias="SETTINGS_ADMIN_TOKEN")
     mimo_api_key: str = Field(default="", alias="MIMO_API_KEY")
     audio_storage_path: str = Field(default="/data/audio", alias="AUDIO_STORAGE_PATH")
     portrait_storage_path: str = Field(default="/data/portraits", alias="PORTRAIT_STORAGE_PATH")

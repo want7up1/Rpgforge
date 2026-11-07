@@ -104,8 +104,12 @@ Important variables:
 | `DEEPSEEK_BASE_URL` | Optional DeepSeek-compatible base URL. |
 | `DEEPSEEK_FLASH_MODEL` | Default Flash model slot name. |
 | `DEEPSEEK_PRO_MODEL` | Default Pro model slot name. |
-| `SETTINGS_ADMIN_TOKEN` | Token required before saving model/API settings when exposed publicly. |
 | `INTERNAL_API_URL` | URL the web container uses to reach the API container. |
+
+Enter the provider Base URL and API key in `/settings`. The app discovers the provider’s
+model list, recommends the Flash/Pro slots, and lets you choose from detected IDs without
+typing model names. Task-level routing continues to use those two slots. Discovery does
+not run a chat completion.
 
 See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for more details.
 
@@ -168,15 +172,15 @@ full prompt, output, token usage, latency, and status. Per-turn telemetry flags
 (`director_used_fallback`, `drift_severity`, `rewrite_triggered`,
 `extractor_failed`) live on `turn_jobs`.
 
-Admin dashboard (token-gated by `SETTINGS_ADMIN_TOKEN`):
+Admin dashboard:
 
-- Open `/admin` in the browser, enter the admin token.
+- Open `/admin` in the browser.
 - Aggregate cards: fallback / rewrite / extractor-failure rates, drift severity
   distribution, per-agent average latency, average judge score.
 - Recent LLM calls table — click any row for the full prompt / reasoning / output.
 - Judge score query by game id.
 
-Admin API (require `X-Settings-Admin-Token`):
+Admin API:
 
 - `GET /api/admin/stats/recent-turns`
 - `GET /api/admin/traces`, `GET /api/admin/traces/{id}`
@@ -197,6 +201,7 @@ See [Optimization Plan](docs/OPTIMIZATION_PLAN.md) for the full design and roadm
 
 ### Documentation
 
+- [剧本创作包](RPGForge-剧本创作包.md)（也可在新建页下载当前版本）
 - [Architecture](docs/ARCHITECTURE.md)
 - [Configuration](docs/CONFIGURATION.md)
 - [Deployment](docs/DEPLOYMENT.md)
@@ -208,7 +213,6 @@ See [Optimization Plan](docs/OPTIMIZATION_PLAN.md) for the full design and roadm
 
 RPGForge is built for self-hosting. Before exposing it publicly:
 
-- Set a strong `SETTINGS_ADMIN_TOKEN`.
 - Put public deployments behind an authenticated reverse proxy.
 - Keep `.env` private.
 - Treat the database as secret storage: runtime DeepSeek API keys are stored there in plaintext in this version.

@@ -140,6 +140,12 @@ export type DeepSeekSettingsRead = {
   settings_protected: boolean;
 };
 
+export type ModelDiscoveryRead = {
+  models: { id: string }[];
+  flash_model: string | null;
+  pro_model: string | null;
+};
+
 export type DeepSeekSettingsUpdate = {
   api_key?: string;
   clear_api_key?: boolean;

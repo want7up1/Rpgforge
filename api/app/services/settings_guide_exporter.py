@@ -28,6 +28,7 @@ def export_settings_guide_markdown() -> str:
     ]
     _append_ai_instruction(lines)
     _append_workflow(lines)
+    _append_author_notes(lines)
     _append_module_reference(lines)
     _append_field_reference(lines)
     _append_risk_rules(lines)
@@ -44,15 +45,17 @@ def _append_ai_instruction(lines: list[str]) -> None:
             "```text",
             "你正在修改 RPGForge 的 story_settings v2 JSON。",
             "请严格保持 JSON 是完整合法对象，format_version 必须是 rpgforge.story.v2。",
-            "可以完整修改世界观、核心人物、五幕主线、主线轨迹、核心机制、行动风格规则、剧本素材库、[地点]、强制规则和生成参数。",
-            "不要添加回合历史、当前状态、存档进度、摘要、AI 思考过程或 Markdown 注释。",
-            "不要把隐藏真相写进 public_facts、public_info、player_visible、角色公开简介或玩家开局已知内容。",
+            "可以完整修改世界观、核心人物、分幕主线、主线轨迹、核心机制、行动风格规则、剧本素材库、[地点]、强制规则和生成参数。",
+            "不要添加 initial_state、回合历史、当前状态、状态增量、结算回执、存档进度、摘要、任务版本或 AI 思考过程。",
+            "不要把隐藏真相写进 public_facts、public_info、player_visible、角色公开简介或 act_plan 的 title/objective；幕标题和目标会进入玩家目标栏。",
             "所有数组条目请保留稳定 id；如果必须改 id，请同步修改引用它的 act_id、completion_anchor、trigger、quest 或素材关系。",
-            "五幕主线的 completion_anchors 是推进到下一幕的软锚点，不是强制任务清单；每个锚点必须有可被状态提取器识别的 completion_signal。",
+            "completion_anchors 的剧情达成方式可以自由，但 required 条件是自动转幕的实际判定依据；completion_signal 必须是可从已发生剧情识别的明确事件。",
+            "同一幕同一 alternative_group 内的 required 锚点是 OR，不同组及未分组 required 锚点之间是 AND；required:false 不阻塞转幕。",
+            "全部必需条件被结算确认为完成后会自动转幕，transition_to_next_act.condition 不是额外的程序门。",
             "main_quest_path 是软主线轨迹，允许玩家自由探索、停留、社交和绕路，不要写成强制一本道。",
             "hard_rules 是最高优先级强约束，不能被临场剧情或风格描述覆盖。",
             "generation_parameters 只控制 GM 输出长度、格式节奏和上下文摘录长度，不要写剧情设定。",
-            "修改完成后只输出完整 JSON，不要输出解释、代码块外文字或额外注释。",
+            "修改完成后只输出完整 JSON，不要解释、Markdown 代码围栏或注释。",
             "```",
             "",
         ]
@@ -69,6 +72,39 @@ def _append_workflow(lines: list[str]) -> None:
             "3. 重点检查 `format_version`、所有 `id`、`act_id`、`completion_anchors` 和 `generation_parameters`。",
             "4. 确认 JSON 可以被解析后，在 RPGForge 设置页导入。",
             "5. 导入成功即保存设定；不会改变当前存档、回合历史、摘要或状态。",
+            "",
+        ]
+    )
+
+
+def _append_author_notes(lines: list[str]) -> None:
+    lines.extend(
+        [
+            "## 作者须知：公开目标、转幕与状态后果",
+            "",
+            "### 公开目标不藏谜底",
+            "",
+            "`act_plan[].title` 和 `act_plan[].objective` 会用于玩家目标栏；任务标题、`player_visible` 和角色公开介绍也应按玩家可读内容填写。不要把尚未揭露的真凶、隐藏身份或关键证物直接写进这些字段。",
+            "例如用“灯塔深处／追查现场线索”作为公开目标，把“地下室藏有走私旧账”放进 `worldview.hidden_facts` 或素材的 `gm_secret`，并说明何时才允许揭露。",
+            "",
+            "### 必需条件达成后自动转幕",
+            "",
+            "模型根据实际发生的正文显式上报已完成锚点，平台再按锚点 ID 校验和结算；`completion_signal` 是叙事完成信号，不是关键词触发器。",
+            "",
+            "- 每个没有替代组的 `required: true` 锚点都必须完成。",
+            "- 同一幕内，填相同 `alternative_group` 的多个必需锚点组成 OR：任意完成一条即可满足该组。",
+            "- 不同替代组之间、替代组与未分组必需锚点之间是 AND：每一项条件都要满足。",
+            "- `required: false` 是可选内容，不阻塞转幕，也不能用它替代必需路线的 `required: true`。",
+            "- 全部必需条件被结算确认为完成后自动进入下一幕；最后一幕的必需条件达成后进入通关结算。转幕是故事阶段变化，不等于必须立即换地点。",
+            "",
+            "例如“勘查灯室 A”独立必需，“找到脚印 B／取得证言 C”同属一个必需替代组，帮助渔民 D 可选；逻辑是 **A AND (B OR C)**，D 不参与门槛。若另有替代组 E/F，则变成 **A AND (B OR C) AND (E OR F)**。创作包完整范例提供 A/B/C/D 的合法 JSON。",
+            "`transition_to_next_act.target_act` 指定下一幕；`condition` 只解释叙事前提，`transition_style` 只描述转场写法。平台不会把 condition 当成第二道独立程序门，也不会因为写了“玩家再次确认”就在条件达成后额外等待。真正必须发生的前提应写成必需锚点和可识别的 completion_signal。",
+            "",
+            "### 外部导入只接设定源",
+            "",
+            "创作 JSON 使用 `story_settings` v2 的人物、世界观、分幕、机制、素材及 `generation_parameters`；它不是游戏存档。不要附带 `initial_state`、`state_json`、`story_progress`、`state_delta_json`、`settlement_receipt`、回合、摘要、任务 ID、`revision` 或 `timeline_generation` 等内部运行数据；这些不是外部剧本导入的状态接口。格式版本 `format_version` 仍须保留。",
+            "初始身份、开局已知信息和初始关系写进人物、世界观和故事前提；机制后果写成可观察的叙事事件，例如“沈兰把钥匙交给林决并说明用途”“接受包扎后伤口不再流血”“守门人因看到证据而由怀疑转为有限配合”。GM 写出实际后果后，平台再识别并结算物品、伤势、关系或已知事实；不要只写抽象的“关系升级”，也不要要求正文输出内部回执。",
+            "`core_mechanics.rule` 等文字提供叙事约束，不是可执行脚本；导入设定不会直接注入物品栏或重写已发生的状态。",
             "",
         ]
     )
@@ -102,8 +138,8 @@ def _append_module_reference(lines: list[str]) -> None:
         ),
         (
             "act_plan",
-            "五幕主线",
-            "每幕目标、揭露范围、完成锚点和转场条件。决定什么时候允许推进到下一幕。",
+            "分幕主线",
+            "每幕公开目标、揭露范围和完成锚点。必需条件结算达成后自动转幕；condition 是叙事说明。",
             "导入生效",
         ),
         (
@@ -196,26 +232,28 @@ def _append_field_reference(lines: list[str]) -> None:
         ("core_characters[].dramatic_function", "戏剧功能", "告诉 GM 该角色在主线中的作用。", "导入生效", "[戏剧功能，如线索守门人]"),
         ("core_characters[].desire/fear/leverage", "动机组", "决定 NPC 行动、谈判筹码和关系变化。", "导入生效", "[动机，如想夺回某物]"),
         ("core_characters[].relationship_arc", "关系弧", "该角色与主角关系的长期变化方向。", "导入生效", "[关系变化方向]"),
-        ("core_characters[].public_limit", "公开边界", "角色开局不会主动说出的秘密。", "导入生效", "[开局不会主动透露的秘密]"),
+        ("core_characters[].public_limit", "公开边界", "按公开可观察的行为边界填写；完整秘密另放 gm_secret。", "导入生效", "没有可信证据前不肯提供帮助"),
         ("core_characters[].portrait_prompt", "立绘提示词", "用于生成角色立绘的描述；不写隐藏身份。", "导入生效", "[立绘描述，不含隐藏身份]"),
         ("core_characters[].visibility", "可见性", "visible 会展示给玩家；hidden 保留给 GM。", "导入生效", "visible"),
     ])
     _append_table_section(lines, "act_plan[]", [
-        ("act_plan[].id", "幕 id", "必须唯一，建议 act_1 到 act_5；被状态推进引用。", "导入生效", "act_1"),
-        ("act_plan[].title", "幕标题", "给 GM 识别阶段，不一定直接展示。", "导入生效", "[幕标题]"),
-        ("act_plan[].objective", "本幕目标", "当前幕 GM 的主要推进方向。", "导入生效", "[本幕主要目标]"),
+        ("act_plan[].id", "幕 id", "必须唯一，建议 act_1、act_2 等；幕数按故事规模安排。", "导入生效", "act_1"),
+        ("act_plan[].title", "幕标题", "会用于玩家目标栏；用不泄露未揭真相的公开标题。", "导入生效", "灯塔深处"),
+        ("act_plan[].objective", "本幕目标", "会用于玩家目标栏；写当前可公开的方向，不写谜底。", "导入生效", "顺着已发现的线索继续调查"),
         ("act_plan[].dramatic_question", "戏剧问题", "决定本幕张力，不等于任务清单。", "导入生效", "[本幕戏剧问题]"),
         ("act_plan[].must_hit_beats[]", "必经节拍", "本幕希望出现的关键剧情节拍，给 GM 软引导。", "导入生效", "[关键节拍]"),
         ("act_plan[].allowed_reveals[]", "允许揭露", "本幕可以透露的信息边界。", "导入生效", "[本幕可揭露的信息]"),
         ("act_plan[].forbidden_reveals[]", "禁止揭露", "本幕不能提前说出的真相。", "导入生效", "[本幕禁止揭露的真相]"),
         ("act_plan[].completion_anchors[]", "完成锚点", "推进到下一幕前需要自然满足的条件。", "导入生效", "[完成条件]"),
         ("completion_anchors[].id", "锚点 id", "必须全局唯一；状态提取器用它标记完成。", "导入生效", "act_1_anchor_1"),
-        ("completion_anchors[].title", "锚点标题", "供 GM 识别该锚点，不一定直接展示。", "导入生效", "[锚点标题]"),
+        ("completion_anchors[].title", "锚点标题", "供进度提示与 GM 识别，按可公开展示填写。", "导入生效", "取得关键证据"),
         ("completion_anchors[].required", "是否必达", "true 表示推进到下一幕前必须满足；默认 true。", "导入生效", "true"),
         ("completion_anchors[].alternative_group", "替代组", "同一幕多个 required 锚点填相同值时，完成其中任意一个即可满足该组；普通必达锚点留空。", "导入生效", "entry_path"),
         ("completion_anchors[].description", "锚点说明", "解释这个锚点要达成什么，给 GM 参考。", "导入生效", "[锚点要达成什么]"),
         ("completion_anchors[].completion_signal", "完成信号", "写成可从剧情文本识别的明确事件。", "导入生效", "[可识别的剧情事件]"),
         ("transition_to_next_act.target_act", "下一幕目标", "只能指向存在的 act id；最后一幕可留空对象。", "导入生效", "act_2"),
+        ("transition_to_next_act.condition", "叙事转场说明", "不是独立程序门；真正的必需前提应写成 required 锚点。", "导入生效", "现场证据齐备后顺线索深入"),
+        ("transition_to_next_act.transition_style", "转场写法", "给 GM 的叙事衔接建议，不改变锚点判定。", "导入生效", "顺线索深入"),
     ])
     _append_table_section(lines, "main_quest_path[]", [
         ("main_quest_path[].id", "主线节点 id", "稳定唯一，便于 AI 修改和引用。", "导入生效", "main_quest_1"),
@@ -296,11 +334,11 @@ def _append_risk_rules(lines: list[str]) -> None:
             "- `act_plan[].id`、`main_quest_path[].act_id`、`transition_to_next_act.target_act` 必须互相对应。",
             "- `completion_anchors[].id` 必须全局唯一；重复会导致导入失败。",
             "- `completion_signal` 要写成剧情中能自然出现、状态提取器能识别的事件。",
-            "- `public_*`、`player_visible`、角色公开字段不能写隐藏真相。",
+            "- `public_*`、`player_visible`、角色公开字段及 `act_plan[].title/objective` 不能写隐藏真相。",
             "- `gm_secret`、`hidden_facts` 可以写完整秘密，但 GM 只能转化成线索，不应直接剧透。",
             "- `story_material_library[].always_on=true` 的素材会更稳定进入上下文，但过多会增加 token 消耗。",
             "- `generation_parameters.recent_turn_excerpt_chars` 越大，近期回合上下文越完整；越小越省 token。",
-            "- 存档、当前状态、回合历史和摘要不在这个 JSON 内；导入设定不会自动重写已经发生的剧情进度。",
+            "- `initial_state`、状态增量、回执、存档、当前状态、回合历史和摘要不在这个 JSON 内；状态后果应写为明确叙事，导入设定不会自动重写已经发生的剧情进度。",
             "",
         ]
     )

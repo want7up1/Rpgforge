@@ -21,11 +21,22 @@ Never commit `.env`.
 | `DATABASE_URL` | Yes | SQLAlchemy PostgreSQL connection string. |
 | `REDIS_URL` | Yes | Redis connection string. |
 | `INTERNAL_API_URL` | Yes for web | URL used by Next.js to proxy API requests. |
-| `SETTINGS_ADMIN_TOKEN` | Required for public deployments | Token required to save DeepSeek settings. In `APP_ENV=production`, saving is blocked when this token is missing. |
 
 ## DeepSeek Settings
 
-DeepSeek can be configured in `.env` or saved from `/settings`.
+DeepSeek-compatible services can be configured in `.env` or saved from `/settings`.
+
+Fill the Base URL and API key to discover models automatically. The two model slots are
+populated from the returned model IDs; use their dropdowns to change the recommendation.
+A single available model can serve both slots. Existing saved choices are retained while
+they remain available. A provider must expose a compatible `GET /models` endpoint; listing
+models does not run chat completions or establish their actual latency, quality or quota.
+See the [DeepSeek model-list reference](https://api-docs.deepseek.com/api/list-models/).
+
+Discovery uses draft form values without saving them. An empty key can reuse the saved
+key for the same provider; changing the provider origin requires entering its key again.
+Editing the provider invalidates an older result. Save explicitly after discovery succeeds.
+Settings and telemetry no longer require an application admin token.
 
 | Variable | Description |
 | --- | --- |
@@ -54,12 +65,11 @@ Thinking is enabled where the app expects reasoning-heavy behavior. The current 
 
 Before exposing the app outside a trusted network:
 
-1. Set a strong `SETTINGS_ADMIN_TOKEN`.
-2. Use HTTPS through a reverse proxy.
-3. Put the app behind an authenticated reverse proxy.
-4. Avoid exposing the API container directly.
-5. Back up the database and portrait volumes privately.
-6. Rotate any API key that may have been used during public testing.
+1. Use HTTPS through a reverse proxy.
+2. Put the app behind an authenticated reverse proxy.
+3. Avoid exposing the API container directly.
+4. Back up the database and portrait volumes privately.
+5. Rotate any API key that may have been used during public testing.
 
 ## Optional Audio Variables
 

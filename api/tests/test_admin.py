@@ -1,7 +1,7 @@
 """admin endpoint 集成测试（TestClient + 真实 DB）。
 
 覆盖 Round 3-6 新增的 /api/admin/* endpoint：trace 列表/详情/聚合、
-golden 过滤、stats 聚合、turn evaluation 查询、token 鉴权。
+golden 过滤、stats 聚合、turn evaluation 查询及无需管理 Token 的访问。
 """
 
 from datetime import UTC, datetime
@@ -173,12 +173,12 @@ def test_admin_game_evaluations(db_session) -> None:
     assert rows[0]["canon_fidelity"] == 4
 
 
-def test_admin_requires_token_when_configured(db_session, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "settings_admin_token", "secret-token")
+def test_admin_does_not_require_management_token_in_production(db_session, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "app_env", "production")
     client = TestClient(app)
 
-    blocked = client.get("/api/admin/stats/recent-turns")
-    assert blocked.status_code == 401
+    without_header = client.get("/api/admin/stats/recent-turns")
+    assert without_header.status_code == 200
 
     allowed = client.get(
         "/api/admin/stats/recent-turns",

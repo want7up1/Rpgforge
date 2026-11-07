@@ -17,7 +17,7 @@ Include:
 
 ## Self-Hosting Notes
 
-- Set `SETTINGS_ADMIN_TOKEN` before exposing the settings page.
+- Settings and telemetry no longer require an application admin token. Restrict access at your existing network or reverse-proxy boundary when needed.
 - Do not commit `.env`.
 - Do not publish Docker volumes or database dumps.
 - Treat generated games, character portraits, and saved API settings as private user data.

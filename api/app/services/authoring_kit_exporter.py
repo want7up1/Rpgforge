@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 
+from app.services.generation_parameters import DEFAULT_GENERATION_PARAMETERS
 from app.services.settings_guide_exporter import export_settings_guide_markdown
 
 # 从头编写的通用范例剧本（侦探题材，绝不使用任何真实存档/剧本）。
@@ -76,7 +77,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
             "fear": "父亲卷入了见不得光的事",
             "leverage": "知道灯塔地下室的入口",
             "relationship_arc": "从敌意防备到有限合作",
-            "public_limit": "不会主动说出地下室的存在",
+            "public_limit": "尚未建立信任前，不愿提供额外线索",
         },
     ],
     "act_plan": [
@@ -101,24 +102,40 @@ AUTHORING_KIT_EXAMPLE: dict = {
                     "completion_signal": "发现灯油被人为放空的痕迹。",
                 },
                 {
-                    "id": "act_1_second_person",
-                    "title": "确认第二个人",
+                    "id": "act_1_second_person_tracks",
+                    "title": "核实现场痕迹",
                     "required": True,
-                    "alternative_group": "",
+                    "alternative_group": "second_person_evidence",
                     "description": "证明失踪当晚灯塔不止看守人一人。",
                     "completion_signal": "找到不属于看守人的脚印或物件。",
+                },
+                {
+                    "id": "act_1_second_person_testimony",
+                    "title": "核实证人证言",
+                    "required": True,
+                    "alternative_group": "second_person_evidence",
+                    "description": "通过另一条调查路线确认当晚有来客。",
+                    "completion_signal": "证人明确说出当晚见到另一人进入灯塔的时间和经过。",
+                },
+                {
+                    "id": "act_1_help_fishermen",
+                    "title": "帮助滞港渔民",
+                    "required": False,
+                    "alternative_group": "",
+                    "description": "可选的人情支线，不是失踪案转幕条件。",
+                    "completion_signal": "帮助渔民修好临时雾号，并得到他们的感谢。",
                 },
             ],
             "transition_to_next_act": {
                 "target_act": "act_2",
-                "condition": "两个现场锚点完成，玩家决定追查第二个人。",
+                "condition": "确认人为熄灯，并通过现场痕迹或证人证言核实当晚有来客。",
                 "transition_style": "顺线索深入",
             },
         },
         {
             "id": "act_2",
-            "title": "地下室的旧账",
-            "objective": "查明灯塔地下室隐藏的秘密。",
+            "title": "灯塔深处",
+            "objective": "追查现场线索，取得能解释失踪案的关键证据。",
             "dramatic_question": "看守人是因为这本旧账才消失的吗？",
             "pressure": "港务局开始施压要求结案。",
             "must_hit_beats": ["进入地下室", "找到走私旧账残页"],
@@ -129,7 +146,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
             "completion_anchors": [
                 {
                     "id": "act_2_find_ledger",
-                    "title": "找到旧账残页",
+                    "title": "取得关键证据",
                     "required": True,
                     "alternative_group": "",
                     "description": "拿到指向下一步的实物证据。",
@@ -152,9 +169,9 @@ AUTHORING_KIT_EXAMPLE: dict = {
         {
             "id": "main_quest_2",
             "act_id": "act_2",
-            "title": "潜入地下室",
-            "objective": "弄清地下室隐藏了什么。",
-            "player_visible": "顺着线索进入灯塔地下室。",
+            "title": "继续调查灯塔",
+            "objective": "查清现场线索指向的后续真相。",
+            "player_visible": "顺着已发现的线索继续调查。",
             "completion_signal": "获得走私旧账残页。",
             "optional": False,
         },
@@ -164,7 +181,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
             "id": "investigation",
             "name": "调查推进",
             "rule": "给线索不给答案，隐藏真相必须通过可观察痕迹逐步揭露。",
-            "progression": "完成当前幕锚点后才允许切换下一幕。",
+            "progression": "本幕全部必需条件达成后自动转幕，同组替代路线任一完成即可。",
             "visibility": "public",
         }
     ],
@@ -243,6 +260,7 @@ AUTHORING_KIT_EXAMPLE: dict = {
         "continuity_rules": ["人物动机和地点状态必须保持一致。"],
         "gm_output_rules": ["正文不输出状态结算。"],
     },
+    "generation_parameters": dict(DEFAULT_GENERATION_PARAMETERS),
 }
 
 _AI_INSTRUCTION = """\
@@ -251,19 +269,42 @@ _AI_INSTRUCTION = """\
 把上面的「字段填写指南」当规则，把「完整范例剧本」当模板，结合用户给你的剧情想法，
 产出一份**全新的** `story_settings` JSON。务必遵守：
 
-1. **只输出一个合法 JSON 对象**，不要输出任何解释、Markdown 代码围栏以外的文字。
+1. **只输出一个合法 JSON 对象**，不要解释、Markdown 代码围栏或注释。
 2. `format_version` 必须是 `rpgforge.story.v2`。
-3. 顶层字段只能用范例里出现过的键，不要自创顶层字段。
+3. 使用范例中的 `story_settings` 顶层键；生成参数放在 `generation_parameters`。
+   不要自创顶层字段，不要套入 `config`、游戏存档或内部运行状态。
 4. 标题、题材、简介写进 `game_profile`（不是顶层），它们决定游戏标题。
 5. `core_characters[].name` 必须唯一且非空；`act_plan[].id` 与所有
    `completion_anchors[].id` 必须全局唯一。
-6. 秘密、真凶、反转**不要**写进公开字段；放进 `worldview.hidden_facts`、
-   `story_material_library[].gm_secret`、`act_plan[].forbidden_reveals`、
-   `hard_rules.must_not` 等隐藏位。
-7. 至少写 2 幕（`act_plan`），每幕至少 1 个 `required: true` 的完成锚点，
-   否则自动转幕兜底会失效；多个 required 锚点如果是同一目标的替代路线，
-   可填相同的 `alternative_group`，表示完成其中任意一个即可满足该组。
-8. 产出后自检：JSON 能被 `JSON.parse` 解析，且字段名与范例一致。
+6. 秘密、真凶、反转**不要**写进公开字段，尤其是玩家目标栏会显示的
+   `act_plan[].title`、`act_plan[].objective`，以及任务名和 `player_visible`；
+   秘密正文放进 `worldview.hidden_facts` 或 `story_material_library[].gm_secret`，
+   再用 `act_plan[].forbidden_reveals`、`hard_rules.must_not` 约束揭露时机。
+7. 本创作模板至少写 2 幕（`act_plan`），每幕至少 1 个 `required: true` 的完成锚点。
+   同组替代路线是 OR，不同组及未分组的必需锚点之间是 AND；`required: false` 不阻塞。
+   全部必需条件被结算确认为完成后，平台自动转幕；`transition_to_next_act.condition`
+   仅作叙事说明，不是独立程序门，也不会额外等待玩家按“继续”或口头确认。
+8. 不要输出 `initial_state`、`state_json`、`story_progress`、状态增量、回执或任务版本。
+   初始设定和后续状态后果写进人物、世界观、机制规则及明确的叙事事件，
+   让 GM 写出实际获得/失去物品、伤势解除、关系变化或事实揭露，再由平台结算。
+9. 产出后自检：JSON 能被 `JSON.parse` 解析，且字段名与范例一致。
+"""
+
+_EXAMPLE_READING_NOTES = """\
+## 如何阅读这个范例
+
+- 幕标题、幕目标、任务标题与玩家提示都按可公开显示来写。
+  第二幕使用“灯塔深处／追查现场线索”，不把尚未揭露的旧账写进目标栏。
+- 第一幕的必需条件是：`act_1_inspect_lamp` **AND**
+  （`act_1_second_person_tracks` **OR** `act_1_second_person_testimony`）。
+  后两条都写 `required: true` 和同一个 `alternative_group`；不是把它们写成可选项。
+  若另有一个替代组，该组也必须至少完成一条；不同组之间仍是 AND。
+- `act_1_help_fishermen` 是 `required: false` 的可选支线。
+  两条必需条件满足后，即使没帮助渔民、也没走另一条调查路线，平台仍会自动进入第二幕。
+- `transition_to_next_act.condition` 复述同一组叙事前提，`transition_style` 描述转场写法。
+  真正必须兑现的新前提应写成必需锚点及明确的 `completion_signal`，不能只藏在 condition 里。
+- 这个 JSON 是设定源，不是开局状态或存档。比如“找到残页后将证据交给沈兰”应作为可观察的
+  剧情后果写入机制或素材说明；不要在 JSON 顶层附带物品栏、`initial_state` 或结算回执。
 """
 
 
@@ -283,6 +324,8 @@ def export_authoring_kit_markdown() -> str:
         export_settings_guide_markdown(),
         "",
         "---",
+        "",
+        _EXAMPLE_READING_NOTES,
         "",
         "## 完整范例剧本（可直接导入，照此结构填写）",
         "",

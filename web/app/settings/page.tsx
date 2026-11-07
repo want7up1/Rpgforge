@@ -1,12 +1,12 @@
 "use client";
 
-import { FormEvent, type ReactNode, useEffect, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
-import { getDeepSeekSettings, updateDeepSeekSettings } from "@/lib/api";
+import { discoverModels, getDeepSeekSettings, updateDeepSeekSettings } from "@/lib/api";
 import type { DeepSeekSettingsRead } from "@/lib/types";
 
-const adminTokenStorageKey = "rpgforge.settingsAdminToken";
+import { canSaveModelDraft, modelProbeReadiness, ModelProbeSession, normalizedModelBaseUrl, selectDiscoveredModels } from "@/lib/modelDiscovery";
 type ModelSlot = "flash" | "pro";
 
 const taskRouteRows: {
@@ -84,7 +84,7 @@ const taskRouteRows: {
   {
     key: "generator_finalize_initial_state",
     label: "初始状态生成",
-    description: "生成开局状态、能力、经验、关系和可见线索。",
+    description: "生成开局处境、随身物品、人物关系和已知线索。",
     defaultSlot: "pro"
   },
   {
@@ -114,7 +114,7 @@ const taskRouteRows: {
   {
     key: "state_delta_extract",
     label: "状态提取",
-    description: "从剧情结果中提取状态变化、XP、技能和关系事件。",
+    description: "从剧情结果中提取处境、物品、关系、任务与线索变化。",
     defaultSlot: "flash"
   },
   {
@@ -130,259 +130,176 @@ type LoadState =
   | { status: "ready"; settings: DeepSeekSettingsRead }
   | { status: "error"; message: string };
 
+type DiscoveryState = { status: "idle" | "loading" | "success" | "error"; models: string[]; revision: number; message: string };
+
 export default function SettingsPage() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [adminToken, setAdminToken] = useState(() =>
-    typeof window === "undefined" ? "" : localStorage.getItem(adminTokenStorageKey) ?? ""
-  );
   const [apiKey, setApiKey] = useState("");
   const [clearApiKey, setClearApiKey] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
-  const [flashModel, setFlashModel] = useState("deepseek-v4-flash");
-  const [proModel, setProModel] = useState("deepseek-v4-pro");
-  const [taskModelRoutes, setTaskModelRoutes] = useState<Record<string, ModelSlot>>(
-    defaultTaskModelRoutes
-  );
+  const [flashModel, setFlashModel] = useState("");
+  const [proModel, setProModel] = useState("");
+  const [taskModelRoutes, setTaskModelRoutes] = useState<Record<string, ModelSlot>>(defaultTaskModelRoutes);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [providerRevision, setProviderRevision] = useState(0);
+  const revision = useRef(0);
+  const [probeTick, setProbeTick] = useState(0);
+  const [probeCancelled, setProbeCancelled] = useState(false);
+  const [discovery, setDiscovery] = useState<DiscoveryState>({ status: "idle", models: [], revision: -1, message: "" });
+  const probes = useRef(new ModelProbeSession());
+  const discoveredRevision = useRef<number | null>(null);
+  const saving = useRef<AbortController | null>(null);
+  const saved = state.status === "ready" ? state.settings : null;
 
   useEffect(() => {
     const controller = new AbortController();
-
-    async function load() {
-      try {
-        const settings = await getDeepSeekSettings();
-        if (!controller.signal.aborted) {
-          setBaseUrl(settings.base_url);
-          setFlashModel(settings.flash_model);
-          setProModel(settings.pro_model);
-          setTaskModelRoutes(normalizeTaskModelRoutes(settings.task_model_routes));
-          setState({ status: "ready", settings });
-        }
-      } catch (caught) {
-        if (!controller.signal.aborted) {
-          setState({
-            status: "error",
-            message: caught instanceof Error ? caught.message : "设置读取失败。"
-          });
-        }
-      }
-    }
-
-    load();
-
-    return () => controller.abort();
+    const session = probes.current;
+    try { localStorage.removeItem("rpgforge.settingsAdminToken"); } catch { /* 清理旧版本的管理Token，不保存服务Key */ }
+    void getDeepSeekSettings(controller.signal).then(settings => {
+      if (controller.signal.aborted) return;
+      setBaseUrl(normalizedModelBaseUrl(settings.base_url));
+      setFlashModel(settings.flash_model);
+      setProModel(settings.pro_model);
+      setTaskModelRoutes(normalizeTaskModelRoutes(settings.task_model_routes));
+      setState({ status: "ready", settings });
+    }).catch(caught => {
+      if (!controller.signal.aborted) setState({ status: "error", message: caught instanceof Error ? caught.message : "设置读取失败。" });
+    });
+    return () => { controller.abort(); session.cancel(); saving.current?.abort(); };
   }, []);
+
+  useEffect(() => {
+    if (!saved || pending || probeCancelled || discoveredRevision.current === providerRevision) return;
+    if (!modelProbeReadiness(baseUrl, apiKey, saved, clearApiKey).ready) return;
+    const probe = probes.current.start();
+    const timer = setTimeout(async () => {
+      if (!probe.isCurrent()) return;
+      setDiscovery({ status: "loading", models: [], revision: providerRevision, message: "正在读取服务提供的模型列表…" });
+      try {
+        const result = await discoverModels({ base_url: normalizedModelBaseUrl(baseUrl), api_key: apiKey.trim() || undefined }, probe.signal);
+        if (!probe.isCurrent()) return;
+        const { models } = selectDiscoveredModels(result, { flash: "", pro: "" });
+        if (!models.length) throw new Error("该服务未返回可用模型，请检查服务地址和 Key 后重新探测。");
+        discoveredRevision.current = providerRevision;
+        setFlashModel(current => selectDiscoveredModels(result, { flash: current, pro: "" }).flash);
+        setProModel(current => selectDiscoveredModels(result, { flash: "", pro: current }).pro);
+        setDiscovery({ status: "success", models, revision: providerRevision, message: `已发现 ${models.length} 个模型，可选择槽位；保存后生效。` });
+      } catch (caught) {
+        if (probe.isCurrent()) setDiscovery({ status: "error", models: [], revision: providerRevision, message: `探测失败：${caught instanceof Error ? caught.message : "请检查服务地址和 Key 后重试。"}` });
+      }
+    }, 600);
+    return () => { clearTimeout(timer); probe.cancel(); };
+  }, [apiKey, baseUrl, clearApiKey, pending, probeCancelled, probeTick, providerRevision, saved]);
+
+  function invalidateProvider() {
+    probes.current.cancel();
+    discoveredRevision.current = null;
+    const next = ++revision.current;
+    setProviderRevision(next);
+    setProbeCancelled(false);
+    setDiscovery({ status: "idle", models: [], revision: next, message: "" });
+    setMessage(null);
+  }
+
+  function retryProbe() {
+    probes.current.cancel();
+    discoveredRevision.current = null;
+    setProbeCancelled(false);
+    setProbeTick(current => current + 1);
+  }
+
+  function cancelProbe() {
+    probes.current.cancel();
+    setProbeCancelled(true);
+    setDiscovery({ status: "idle", models: [], revision: providerRevision, message: "已取消探测，可重新探测。" });
+  }
+
+  const currentDiscovery = discovery.status === "success" && discovery.revision === providerRevision;
+  const canSave = saved !== null && canSaveModelDraft(saved, { baseUrl, apiKey, flash: flashModel, pro: proModel }, { current: currentDiscovery, models: discovery.models });
+  const readiness = saved ? modelProbeReadiness(baseUrl, apiKey, saved, clearApiKey) : { ready: false, message: "" };
+  const sameProvider = saved && normalizedModelBaseUrl(saved.base_url) === normalizedModelBaseUrl(baseUrl) && !apiKey.trim();
+  const models = currentDiscovery ? discovery.models : sameProvider && saved ? [...new Set([saved.flash_model, saved.pro_model].filter(Boolean))] : [];
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending) {
-      return;
-    }
-
+    if (pending || !canSave) return;
+    saving.current?.abort();
+    const controller = saving.current = new AbortController();
+    probes.current.cancel();
     setPending(true);
     setMessage(null);
     try {
-      const updated = await updateDeepSeekSettings(
-        {
-          api_key: apiKey.trim() || undefined,
-          clear_api_key: clearApiKey,
-          base_url: baseUrl.trim(),
-          flash_model: flashModel.trim(),
-          pro_model: proModel.trim(),
-          task_model_routes: taskModelRoutes
-        },
-        adminToken.trim() || undefined
-      );
-      if (adminToken.trim()) {
-        localStorage.setItem(adminTokenStorageKey, adminToken.trim());
-      }
+      const updated = await updateDeepSeekSettings({ api_key: apiKey.trim() || undefined, clear_api_key: clearApiKey,
+        base_url: normalizedModelBaseUrl(baseUrl), flash_model: flashModel, pro_model: proModel, task_model_routes: taskModelRoutes }, controller.signal);
+      if (controller.signal.aborted) return;
       setApiKey("");
       setClearApiKey(false);
+      setBaseUrl(normalizedModelBaseUrl(updated.base_url));
       setState({ status: "ready", settings: updated });
-      setMessage("DeepSeek 配置已保存，新的生成和回合请求会立即使用。");
+      setMessage("模型服务配置已保存，新的生成和回合请求会使用这些设置。");
     } catch (caught) {
-      setMessage(caught instanceof Error ? caught.message : "保存失败。");
+      if (!controller.signal.aborted) setMessage(caught instanceof Error ? caught.message : "保存失败。");
     } finally {
-      setPending(false);
+      if (!controller.signal.aborted) setPending(false);
     }
   }
 
-  return (
-    <AppShell>
-      <section className="px-panel px-panel-strong px-panel-pad">
-        <p className="px-eyebrow">SYSTEM CONSOLE</p>
-        <h1 className="px-heading mt-2 text-3xl">系统设置</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)]">
-          这里保存运行时模型配置。浏览器只访问当前 Web 端口，后端由 Docker 内网代理。
-        </p>
-      </section>
-
-      {state.status === "loading" ? (
-        <section className="px-panel px-panel-pad text-sm text-[color:var(--muted)]">
-          <span className="px-caret" aria-hidden="true" /> 正在读取设置…
-        </section>
-      ) : state.status === "error" ? (
-        <section className="px-alert">{state.message}</section>
-      ) : (
-        <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-          <form
-            className="px-panel px-panel-pad"
-            onSubmit={handleSubmit}
-          >
-            <div className="grid gap-4">
-              {state.settings.settings_protected ? (
-                <label className="grid gap-2">
-                  <span className="px-label">设置管理 Token</span>
-                  <input
-                    className="px-input"
-                    onChange={(event) => setAdminToken(event.target.value)}
-                    placeholder="SETTINGS_ADMIN_TOKEN"
-                    type="password"
-                    value={adminToken}
-                  />
-                </label>
-              ) : (
-                <div className="px-alert">
-                  当前未配置 SETTINGS_ADMIN_TOKEN。生产环境会禁止保存设置；外网部署必须配置强 Token
-                  并放在认证反代后。
-                </div>
-              )}
-
-              <label className="grid gap-2">
-                <span className="px-label">DeepSeek API Key</span>
-                <input
-                  className="px-input"
-                  disabled={clearApiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder="留空表示不修改现有 Key"
-                  type="password"
-                  value={apiKey}
-                />
-              </label>
-
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  checked={clearApiKey}
-                  onChange={(event) => setClearApiKey(event.target.checked)}
-                  type="checkbox"
-                />
-                清空数据库中保存的 API Key
-              </label>
-
-              <label className="grid gap-2">
-                <span className="px-label">Base URL</span>
-                <input
-                  className="px-input"
-                  onChange={(event) => setBaseUrl(event.target.value)}
-                  placeholder="https://api.deepseek.com"
-                  value={baseUrl}
-                />
-              </label>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="px-label">Flash 模型槽位</span>
-                  <input
-                    className="px-input"
-                    onChange={(event) => setFlashModel(event.target.value)}
-                    value={flashModel}
-                  />
-                </label>
-                <label className="grid gap-2">
-                  <span className="px-label">Pro 模型槽位</span>
-                  <input
-                    className="px-input"
-                    onChange={(event) => setProModel(event.target.value)}
-                    value={proModel}
-                  />
-                </label>
+  return <AppShell>
+    <section className="px-panel px-panel-strong px-panel-pad">
+      <p className="px-eyebrow">SYSTEM CONSOLE</p><h1 className="px-heading mt-2 text-3xl">系统设置</h1>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--muted)]">填写服务地址与 API Key 自动发现模型，再选择槽位并分配任务；保存后生效。</p>
+    </section>
+    {state.status === "loading" ? <section className="px-panel px-panel-pad">正在读取设置…</section>
+      : state.status === "error" ? <section className="px-alert">{state.message}</section>
+      : <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
+        <form className="px-panel px-panel-pad" onSubmit={handleSubmit}>
+          <fieldset disabled={pending} className="grid gap-4 min-w-0">
+            <label className="grid gap-2"><span className="px-label">Base URL</span>
+              <input className="px-input" onChange={event => { invalidateProvider(); setBaseUrl(event.target.value); }} placeholder="https://api.example.com/v1" value={baseUrl} autoComplete="off" />
+            </label>
+            <label className="grid gap-2"><span className="px-label">API Key</span>
+              <input className="px-input" disabled={clearApiKey} onChange={event => { invalidateProvider(); setApiKey(event.target.value); }} placeholder={state.settings.api_key_configured ? "留空使用已保存的 Key" : "填写该服务的 API Key"} type="password" autoComplete="off" value={apiKey} />
+            </label>
+            <label className="flex items-center gap-2 text-sm"><input checked={clearApiKey} onChange={event => { invalidateProvider(); setClearApiKey(event.target.checked); if (event.target.checked) { setApiKey(""); setFlashModel(state.settings.flash_model); setProModel(state.settings.pro_model); } }} type="checkbox" />清空数据库中保存的 API Key</label>
+            <div className="grid gap-2">
+              <p aria-live="polite" className={discovery.status === "error" ? "px-warning" : "px-status"}>{discovery.message || readiness.message}</p>
+              <div className="flex flex-wrap gap-2"><button type="button" className="px-btn" disabled={!readiness.ready || discovery.status === "loading"} onClick={retryProbe}>重新探测模型</button>
+                {discovery.status === "loading" || (readiness.ready && !currentDiscovery && !probeCancelled && discovery.status !== "error") ? <button type="button" className="px-btn" onClick={cancelProbe}>取消探测</button> : null}
               </div>
-
-              <section className="grid gap-3 border-t-2 border-[color:var(--border)] pt-4">
-                <div>
-                  <h2 className="px-heading text-base">模型职责分配</h2>
-                  <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
-                    每个步骤选择使用 Flash 或 Pro 槽位。槽位对应的实际模型名由上方输入框决定。
-                  </p>
-                </div>
-                <div className="grid gap-3">
-                  {taskRouteRows.map((row) => (
-                    <ModelRouteControl
-                      flashModel={flashModel}
-                      key={row.key}
-                      onChange={(slot) =>
-                        setTaskModelRoutes((current) => ({
-                          ...current,
-                          [row.key]: slot
-                        }))
-                      }
-                      proModel={proModel}
-                      row={row}
-                      slot={taskModelRoutes[row.key] ?? row.defaultSlot}
-                    />
-                  ))}
-                </div>
-              </section>
-
-              {message ? (
-                <div className="px-status">
-                  {message}
-                </div>
-              ) : null}
-
-              <button
-                className="px-btn px-btn-primary"
-                disabled={pending || !flashModel.trim() || !proModel.trim()}
-                type="submit"
-              >
-                {pending ? "保存中..." : "保存 DeepSeek 配置"}
-              </button>
             </div>
-          </form>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModelSelect label="快速模型槽位" value={flashModel} models={models} disabled={!currentDiscovery} onChange={setFlashModel} />
+              <ModelSelect label="高质量模型槽位" value={proModel} models={models} disabled={!currentDiscovery} onChange={setProModel} />
+            </div>
+            {!canSave ? <p className="text-xs text-[color:var(--muted)]">更换服务或 Key 后，请先探测并选择当前服务返回的模型。</p> : null}
+            <section className="grid gap-3 border-t-2 border-[color:var(--border)] pt-4">
+              <div><h2 className="px-heading text-base">模型职责分配</h2><p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">为每个步骤选择快速或高质量槽位，两槽也可以使用同一个模型。</p></div>
+              <div className="grid gap-3">{taskRouteRows.map(row => <ModelRouteControl flashModel={flashModel} proModel={proModel} key={row.key} row={row} slot={taskModelRoutes[row.key] ?? row.defaultSlot} onChange={slot => setTaskModelRoutes(current => ({ ...current, [row.key]: slot }))} />)}</div>
+            </section>
+            {message ? <div className="px-status" role="status">{message}</div> : null}
+            <button className="px-btn px-btn-primary" disabled={pending || !canSave} type="submit">{pending ? "保存中..." : "保存模型配置"}</button>
+          </fieldset>
+        </form>
+        <aside className="px-panel px-panel-pad"><h2 className="px-heading text-base">已保存配置</h2><dl className="mt-4 grid gap-3 text-sm">
+          <StatusRow label="API Key">{state.settings.api_key_configured ? state.settings.api_key_masked : "未配置"}</StatusRow>
+          <StatusRow label="Key 来源">{{ database: "已保存", environment: "环境配置", missing: "未配置" }[state.settings.api_key_source]}</StatusRow>
+          <StatusRow label="Base URL">{state.settings.base_url || "https://api.deepseek.com"}</StatusRow>
+          <StatusRow label="快速模型">{state.settings.flash_model}</StatusRow><StatusRow label="高质量模型">{state.settings.pro_model}</StatusRow>
+          <StatusRow label="职责分配"><div className="grid gap-2">{taskRouteRows.map(row => {
+            const slot = state.settings.task_model_routes[row.key] ?? row.defaultSlot;
+            return <div className="flex flex-wrap items-center justify-between gap-2" key={row.key}><span>{row.label}</span><span className="px-badge">{slotLabel(slot)} · {slot === "pro" ? state.settings.pro_model : state.settings.flash_model}</span></div>;
+          })}</div></StatusRow>
+        </dl></aside>
+      </div>}
+  </AppShell>;
+}
 
-          <aside className="px-panel px-panel-pad">
-            <h2 className="px-heading text-base">当前状态</h2>
-            <dl className="mt-4 grid gap-3 text-sm">
-              <StatusRow label="API Key">
-                {state.settings.api_key_configured
-                  ? state.settings.api_key_masked
-                  : "未配置"}
-              </StatusRow>
-              <StatusRow label="Key 来源">{state.settings.api_key_source}</StatusRow>
-              <StatusRow label="Base URL">
-                {state.settings.base_url || "https://api.deepseek.com"}
-              </StatusRow>
-              <StatusRow label="Flash">{state.settings.flash_model}</StatusRow>
-              <StatusRow label="Pro">{state.settings.pro_model}</StatusRow>
-              <StatusRow label="职责分配">
-                <div className="grid gap-2">
-                  {taskRouteRows.map((row) => {
-                    const slot =
-                      state.settings.task_model_routes[row.key] ?? row.defaultSlot;
-                    return (
-                      <div
-                        className="flex flex-wrap items-center justify-between gap-2"
-                        key={row.key}
-                      >
-                        <span>{row.label}</span>
-                        <span className="px-badge">
-                          {slotLabel(slot)} · {slot === "pro" ? state.settings.pro_model : state.settings.flash_model}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </StatusRow>
-              <StatusRow label="保存保护">
-                {state.settings.settings_protected ? "已启用" : "未启用"}
-              </StatusRow>
-            </dl>
-          </aside>
-        </div>
-      )}
-    </AppShell>
-  );
+function ModelSelect({ label, value, models, disabled, onChange }: { label: string; value: string; models: string[]; disabled: boolean; onChange: (value: string) => void }) {
+  const selected = models.includes(value) ? value : "";
+  return <label className="grid gap-2 min-w-0"><span className="px-label">{label}</span><select className="px-input min-w-0" value={selected} disabled={disabled} onChange={event => onChange(event.target.value)}>
+    {!selected ? <option value="">等待探测模型</option> : null}{models.map(model => <option key={model} value={model}>{model}</option>)}
+  </select></label>;
 }
 
 function ModelRouteControl({
@@ -418,14 +335,14 @@ function ModelRouteControl({
             onClick={() => onChange("flash")}
             type="button"
           >
-            Flash
+            快速
           </button>
           <button
             className={slot === "pro" ? "mode-active" : undefined}
             onClick={() => onChange("pro")}
             type="button"
           >
-            Pro
+            高质量
           </button>
         </div>
       </div>
@@ -456,7 +373,7 @@ function defaultTaskModelRoutes(): Record<string, ModelSlot> {
 }
 
 function slotLabel(slot: ModelSlot) {
-  return slot === "pro" ? "Pro" : "Flash";
+  return slot === "pro" ? "高质量" : "快速";
 }
 
 function StatusRow({

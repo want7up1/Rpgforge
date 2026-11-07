@@ -1,6 +1,6 @@
 # RPGForge AI 开发驾驶舱
 
-> 最后更新：2026-11-07（Round 62：替换部署验收通过；A/B 重构完成，B4 延后）。本文件只保留当前目标、执行边界、下一步队列和最近完成摘要；Round 1–59 的完整旧驾驶舱已归档到 [`history/OPTIMIZATION_PLAN_ARCHIVE_THROUGH_ROUND_59.md`](history/OPTIMIZATION_PLAN_ARCHIVE_THROUGH_ROUND_59.md)。文档与代码冲突时以代码为准。
+> 最后更新：2026-11-07（Round 63：创作包与模型自动探测通过候选验收；待发布，B4 延后）。本文件只保留当前目标、执行边界、下一步队列和最近完成摘要；Round 1–59 的完整旧驾驶舱已归档到 [`history/OPTIMIZATION_PLAN_ARCHIVE_THROUGH_ROUND_59.md`](history/OPTIMIZATION_PLAN_ARCHIVE_THROUGH_ROUND_59.md)。文档与代码冲突时以代码为准。
 
 ## 0. AI 接手摘要
 
@@ -10,9 +10,9 @@
 | 运行形态 | Docker Compose：Next.js `web` → FastAPI `api` → Redis/RQ `worker`，PostgreSQL + pgvector 持久化；公开入口只应指向 Web。 |
 | 主回合 | 玩家行动 → 6 阶段 TurnJob → StoryDirector → GM 流式正文 → 持久化回合 → 异步状态提取/应用、偏离审计、结局判断和周期性记忆维护。 |
 | 前端 | Round 58 已重做为像素磷光绿终端风；Round 59 已修复 320px 窄屏右侧溢出和记忆页帮助气泡越界，远端实页已验收。 |
-| 当前任务 | A1–A4、B1–B3、C1–C5 已完成合并重构与性能对比；经用户授权，Round 62 已替换旧 TaleForge 部署并验收，旧专属代码和存档按要求删除。B4 延后，模型配置待用户填写；发布记录以本轮 Git 提交为准。 |
+| 当前任务 | Round 63 已更新创作包、移除共享管理 TOKEN、加入模型自动探测与下拉槽位；候选验收通过，按授权提交推送后更新现有部署。A/B 重构和 Round 62 替换部署保持，B4 延后。 |
 | 审查台账 | [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md) 保留 A/B 原始复现与本轮修复证据；异步晚写、隐藏人物关系和通关投影有专门回归用例。 |
-| 最近验证 | Round 62：远端实际镜像隔离数据库 312 项全过、生产构建通过；真实代理/SSE/存读档/回退/重开/RQ worker/卷可写/源码摘要通过。Round 61 的本地 92 项前端与旧档兼容、移动端模拟验收保留。未调用真实模型。 |
+| 最近验证 | Round 63：候选镜像独立库 355 项、前端 102 项、ruff/lint/TypeScript/生产构建通过；独立预览真实代理+模拟模型列表验证自动发现、保存、刷新、失败恢复、清 Key 与晚响应，320/430px 无溢出。未调用真实聊天模型。 |
 
 接手顺序：
 
@@ -42,14 +42,15 @@
 
 ## 2. 当前执行队列
 
-本轮已获授权的范围为 A1–A4、B1–B3、C1–C5；具体实现、测量方法和兼容边界见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)。用户随后明确授权 Round 62 的替换部署、旧 TaleForge 专属代码/数据删除和 GitHub 发布；这不授权模型费用或清理其他项目。
+本轮已获授权的范围为 A1–A4、B1–B3、C1–C5；具体实现、测量方法和兼容边界见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)。用户随后授权 Round 62 替换部署与旧 TaleForge 专属数据删除，以及 Round 63 创作包更新、共享 TOKEN 移除、模型自动探测、GitHub 发布和现有部署更新；这不授权模型费用或清理其他项目。
 
 | 状态 | 事项 | 当前边界 |
 |---|---|---|
+| Ready | Round 63 发布 | 创作包、免 TOKEN 与模型自动探测实现及候选验收通过；按授权先推送，再仅更新 API/worker/web，保留存档与卷。 |
 | Done | Round 62 替换部署 | 新栈接管原入口，5 项服务运行，迁移 0032，实际代理/队列/状态与 312 项远端回归通过；其他服务和反代配置未改。 |
 | Done | Round 61 A/B 合并重构 | 本地验收完成；500 回合续玩准备 373→122ms、SQL 1009→5，读档 305→160ms、SQL 1013→19；新快照约增大 4%，保存略慢。未保留永久双实现。 |
 | Deferred | B4：承诺、期限、离屏推进 | 用户明确延后；新增玩法需要另定创建、到期、后果、可见性与回退语义。 |
-| Ready | 配置模型与真实多回合复验 | 新实例模型 API Key 尚未填写，设置保存需要私有管理令牌。有效配置后再确认连续性、实际代价、替代路线与文风；模型费用需要独立授权。 |
+| Ready | 配置模型与真实多回合复验 | 正式实例模型 API Key 尚未填写；新设置页不再需要管理令牌，地址/Key 自动列出模型并推荐槽位。有效配置后再做真实长局验收；模型费用需要独立授权。 |
 | Candidate | 生成页手动新增数组项、同名条目精确编辑 | 原有工坊/看板候选，不属于本轮。 |
 | Candidate | API 文档与 router 对照 | 先只读核对，不以本轮优化扩大为全项目文档审查。 |
 | Conditional | Agent 抽象、Prompt 版本管理、动态模型路由 | 有新增 Agent 或可靠测量证明收益时再设计。 |
@@ -260,11 +261,11 @@ npm run build
 
 只保留最近 5 条；详细内容进入 history。
 
-1. **Round 62（2026-11-07）— 替换部署与发布**：按用户要求删除旧 TaleForge 专属资源，当前项目接管原入口；远端 312 项及真实代理/SSE/状态/RQ 通过，其他服务与反代配置不变。模型 Key 待填写。详见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)，私有地址和命令不进入 Git。
-2. **Round 61（2026-11-07）— A/B 合并重构**：统一进度规则、实际回执、时间线恢复/幂等与连接生命周期，删除重复派生链并缓存 Markdown 计算；保留旧档，B4 延后。312 后端/92 前端回归及本地模拟通关通过，性能与兼容成本见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)。未部署。
-3. **Round 60（2026-07-21）— 驾驶舱归档与接手信息重整**：完整保留旧驾驶舱，主文档从 1500+ 行历史堆栈重构为当前目标、队列、规则、关键文件和验证清单；修正旧文档中与代码不一致的阶段总数与超时信息。详见 [`history/OPTIMIZATION_LOG_2026-07.md`](history/OPTIMIZATION_LOG_2026-07.md)。
-4. **Round 59（2026-07-21）— 移动端右侧溢出修复**：为 `.game-screen` 显式建立可收缩 Grid 列；移动端帮助气泡改为视口安全定位；远端真实存档多宽度验收通过。详见 [`history/OPTIMIZATION_LOG_2026-07.md`](history/OPTIMIZATION_LOG_2026-07.md) 和 [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md)。
-5. **Round 58（2026-07-18）— 像素磷光绿终端 UI 重做**：重组信息架构、核心游玩页和全局设计系统，并完成移动端补充复查。详见当月 history 与完整归档。
+1. **Round 63（2026-11-07）— 创作包与模型自动探测**：同步范例/指南，取消共享管理 TOKEN，模型按服务列表推荐并下拉选择；355 后端/102 前端、构建及独立预览通过，待发布验证。详见当月日志。
+2. **Round 62（2026-11-07）— 替换部署与发布**：按用户要求删除旧 TaleForge 专属资源，当前项目接管原入口；远端 312 项及真实代理/SSE/状态/RQ 通过，其他服务与反代配置不变。模型 Key 待填写。详见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)，私有地址和命令不进入 Git。
+3. **Round 61（2026-11-07）— A/B 合并重构**：统一进度规则、实际回执、时间线恢复/幂等与连接生命周期，删除重复派生链并缓存 Markdown 计算；保留旧档，B4 延后。312 后端/92 前端回归及本地模拟通关通过，性能与兼容成本见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)。未部署。
+4. **Round 60（2026-07-21）— 驾驶舱归档与接手信息重整**：完整保留旧驾驶舱，主文档从 1500+ 行历史堆栈重构为当前目标、队列、规则、关键文件和验证清单；修正旧文档中与代码不一致的阶段总数与超时信息。详见 [`history/OPTIMIZATION_LOG_2026-07.md`](history/OPTIMIZATION_LOG_2026-07.md)。
+5. **Round 59（2026-07-21）— 移动端右侧溢出修复**：为 `.game-screen` 显式建立可收缩 Grid 列；移动端帮助气泡改为视口安全定位；远端真实存档多宽度验收通过。详见 [`history/OPTIMIZATION_LOG_2026-07.md`](history/OPTIMIZATION_LOG_2026-07.md) 和 [`REVIEW_FINDINGS.md`](REVIEW_FINDINGS.md)。
 
 ## 10. 历史归档索引
 

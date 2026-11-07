@@ -2,6 +2,15 @@
 
 本文件记录代码审查发现的有效问题。状态说明：`Open` 待处理，`Done` 已修复并验证，`Ignored` 明确暂不处理。
 
+## 2026-11-07 — 创作包同步
+
+### Done — 创作指南与实际进度、可见性和导入边界不一致
+
+- 位置：`authoring_kit_exporter.py`、`settings_guide_exporter.py`。
+- 影响：公开幕标题/目标可能承载谜底；样例 condition 暗示额外等待玩家确认；替代组没有完整示范；生成参数在指南与顶层白名单间矛盾；作者可能把 initial_state 当外部导入状态接口。
+- 修复：同步公开字段、自动转幕及 AND/OR 示例，补 generation_parameters，明确可识别状态后果与内部字段边界；更新实际 Markdown。
+- 验证：导出唯一 JSON 可直接导入、两条替代路线自动转幕、可选项不阻塞、condition 不新增门槛、内部状态不注入及完整后端回归通过。
+
 ## 2026-11-07 — A/B 优化评估中的已定位问题
 
 以下问题已在 Round 61 的共同职责重构中修复。范围见 [`OPTIMIZATION_PLAN.md` §2](OPTIMIZATION_PLAN.md#2-当前执行队列)，详细测试与性能记录见 [`history/OPTIMIZATION_LOG_2026-11.md`](history/OPTIMIZATION_LOG_2026-11.md)。证据包括隔离 PostgreSQL、模拟模型任务与内置浏览器；不等同于真实模型长局、生产断电或实体手机验收。

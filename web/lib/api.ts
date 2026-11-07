@@ -32,7 +32,8 @@ import type {
   TurnJobRead,
   TurnRead,
   SettingModule,
-  ModuleMergePreview
+  ModuleMergePreview,
+  ModelDiscoveryRead
 } from "@/lib/types";
 
 export function getApiBaseUrl(): string {
@@ -676,23 +677,26 @@ export async function rejectStateDelta(
   );
 }
 
-export async function getDeepSeekSettings(): Promise<DeepSeekSettingsRead> {
-  return requestJson<DeepSeekSettingsRead>("/api/settings/deepseek");
+export async function getDeepSeekSettings(signal?: AbortSignal): Promise<DeepSeekSettingsRead> {
+  return requestJson<DeepSeekSettingsRead>("/api/settings/deepseek", { signal });
 }
 
 export async function updateDeepSeekSettings(
   payload: DeepSeekSettingsUpdate,
-  adminToken?: string
+  signal?: AbortSignal
 ): Promise<DeepSeekSettingsRead> {
   return requestJson<DeepSeekSettingsRead>("/api/settings/deepseek", {
     method: "PATCH",
-    headers: adminToken ? { "X-Settings-Admin-Token": adminToken } : undefined,
+    signal,
     body: JSON.stringify(payload)
   });
 }
 
+export async function discoverModels(payload: { base_url?: string; api_key?: string }, signal?: AbortSignal): Promise<ModelDiscoveryRead> {
+  return requestJson<ModelDiscoveryRead>("/api/settings/deepseek/models", { method: "POST", body: JSON.stringify(payload), signal });
+}
+
 // ---------- Admin (telemetry / trace / judge) ----------
-// 所有 admin endpoint 需要 X-Settings-Admin-Token header。
 
 export type RecentTurnStats = {
   sample_size: number;
@@ -731,29 +735,25 @@ export type AgentTraceDetail = AgentTraceSummary & {
   extras: Record<string, unknown> | null;
 };
 
-function adminHeaders(token: string): HeadersInit {
-  return { "X-Settings-Admin-Token": token };
-}
-
 export async function fetchRecentTurnStats(
-  token: string,
-  limit = 100
+  limit = 100,
+  signal?: AbortSignal
 ): Promise<RecentTurnStats> {
   return requestJson<RecentTurnStats>(
     `/api/admin/stats/recent-turns?limit=${limit}`,
-    { headers: adminHeaders(token) }
+    { signal }
   );
 }
 
 export async function fetchRecentTraces(
-  token: string,
   params: {
     limit?: number;
     agent?: string;
     status?: string;
     jobKind?: string;
     jobId?: string;
-  } = {}
+  } = {},
+  signal?: AbortSignal
 ): Promise<AgentTraceSummary[]> {
   const query = new URLSearchParams();
   if (params.limit) query.set("limit", String(params.limit));
@@ -764,26 +764,26 @@ export async function fetchRecentTraces(
   const qs = query.toString();
   return requestJson<AgentTraceSummary[]>(
     `/api/admin/traces${qs ? `?${qs}` : ""}`,
-    { headers: adminHeaders(token) }
+    { signal }
   );
 }
 
 export async function fetchTraceDetail(
-  token: string,
-  traceId: string
+  traceId: string,
+  signal?: AbortSignal
 ): Promise<AgentTraceDetail> {
   return requestJson<AgentTraceDetail>(`/api/admin/traces/${traceId}`, {
-    headers: adminHeaders(token)
+    signal
   });
 }
 
 export async function fetchTurnJobTraces(
-  token: string,
-  jobId: string
+  jobId: string,
+  signal?: AbortSignal
 ): Promise<AgentTraceDetail[]> {
   return requestJson<AgentTraceDetail[]>(
     `/api/admin/turn-jobs/${jobId}/traces`,
-    { headers: adminHeaders(token) }
+    { signal }
   );
 }
 
@@ -807,23 +807,23 @@ export type TurnEvaluationRead = {
 };
 
 export async function fetchGameEvaluations(
-  token: string,
   gameId: string,
-  limit = 100
+  limit = 100,
+  signal?: AbortSignal
 ): Promise<TurnEvaluationRead[]> {
   return requestJson<TurnEvaluationRead[]>(
     `/api/admin/games/${gameId}/evaluations?limit=${limit}`,
-    { headers: adminHeaders(token) }
+    { signal }
   );
 }
 
 export async function triggerTurnEvaluation(
-  token: string,
-  turnId: string
+  turnId: string,
+  signal?: AbortSignal
 ): Promise<TurnEvaluationRead> {
   return requestJson<TurnEvaluationRead>(
     `/api/admin/turns/${turnId}/evaluate`,
-    { method: "POST", headers: adminHeaders(token) }
+    { method: "POST", signal }
   );
 }
 

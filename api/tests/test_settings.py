@@ -63,26 +63,27 @@ def test_update_deepseek_settings_persists_runtime_config(db_session) -> None:
     assert effective_settings.task_model_routes["state_delta_extract"] == "pro"
 
 
-def test_update_deepseek_settings_requires_admin_token_when_configured(
+def test_update_deepseek_settings_does_not_require_admin_token_in_production(
     db_session,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(settings, "settings_admin_token", "secret-token")
+    monkeypatch.setattr(settings, "app_env", "production")
     client = TestClient(app)
 
-    unauthorized = client.patch(
+    without_header = client.patch(
         "/api/settings/deepseek",
         json={"api_key": "sk-blocked"},
     )
-    authorized = client.patch(
+    obsolete_header = client.patch(
         "/api/settings/deepseek",
         headers={"X-Settings-Admin-Token": "secret-token"},
         json={"api_key": "sk-allowed"},
     )
 
-    assert unauthorized.status_code == 401
-    assert authorized.status_code == 200
-    assert authorized.json()["api_key_source"] == "database"
+    assert without_header.status_code == obsolete_header.status_code == 200
+    assert without_header.json()["settings_protected"] is False
+    assert obsolete_header.json()["settings_protected"] is False
+    assert obsolete_header.json()["api_key_source"] == "database"
 
 
 def test_model_router_uses_saved_task_model_routes(db_session) -> None:

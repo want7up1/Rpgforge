@@ -49,7 +49,8 @@ For Nginx, Caddy, Cloudflare Tunnel, or similar tools:
 - Increase request and response timeouts for long AI generation jobs.
 - Use HTTPS.
 - Require authentication at the reverse proxy for public deployments.
-- Set `SETTINGS_ADMIN_TOKEN`; production saves are blocked when it is missing.
+- Configure the provider Base URL and API key from `/settings`; models are discovered automatically.
+- Application settings and telemetry do not require a separate management token.
 
 ## Data Volumes
 
