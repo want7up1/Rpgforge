@@ -1,0 +1,1400 @@
+{
+  "baseline_commit": "573d69a431a0a451b8d1293bbcbf8bbbf8d93c6d",
+  "measured_date": "2026-11-07",
+  "scope": "isolated deterministic fixtures; no production data or model calls; see OPTIMIZATION_LOG_2026-11.md for limits",
+  "runtime": {
+    "before": {
+      "label": "before",
+      "python": "3.11.14",
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "database": "rpgforge_perf_before_test",
+      "repeats": 3,
+      "measured_at_utc": "2026-11-07T09:41:15.289810+00:00",
+      "method": {
+        "sql": "cursor executions including game relationships + operation + commit; fixture/schema/warm-up excluded",
+        "clock": "perf_counter; warm process and local PostgreSQL; no HTTP or LLM",
+        "tokens": "ceil(sum(message content characters)/2); rough estimate, not tokenizer usage",
+        "snapshot_bytes": "compact UTF-8 JSON of JSONB snapshot fields; not PostgreSQL compressed storage size",
+        "input": "shared fixture, one act/one anchor; 6 long recent narratives, identical deterministic IDs/facts/prose"
+      },
+      "cases": [
+        {
+          "turns": 10,
+          "settled_prepare": {
+            "median_ms": 9.905,
+            "median_sql": 29,
+            "samples": [
+              {
+                "ms": 9.526,
+                "sql": 29,
+                "statements": {
+                  "SELECT": 27,
+                  "UPDATE": 2
+                }
+              },
+              {
+                "ms": 10.044,
+                "sql": 29,
+                "statements": {
+                  "SELECT": 27,
+                  "UPDATE": 2
+                }
+              },
+              {
+                "ms": 9.905,
+                "sql": 29,
+                "statements": {
+                  "SELECT": 27,
+                  "UPDATE": 2
+                }
+              }
+            ],
+            "changed_returns": [
+              true,
+              true,
+              true
+            ],
+            "model_calls": 0
+          },
+          "save": {
+            "median_ms": 5.021,
+            "median_sql": 9,
+            "samples": [
+              {
+                "ms": 5.739,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 5.021,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 4.858,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              }
+            ],
+            "snapshot_json_bytes": 207239,
+            "json_fields_bytes": {
+              "state_json": 1473,
+              "turns_json": 202884,
+              "summaries_json": 2,
+              "state_deltas_json": 2812
+            },
+            "canonical_payload_digest": "320d48ea2f4b63308f6b4feedc5818909cbb34e0016c0941ce3120208b41428d",
+            "snapshot_version": 1,
+            "added_metadata": [],
+            "turns_with_receipt": 0
+          },
+          "load": {
+            "median_ms": 10.352,
+            "median_sql": 33,
+            "samples": [
+              {
+                "ms": 9.959,
+                "sql": 33,
+                "statements": {
+                  "SELECT": 29,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 10.451,
+                "sql": 33,
+                "statements": {
+                  "SELECT": 29,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 10.352,
+                "sql": 33,
+                "statements": {
+                  "SELECT": 29,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              }
+            ],
+            "canonical_digest": "7d5c3105d1eff9680aac078dee7e0cbcc78c0a670dea689cd0d52457c2cd7927",
+            "restored_canonical_matches": true
+          },
+          "canonical_state_digest": "7d5c3105d1eff9680aac078dee7e0cbcc78c0a670dea689cd0d52457c2cd7927",
+          "rebuild_tracemalloc": {
+            "median_peak_bytes": 37444,
+            "median_ms_with_tracing": 5.597,
+            "samples": [
+              {
+                "ms": 5.593,
+                "peak_bytes": 37512
+              },
+              {
+                "ms": 5.597,
+                "peak_bytes": 37444
+              },
+              {
+                "ms": 5.758,
+                "peak_bytes": 37444
+              }
+            ],
+            "canonical_digest": "7d5c3105d1eff9680aac078dee7e0cbcc78c0a670dea689cd0d52457c2cd7927",
+            "stable_digest": true,
+            "scope": "rebuild only; fixture allocated before tracing; in-memory repository"
+          },
+          "context": {
+            "messages_content_chars": 15112,
+            "messages_content_utf8_bytes": 33566,
+            "serialized_messages_utf8_bytes": 34166,
+            "rough_tokens_chars_div_2": 7556,
+            "recent_prose_chars": 5298,
+            "tails_retained_in_full_turns": [
+              false,
+              false
+            ],
+            "hard_constraints_in_system": [
+              true,
+              true
+            ]
+          }
+        },
+        {
+          "turns": 100,
+          "settled_prepare": {
+            "median_ms": 66.409,
+            "median_sql": 209,
+            "samples": [
+              {
+                "ms": 66.409,
+                "sql": 209,
+                "statements": {
+                  "SELECT": 207,
+                  "UPDATE": 2
+                }
+              },
+              {
+                "ms": 64.954,
+                "sql": 209,
+                "statements": {
+                  "SELECT": 207,
+                  "UPDATE": 2
+                }
+              },
+              {
+                "ms": 70.267,
+                "sql": 209,
+                "statements": {
+                  "SELECT": 207,
+                  "UPDATE": 2
+                }
+              }
+            ],
+            "changed_returns": [
+              true,
+              true,
+              true
+            ],
+            "model_calls": 0
+          },
+          "save": {
+            "median_ms": 14.321,
+            "median_sql": 9,
+            "samples": [
+              {
+                "ms": 14.154,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 14.684,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 14.321,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              }
+            ],
+            "snapshot_json_bytes": 698916,
+            "json_fields_bytes": {
+              "state_json": 2376,
+              "turns_json": 668277,
+              "summaries_json": 2,
+              "state_deltas_json": 28193
+            },
+            "canonical_payload_digest": "884e546605ae20779c5e27976bc2fb5e11f9fccea56c34fa29faa975898f53e5",
+            "snapshot_version": 1,
+            "added_metadata": [],
+            "turns_with_receipt": 0
+          },
+          "load": {
+            "median_ms": 62.043,
+            "median_sql": 213,
+            "samples": [
+              {
+                "ms": 62.043,
+                "sql": 213,
+                "statements": {
+                  "SELECT": 209,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 61.918,
+                "sql": 213,
+                "statements": {
+                  "SELECT": 209,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 78.927,
+                "sql": 213,
+                "statements": {
+                  "SELECT": 209,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              }
+            ],
+            "canonical_digest": "1347f8e942a94d8b459a3a67311adb4e39cf27d700328074a45fdd9eede3bf36",
+            "restored_canonical_matches": true
+          },
+          "canonical_state_digest": "1347f8e942a94d8b459a3a67311adb4e39cf27d700328074a45fdd9eede3bf36",
+          "rebuild_tracemalloc": {
+            "median_peak_bytes": 41777,
+            "median_ms_with_tracing": 53.51,
+            "samples": [
+              {
+                "ms": 53.089,
+                "peak_bytes": 41845
+              },
+              {
+                "ms": 53.51,
+                "peak_bytes": 41777
+              },
+              {
+                "ms": 54.27,
+                "peak_bytes": 41707
+              }
+            ],
+            "canonical_digest": "1347f8e942a94d8b459a3a67311adb4e39cf27d700328074a45fdd9eede3bf36",
+            "stable_digest": true,
+            "scope": "rebuild only; fixture allocated before tracing; in-memory repository"
+          },
+          "context": {
+            "messages_content_chars": 15121,
+            "messages_content_utf8_bytes": 33563,
+            "serialized_messages_utf8_bytes": 34163,
+            "rough_tokens_chars_div_2": 7561,
+            "recent_prose_chars": 5298,
+            "tails_retained_in_full_turns": [
+              false,
+              false
+            ],
+            "hard_constraints_in_system": [
+              true,
+              true
+            ]
+          }
+        },
+        {
+          "turns": 500,
+          "settled_prepare": {
+            "median_ms": 372.75,
+            "median_sql": 1009,
+            "samples": [
+              {
+                "ms": 372.75,
+                "sql": 1009,
+                "statements": {
+                  "SELECT": 1007,
+                  "UPDATE": 2
+                }
+              },
+              {
+                "ms": 381.88,
+                "sql": 1009,
+                "statements": {
+                  "SELECT": 1007,
+                  "UPDATE": 2
+                }
+              },
+              {
+                "ms": 363.064,
+                "sql": 1009,
+                "statements": {
+                  "SELECT": 1007,
+                  "UPDATE": 2
+                }
+              }
+            ],
+            "changed_returns": [
+              true,
+              true,
+              true
+            ],
+            "model_calls": 0
+          },
+          "save": {
+            "median_ms": 73.059,
+            "median_sql": 9,
+            "samples": [
+              {
+                "ms": 73.059,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 74.387,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 71.128,
+                "sql": 9,
+                "statements": {
+                  "SELECT": 8,
+                  "INSERT": 1
+                }
+              }
+            ],
+            "snapshot_json_bytes": 2886116,
+            "json_fields_bytes": {
+              "state_json": 6776,
+              "turns_json": 2737877,
+              "summaries_json": 2,
+              "state_deltas_json": 141393
+            },
+            "canonical_payload_digest": "78a0dd38c2fa6060444a04428eac6d35882e7b16988f8498c181e3121148bdd0",
+            "snapshot_version": 1,
+            "added_metadata": [],
+            "turns_with_receipt": 0
+          },
+          "load": {
+            "median_ms": 304.639,
+            "median_sql": 1013,
+            "samples": [
+              {
+                "ms": 320.156,
+                "sql": 1013,
+                "statements": {
+                  "SELECT": 1009,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 304.639,
+                "sql": 1013,
+                "statements": {
+                  "SELECT": 1009,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 284.809,
+                "sql": 1013,
+                "statements": {
+                  "SELECT": 1009,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              }
+            ],
+            "canonical_digest": "a5cbb7ff2c193f51eebf9549b0a0f0df77bb00cc310f30323c8ef9dfb9218bf0",
+            "restored_canonical_matches": true
+          },
+          "canonical_state_digest": "a5cbb7ff2c193f51eebf9549b0a0f0df77bb00cc310f30323c8ef9dfb9218bf0",
+          "rebuild_tracemalloc": {
+            "median_peak_bytes": 58556,
+            "median_ms_with_tracing": 380.707,
+            "samples": [
+              {
+                "ms": 392.68,
+                "peak_bytes": 58350
+              },
+              {
+                "ms": 380.707,
+                "peak_bytes": 58556
+              },
+              {
+                "ms": 375.051,
+                "peak_bytes": 58556
+              }
+            ],
+            "canonical_digest": "a5cbb7ff2c193f51eebf9549b0a0f0df77bb00cc310f30323c8ef9dfb9218bf0",
+            "stable_digest": true,
+            "scope": "rebuild only; fixture allocated before tracing; in-memory repository"
+          },
+          "context": {
+            "messages_content_chars": 15126,
+            "messages_content_utf8_bytes": 33558,
+            "serialized_messages_utf8_bytes": 34158,
+            "rough_tokens_chars_div_2": 7563,
+            "recent_prose_chars": 5298,
+            "tails_retained_in_full_turns": [
+              false,
+              false
+            ],
+            "hard_constraints_in_system": [
+              true,
+              true
+            ]
+          }
+        }
+      ]
+    },
+    "after": {
+      "label": "after-final",
+      "python": "3.11.14",
+      "platform": "macOS-26.6.2-arm64-arm-64bit",
+      "database": "rpgforge_perf_after_test",
+      "repeats": 3,
+      "source_digest": "4ffe50056c088588b20e86a92f7fd7f9d92d7ac3f8826021673d56bb187eff09",
+      "started_at_utc": "2026-11-07T09:44:28.776052+00:00",
+      "measured_at_utc": "2026-11-07T09:44:32.322812+00:00",
+      "method": {
+        "sql": "cursor executions including game relationships + operation + commit; fixture/schema/warm-up excluded",
+        "clock": "perf_counter; warm process and local PostgreSQL; no HTTP or LLM",
+        "tokens": "ceil(sum(message content characters)/2); rough estimate, not tokenizer usage",
+        "snapshot_bytes": "compact UTF-8 JSON of JSONB snapshot fields; not PostgreSQL compressed storage size",
+        "input": "shared fixture, one act/one anchor; 6 long recent narratives, identical deterministic IDs/facts/prose"
+      },
+      "cases": [
+        {
+          "turns": 10,
+          "settled_prepare": {
+            "median_ms": 3.176,
+            "median_sql": 5,
+            "samples": [
+              {
+                "ms": 3.24,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              },
+              {
+                "ms": 2.975,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              },
+              {
+                "ms": 3.176,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              }
+            ],
+            "changed_returns": [
+              false,
+              false,
+              false
+            ],
+            "model_calls": 0
+          },
+          "save": {
+            "median_ms": 6.468,
+            "median_sql": 12,
+            "samples": [
+              {
+                "ms": 6.468,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 6.113,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 7.056,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              }
+            ],
+            "snapshot_json_bytes": 210705,
+            "json_fields_bytes": {
+              "state_json": 1488,
+              "turns_json": 204896,
+              "summaries_json": 2,
+              "state_deltas_json": 2992,
+              "initial_state_json": 1237
+            },
+            "canonical_payload_digest": "320d48ea2f4b63308f6b4feedc5818909cbb34e0016c0941ce3120208b41428d",
+            "snapshot_version": 2,
+            "added_metadata": [
+              "initial_state_json",
+              "game_status",
+              "config_hash"
+            ],
+            "turns_with_receipt": 10
+          },
+          "load": {
+            "median_ms": 10.165,
+            "median_sql": 19,
+            "samples": [
+              {
+                "ms": 10.165,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 10.23,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 9.344,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              }
+            ],
+            "canonical_digest": "7d5c3105d1eff9680aac078dee7e0cbcc78c0a670dea689cd0d52457c2cd7927",
+            "restored_canonical_matches": true
+          },
+          "canonical_state_digest": "7d5c3105d1eff9680aac078dee7e0cbcc78c0a670dea689cd0d52457c2cd7927",
+          "rebuild_tracemalloc": {
+            "median_peak_bytes": 36336,
+            "median_ms_with_tracing": 2.929,
+            "samples": [
+              {
+                "ms": 2.929,
+                "peak_bytes": 36344
+              },
+              {
+                "ms": 3.063,
+                "peak_bytes": 36336
+              },
+              {
+                "ms": 2.831,
+                "peak_bytes": 36320
+              }
+            ],
+            "canonical_digest": "7d5c3105d1eff9680aac078dee7e0cbcc78c0a670dea689cd0d52457c2cd7927",
+            "stable_digest": true,
+            "scope": "rebuild only; fixture allocated before tracing; in-memory repository"
+          },
+          "context": {
+            "messages_content_chars": 15380,
+            "messages_content_utf8_bytes": 33966,
+            "serialized_messages_utf8_bytes": 34590,
+            "rough_tokens_chars_div_2": 7690,
+            "recent_prose_chars": 5292,
+            "tails_retained_in_full_turns": [
+              true,
+              true
+            ],
+            "hard_constraints_in_system": [
+              true,
+              true
+            ]
+          }
+        },
+        {
+          "turns": 100,
+          "settled_prepare": {
+            "median_ms": 14.337,
+            "median_sql": 5,
+            "samples": [
+              {
+                "ms": 14.292,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              },
+              {
+                "ms": 14.337,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              },
+              {
+                "ms": 14.882,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              }
+            ],
+            "changed_returns": [
+              false,
+              false,
+              false
+            ],
+            "model_calls": 0
+          },
+          "save": {
+            "median_ms": 16.725,
+            "median_sql": 12,
+            "samples": [
+              {
+                "ms": 17.29,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 16.525,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 16.725,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              }
+            ],
+            "snapshot_json_bytes": 722274,
+            "json_fields_bytes": {
+              "state_json": 2391,
+              "turns_json": 688561,
+              "summaries_json": 2,
+              "state_deltas_json": 29993,
+              "initial_state_json": 1237
+            },
+            "canonical_payload_digest": "884e546605ae20779c5e27976bc2fb5e11f9fccea56c34fa29faa975898f53e5",
+            "snapshot_version": 2,
+            "added_metadata": [
+              "initial_state_json",
+              "game_status",
+              "config_hash"
+            ],
+            "turns_with_receipt": 100
+          },
+          "load": {
+            "median_ms": 34.853,
+            "median_sql": 19,
+            "samples": [
+              {
+                "ms": 33.493,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 34.853,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 49.801,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              }
+            ],
+            "canonical_digest": "1347f8e942a94d8b459a3a67311adb4e39cf27d700328074a45fdd9eede3bf36",
+            "restored_canonical_matches": true
+          },
+          "canonical_state_digest": "1347f8e942a94d8b459a3a67311adb4e39cf27d700328074a45fdd9eede3bf36",
+          "rebuild_tracemalloc": {
+            "median_peak_bytes": 151816,
+            "median_ms_with_tracing": 26.36,
+            "samples": [
+              {
+                "ms": 27.104,
+                "peak_bytes": 151824
+              },
+              {
+                "ms": 25.861,
+                "peak_bytes": 151816
+              },
+              {
+                "ms": 26.36,
+                "peak_bytes": 151800
+              }
+            ],
+            "canonical_digest": "1347f8e942a94d8b459a3a67311adb4e39cf27d700328074a45fdd9eede3bf36",
+            "stable_digest": true,
+            "scope": "rebuild only; fixture allocated before tracing; in-memory repository"
+          },
+          "context": {
+            "messages_content_chars": 15389,
+            "messages_content_utf8_bytes": 33963,
+            "serialized_messages_utf8_bytes": 34587,
+            "rough_tokens_chars_div_2": 7695,
+            "recent_prose_chars": 5292,
+            "tails_retained_in_full_turns": [
+              true,
+              true
+            ],
+            "hard_constraints_in_system": [
+              true,
+              true
+            ]
+          }
+        },
+        {
+          "turns": 500,
+          "settled_prepare": {
+            "median_ms": 122.033,
+            "median_sql": 5,
+            "samples": [
+              {
+                "ms": 120.67,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              },
+              {
+                "ms": 138.803,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              },
+              {
+                "ms": 122.033,
+                "sql": 5,
+                "statements": {
+                  "SELECT": 5
+                }
+              }
+            ],
+            "changed_returns": [
+              false,
+              false,
+              false
+            ],
+            "model_calls": 0
+          },
+          "save": {
+            "median_ms": 81.731,
+            "median_sql": 12,
+            "samples": [
+              {
+                "ms": 81.731,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 98.885,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              },
+              {
+                "ms": 78.723,
+                "sql": 12,
+                "statements": {
+                  "SELECT": 11,
+                  "INSERT": 1
+                }
+              }
+            ],
+            "snapshot_json_bytes": 2998674,
+            "json_fields_bytes": {
+              "state_json": 6791,
+              "turns_json": 2840161,
+              "summaries_json": 2,
+              "state_deltas_json": 150393,
+              "initial_state_json": 1237
+            },
+            "canonical_payload_digest": "78a0dd38c2fa6060444a04428eac6d35882e7b16988f8498c181e3121148bdd0",
+            "snapshot_version": 2,
+            "added_metadata": [
+              "initial_state_json",
+              "game_status",
+              "config_hash"
+            ],
+            "turns_with_receipt": 500
+          },
+          "load": {
+            "median_ms": 159.768,
+            "median_sql": 19,
+            "samples": [
+              {
+                "ms": 159.768,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 160.368,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              },
+              {
+                "ms": 136.492,
+                "sql": 19,
+                "statements": {
+                  "SELECT": 14,
+                  "UPDATE": 1,
+                  "DELETE": 2,
+                  "INSERT": 2
+                }
+              }
+            ],
+            "canonical_digest": "a5cbb7ff2c193f51eebf9549b0a0f0df77bb00cc310f30323c8ef9dfb9218bf0",
+            "restored_canonical_matches": true
+          },
+          "canonical_state_digest": "a5cbb7ff2c193f51eebf9549b0a0f0df77bb00cc310f30323c8ef9dfb9218bf0",
+          "rebuild_tracemalloc": {
+            "median_peak_bytes": 643464,
+            "median_ms_with_tracing": 258.843,
+            "samples": [
+              {
+                "ms": 259.871,
+                "peak_bytes": 643464
+              },
+              {
+                "ms": 258.718,
+                "peak_bytes": 643464
+              },
+              {
+                "ms": 258.843,
+                "peak_bytes": 643464
+              }
+            ],
+            "canonical_digest": "a5cbb7ff2c193f51eebf9549b0a0f0df77bb00cc310f30323c8ef9dfb9218bf0",
+            "stable_digest": true,
+            "scope": "rebuild only; fixture allocated before tracing; in-memory repository"
+          },
+          "context": {
+            "messages_content_chars": 15394,
+            "messages_content_utf8_bytes": 33958,
+            "serialized_messages_utf8_bytes": 34582,
+            "rough_tokens_chars_div_2": 7697,
+            "recent_prose_chars": 5292,
+            "tails_retained_in_full_turns": [
+              true,
+              true
+            ],
+            "hard_constraints_in_system": [
+              true,
+              true
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "comparison": [
+    {
+      "turns": 10,
+      "canonical_state_equal": true,
+      "canonical_snapshot_equal": true,
+      "memory_fold_canonical_equal": true,
+      "eight_acts_cpu_canonical_equal": true,
+      "settled_prepare": {
+        "before_ms": 9.905,
+        "after_ms": 3.176,
+        "before_sql": 29,
+        "after_sql": 5,
+        "speedup": 3.119
+      },
+      "save": {
+        "before_ms": 5.021,
+        "after_ms": 6.468,
+        "before_sql": 9,
+        "after_sql": 12,
+        "speedup": 0.776
+      },
+      "load": {
+        "before_ms": 10.352,
+        "after_ms": 10.165,
+        "before_sql": 33,
+        "after_sql": 19,
+        "speedup": 1.018
+      },
+      "snapshot_bytes": {
+        "before": 207239,
+        "after": 210705,
+        "pct_change": 1.67
+      },
+      "rebuild_peak_bytes": {
+        "before": 37444,
+        "after": 36336
+      },
+      "eight_acts_six_anchors_cpu": {
+        "before": {
+          "turns": 10,
+          "story_acts": 8,
+          "anchors_per_act": 6,
+          "median_ms": 4.456,
+          "calls": {
+            "apply_state_delta": 10,
+            "rebuild_game_state": 1,
+            "normalize_story_settings": 40
+          },
+          "repository_reads": 1,
+          "flushes": 2,
+          "facts": 10,
+          "canonical_digest": "3c026a636f6967b3192d440c35b75290ad1634ddf899e91a54d9380db3c2ae1e"
+        },
+        "after": {
+          "turns": 10,
+          "story_acts": 8,
+          "anchors_per_act": 6,
+          "median_ms": 0.909,
+          "calls": {
+            "rebuild_game_state": 1,
+            "normalize_story_settings": 1,
+            "apply_state_delta": 10
+          },
+          "repository_reads": 1,
+          "flushes": 1,
+          "facts": 10,
+          "canonical_digest": "3c026a636f6967b3192d440c35b75290ad1634ddf899e91a54d9380db3c2ae1e"
+        }
+      },
+      "context": {
+        "before": {
+          "messages_content_chars": 15112,
+          "messages_content_utf8_bytes": 33566,
+          "serialized_messages_utf8_bytes": 34166,
+          "rough_tokens_chars_div_2": 7556,
+          "recent_prose_chars": 5298,
+          "tails_retained_in_full_turns": [
+            false,
+            false
+          ],
+          "hard_constraints_in_system": [
+            true,
+            true
+          ]
+        },
+        "after": {
+          "messages_content_chars": 15380,
+          "messages_content_utf8_bytes": 33966,
+          "serialized_messages_utf8_bytes": 34590,
+          "rough_tokens_chars_div_2": 7690,
+          "recent_prose_chars": 5292,
+          "tails_retained_in_full_turns": [
+            true,
+            true
+          ],
+          "hard_constraints_in_system": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "turns": 100,
+      "canonical_state_equal": true,
+      "canonical_snapshot_equal": true,
+      "memory_fold_canonical_equal": true,
+      "eight_acts_cpu_canonical_equal": true,
+      "settled_prepare": {
+        "before_ms": 66.409,
+        "after_ms": 14.337,
+        "before_sql": 209,
+        "after_sql": 5,
+        "speedup": 4.632
+      },
+      "save": {
+        "before_ms": 14.321,
+        "after_ms": 16.725,
+        "before_sql": 9,
+        "after_sql": 12,
+        "speedup": 0.856
+      },
+      "load": {
+        "before_ms": 62.043,
+        "after_ms": 34.853,
+        "before_sql": 213,
+        "after_sql": 19,
+        "speedup": 1.78
+      },
+      "snapshot_bytes": {
+        "before": 698916,
+        "after": 722274,
+        "pct_change": 3.34
+      },
+      "rebuild_peak_bytes": {
+        "before": 41777,
+        "after": 151816
+      },
+      "eight_acts_six_anchors_cpu": {
+        "before": {
+          "turns": 100,
+          "story_acts": 8,
+          "anchors_per_act": 6,
+          "median_ms": 44.557,
+          "calls": {
+            "apply_state_delta": 100,
+            "rebuild_game_state": 1,
+            "normalize_story_settings": 400
+          },
+          "repository_reads": 1,
+          "flushes": 2,
+          "facts": 100,
+          "canonical_digest": "adda611964a4737afd207aded4add1f5839ae7d26560824730d5db5ff8959a1e"
+        },
+        "after": {
+          "turns": 100,
+          "story_acts": 8,
+          "anchors_per_act": 6,
+          "median_ms": 9.894,
+          "calls": {
+            "rebuild_game_state": 1,
+            "normalize_story_settings": 1,
+            "apply_state_delta": 100
+          },
+          "repository_reads": 1,
+          "flushes": 1,
+          "facts": 100,
+          "canonical_digest": "adda611964a4737afd207aded4add1f5839ae7d26560824730d5db5ff8959a1e"
+        }
+      },
+      "context": {
+        "before": {
+          "messages_content_chars": 15121,
+          "messages_content_utf8_bytes": 33563,
+          "serialized_messages_utf8_bytes": 34163,
+          "rough_tokens_chars_div_2": 7561,
+          "recent_prose_chars": 5298,
+          "tails_retained_in_full_turns": [
+            false,
+            false
+          ],
+          "hard_constraints_in_system": [
+            true,
+            true
+          ]
+        },
+        "after": {
+          "messages_content_chars": 15389,
+          "messages_content_utf8_bytes": 33963,
+          "serialized_messages_utf8_bytes": 34587,
+          "rough_tokens_chars_div_2": 7695,
+          "recent_prose_chars": 5292,
+          "tails_retained_in_full_turns": [
+            true,
+            true
+          ],
+          "hard_constraints_in_system": [
+            true,
+            true
+          ]
+        }
+      }
+    },
+    {
+      "turns": 500,
+      "canonical_state_equal": true,
+      "canonical_snapshot_equal": true,
+      "memory_fold_canonical_equal": true,
+      "eight_acts_cpu_canonical_equal": true,
+      "settled_prepare": {
+        "before_ms": 372.75,
+        "after_ms": 122.033,
+        "before_sql": 1009,
+        "after_sql": 5,
+        "speedup": 3.055
+      },
+      "save": {
+        "before_ms": 73.059,
+        "after_ms": 81.731,
+        "before_sql": 9,
+        "after_sql": 12,
+        "speedup": 0.894
+      },
+      "load": {
+        "before_ms": 304.639,
+        "after_ms": 159.768,
+        "before_sql": 1013,
+        "after_sql": 19,
+        "speedup": 1.907
+      },
+      "snapshot_bytes": {
+        "before": 2886116,
+        "after": 2998674,
+        "pct_change": 3.9
+      },
+      "rebuild_peak_bytes": {
+        "before": 58556,
+        "after": 643464
+      },
+      "eight_acts_six_anchors_cpu": {
+        "before": {
+          "turns": 500,
+          "story_acts": 8,
+          "anchors_per_act": 6,
+          "median_ms": 268.896,
+          "calls": {
+            "apply_state_delta": 500,
+            "rebuild_game_state": 1,
+            "normalize_story_settings": 2000
+          },
+          "repository_reads": 1,
+          "flushes": 2,
+          "facts": 500,
+          "canonical_digest": "2a4b28fea87570d98f183d5907aa033b216f4c2781b2b041b8a1cd277df97df4"
+        },
+        "after": {
+          "turns": 500,
+          "story_acts": 8,
+          "anchors_per_act": 6,
+          "median_ms": 107.943,
+          "calls": {
+            "rebuild_game_state": 1,
+            "normalize_story_settings": 1,
+            "apply_state_delta": 500
+          },
+          "repository_reads": 1,
+          "flushes": 1,
+          "facts": 500,
+          "canonical_digest": "2a4b28fea87570d98f183d5907aa033b216f4c2781b2b041b8a1cd277df97df4"
+        }
+      },
+      "context": {
+        "before": {
+          "messages_content_chars": 15126,
+          "messages_content_utf8_bytes": 33558,
+          "serialized_messages_utf8_bytes": 34158,
+          "rough_tokens_chars_div_2": 7563,
+          "recent_prose_chars": 5298,
+          "tails_retained_in_full_turns": [
+            false,
+            false
+          ],
+          "hard_constraints_in_system": [
+            true,
+            true
+          ]
+        },
+        "after": {
+          "messages_content_chars": 15394,
+          "messages_content_utf8_bytes": 33958,
+          "serialized_messages_utf8_bytes": 34582,
+          "rough_tokens_chars_div_2": 7697,
+          "recent_prose_chars": 5292,
+          "tails_retained_in_full_turns": [
+            true,
+            true
+          ],
+          "hard_constraints_in_system": [
+            true,
+            true
+          ]
+        }
+      }
+    }
+  ],
+  "multi_act_cpu": {
+    "before": [
+      {
+        "turns": 10,
+        "story_acts": 8,
+        "anchors_per_act": 6,
+        "median_ms": 4.456,
+        "calls": {
+          "apply_state_delta": 10,
+          "rebuild_game_state": 1,
+          "normalize_story_settings": 40
+        },
+        "repository_reads": 1,
+        "flushes": 2,
+        "facts": 10,
+        "canonical_digest": "3c026a636f6967b3192d440c35b75290ad1634ddf899e91a54d9380db3c2ae1e"
+      },
+      {
+        "turns": 100,
+        "story_acts": 8,
+        "anchors_per_act": 6,
+        "median_ms": 44.557,
+        "calls": {
+          "apply_state_delta": 100,
+          "rebuild_game_state": 1,
+          "normalize_story_settings": 400
+        },
+        "repository_reads": 1,
+        "flushes": 2,
+        "facts": 100,
+        "canonical_digest": "adda611964a4737afd207aded4add1f5839ae7d26560824730d5db5ff8959a1e"
+      },
+      {
+        "turns": 500,
+        "story_acts": 8,
+        "anchors_per_act": 6,
+        "median_ms": 268.896,
+        "calls": {
+          "apply_state_delta": 500,
+          "rebuild_game_state": 1,
+          "normalize_story_settings": 2000
+        },
+        "repository_reads": 1,
+        "flushes": 2,
+        "facts": 500,
+        "canonical_digest": "2a4b28fea87570d98f183d5907aa033b216f4c2781b2b041b8a1cd277df97df4"
+      }
+    ],
+    "after": [
+      {
+        "turns": 10,
+        "story_acts": 8,
+        "anchors_per_act": 6,
+        "median_ms": 0.909,
+        "calls": {
+          "rebuild_game_state": 1,
+          "normalize_story_settings": 1,
+          "apply_state_delta": 10
+        },
+        "repository_reads": 1,
+        "flushes": 1,
+        "facts": 10,
+        "canonical_digest": "3c026a636f6967b3192d440c35b75290ad1634ddf899e91a54d9380db3c2ae1e"
+      },
+      {
+        "turns": 100,
+        "story_acts": 8,
+        "anchors_per_act": 6,
+        "median_ms": 9.894,
+        "calls": {
+          "rebuild_game_state": 1,
+          "normalize_story_settings": 1,
+          "apply_state_delta": 100
+        },
+        "repository_reads": 1,
+        "flushes": 1,
+        "facts": 100,
+        "canonical_digest": "adda611964a4737afd207aded4add1f5839ae7d26560824730d5db5ff8959a1e"
+      },
+      {
+        "turns": 500,
+        "story_acts": 8,
+        "anchors_per_act": 6,
+        "median_ms": 107.943,
+        "calls": {
+          "rebuild_game_state": 1,
+          "normalize_story_settings": 1,
+          "apply_state_delta": 500
+        },
+        "repository_reads": 1,
+        "flushes": 1,
+        "facts": 500,
+        "canonical_digest": "2a4b28fea87570d98f183d5907aa033b216f4c2781b2b041b8a1cd277df97df4"
+      }
+    ]
+  },
+  "markdown_derivation": {
+    "baseline": {
+      "ref": "573d69a",
+      "commit": "573d69a431a0a451b8d1293bbcbf8bbbf8d93c6d"
+    },
+    "node": "v25.6.1",
+    "frames": 1200,
+    "textUpdates": 120,
+    "finalChars": 10520,
+    "characters": 24,
+    "trials": 7,
+    "before": {
+      "medianMs": 560.16,
+      "componentRenders": 1200,
+      "matcherBuilds": 1200
+    },
+    "after": {
+      "medianMs": 63.17,
+      "componentRenders": 120,
+      "matcherBuilds": 1
+    },
+    "scope": "isolated component/derivation replay with a shallow memo/useMemo harness; excludes React reconciliation, DOM, network and model latency"
+  },
+  "changed_production_files": {
+    "files": 45,
+    "before_lines": 15286,
+    "after_lines": 16228,
+    "net_lines": 942
+  }
+}

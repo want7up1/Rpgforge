@@ -43,6 +43,10 @@ type ApiErrorBody = {
   detail?: unknown;
 };
 
+export class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); this.name = "ApiRequestError"; }
+}
+
 async function requestJson<T>(
   path: string,
   options: RequestInit = {}
@@ -66,7 +70,7 @@ async function requestJson<T>(
     } catch {
       // Keep the HTTP fallback.
     }
-    throw new Error(message);
+    throw new ApiRequestError(message, response.status);
   }
 
   return (await response.json()) as T;
@@ -448,8 +452,8 @@ export async function createGeneratorChatJob(payload: {
   });
 }
 
-export async function getGeneratorChatJob(jobId: string): Promise<GeneratorChatJobRead> {
-  return requestJson<GeneratorChatJobRead>(`/api/generator/chat-jobs/${jobId}`);
+export async function getGeneratorChatJob(jobId: string, signal?: AbortSignal): Promise<GeneratorChatJobRead> {
+  return requestJson<GeneratorChatJobRead>(`/api/generator/chat-jobs/${jobId}`, { signal });
 }
 
 export async function getActiveGeneratorChatJob(): Promise<GeneratorChatJobRead | null> {
@@ -488,9 +492,9 @@ export async function createGeneratorFinalizeJob(payload: {
 }
 
 export async function getGeneratorFinalizeJob(
-  jobId: string
+  jobId: string, signal?: AbortSignal
 ): Promise<GeneratorFinalizeJobRead> {
-  return requestJson<GeneratorFinalizeJobRead>(`/api/generator/finalize-jobs/${jobId}`);
+  return requestJson<GeneratorFinalizeJobRead>(`/api/generator/finalize-jobs/${jobId}`, { signal });
 }
 
 export async function getActiveGeneratorFinalizeJob(): Promise<GeneratorFinalizeJobRead | null> {
@@ -600,18 +604,21 @@ export async function createTurn(
 
 export async function createTurnJob(
   gameId: string,
-  payload:
+  payload: (
     | { player_input: string; selected_option?: never }
     | { selected_option: ActionOption; player_input?: never }
+  ) & { request_id?: string; expected_revision?: number },
+  signal?: AbortSignal
 ): Promise<TurnJobCreateResponse> {
   return requestJson<TurnJobCreateResponse>(`/api/games/${gameId}/turns/jobs`, {
+    signal,
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
-export async function getTurnJob(gameId: string, jobId: string): Promise<TurnJobRead> {
-  return requestJson<TurnJobRead>(`/api/games/${gameId}/turns/jobs/${jobId}`);
+export async function getTurnJob(gameId: string, jobId: string, signal?: AbortSignal): Promise<TurnJobRead> {
+  return requestJson<TurnJobRead>(`/api/games/${gameId}/turns/jobs/${jobId}`, { signal });
 }
 
 export async function getActiveTurnJob(gameId: string): Promise<TurnJobRead | null> {

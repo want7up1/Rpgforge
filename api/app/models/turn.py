@@ -31,6 +31,8 @@ class Turn(Base):
     visible_summary: Mapped[str | None] = mapped_column(Text)
     hidden_summary: Mapped[str | None] = mapped_column(Text)
     state_delta_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    # Applied, player-visible before/after results; empty on legacy, unreconstructed turns.
+    settlement_receipt: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     action_options_json: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,

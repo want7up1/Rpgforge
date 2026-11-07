@@ -24,6 +24,7 @@ from app.services.gameplay import (
     GameplayValidationError,
     gameplay_game_query,
 )
+from app.services.turn_job_access import current_turn_job
 from app.services.turn_stream_events import turn_stream_event_broker
 
 # 单回合最坏情况：Director(90s) + GM 首次(360s)（+ 罕见的剧透兜底重写 360s）。偏离校验已
@@ -57,6 +58,10 @@ class StreamState(TypedDict):
     model: str | None
     stage: str
     stage_started_at: datetime | None
+    timeline_generation: int
+    game_revision: int
+    stream_revision: int
+    event_seq: int
 
 
 async def run_turn_job(job_id: UUID) -> None:
@@ -69,12 +74,21 @@ async def run_turn_job(job_id: UUID) -> None:
         "model": None,
         "stage": STAGE_PREPARE_CONTEXT,
         "stage_started_at": None,
+        "timeline_generation": 0,
+        "game_revision": 0,
+        "stream_revision": 0,
+        "event_seq": 0,
     }
 
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
+        job = current_turn_job(db, job_id)
+        if job is None or job.status != "pending":
             return
+        stream_state["timeline_generation"] = job.timeline_generation or 0
+        stream_state["game_revision"] = job.game_revision or 0
+        stream_state["stream_revision"] = (job.stream_revision or 0) + 1
+        stream_state["event_seq"] = job.event_seq or 0
+        job.stream_revision = stream_state["stream_revision"]
         now = datetime.now(UTC)
         job.status = "running"
         job.error_message = None
@@ -96,6 +110,8 @@ async def run_turn_job(job_id: UUID) -> None:
         last_saved_narrative_length = 0
         last_published_reasoning_length = 0
         last_published_content_length = 0
+        last_reasoning = ""
+        last_content = ""
 
         async def on_update(reasoning: str, content: str, model: str | None) -> None:
             nonlocal last_saved_at
@@ -104,15 +120,18 @@ async def run_turn_job(job_id: UUID) -> None:
             nonlocal last_saved_reasoning_length
             nonlocal last_published_content_length
             nonlocal last_published_reasoning_length
+            nonlocal last_reasoning, last_content
             narrative = extract_partial_json_string_field(content, "narrative")
             stream_state["reasoning"] = reasoning
             stream_state["content"] = content
             stream_state["narrative"] = narrative
             stream_state["model"] = model
-            reset_buffers = (
-                len(reasoning) < last_published_reasoning_length
-                or len(content) < last_published_content_length
+            reset_buffers = not reasoning.startswith(last_reasoning) or not content.startswith(
+                last_content
             )
+            if reset_buffers:
+                stream_state["stream_revision"] += 1
+            last_reasoning, last_content = reasoning, content
 
             _publish_turn_delta(
                 job_id,
@@ -129,6 +148,7 @@ async def run_turn_job(job_id: UUID) -> None:
                 stage=stream_state["stage"],
                 stage_started_at=stream_state["stage_started_at"],
                 reset_buffers=reset_buffers,
+                **_next_stream_event(stream_state),
             )
             last_published_reasoning_length = len(reasoning)
             last_published_content_length = len(content)
@@ -138,7 +158,8 @@ async def run_turn_job(job_id: UUID) -> None:
             content_delta = len(content) - last_saved_content_length
             narrative_delta = len(narrative) - last_saved_narrative_length
             should_save = (
-                now_monotonic - last_saved_at >= STREAM_WRITE_INTERVAL_SECONDS
+                reset_buffers
+                or now_monotonic - last_saved_at >= STREAM_WRITE_INTERVAL_SECONDS
                 or reasoning_delta >= STREAM_WRITE_MIN_CHARS
                 or content_delta >= STREAM_WRITE_MIN_CHARS
                 or narrative_delta >= 80
@@ -160,6 +181,7 @@ async def run_turn_job(job_id: UUID) -> None:
                 stage=stream_state["stage"],
                 stage_started_at=stream_state["stage_started_at"],
                 reset_buffers=reset_buffers,
+                **_stream_metadata(stream_state),
             )
 
         async def on_stage(stage: str) -> None:
@@ -178,6 +200,7 @@ async def run_turn_job(job_id: UUID) -> None:
                 narrative=stream_state["narrative"],
                 stage=stream_state["stage"],
                 stage_started_at=stream_state["stage_started_at"],
+                **_next_stream_event(stream_state),
             )
 
         async def on_progress(message: str) -> None:
@@ -191,6 +214,7 @@ async def run_turn_job(job_id: UUID) -> None:
                 narrative=stream_state["narrative"],
                 stage=stream_state["stage"],
                 stage_started_at=stream_state["stage_started_at"],
+                **_next_stream_event(stream_state),
             )
             _update_progress_message(
                 job_id,
@@ -201,11 +225,12 @@ async def run_turn_job(job_id: UUID) -> None:
                 narrative=stream_state["narrative"],
                 stage=stream_state["stage"],
                 stage_started_at=stream_state["stage_started_at"],
+                **_stream_metadata(stream_state),
             )
 
         service = GameplayService()
         with SessionLocal() as db:
-            job = db.get(TurnJob, job_id)
+            job = current_turn_job(db, job_id)
             if job is None:
                 return
             game = db.scalars(gameplay_game_query(job.game_id)).first()
@@ -213,6 +238,7 @@ async def run_turn_job(job_id: UUID) -> None:
                 _mark_job_failed(job_id, "Game not found.", stream_state)
                 return
             request = TurnCreate.model_validate(job.request_json)
+            db.commit()  # Release the admission fence before callbacks/model IO.
             context = await service.load_turn_runtime_context(
                 db,
                 game,
@@ -234,13 +260,18 @@ async def run_turn_job(job_id: UUID) -> None:
         await on_stage(STAGE_PERSIST_TURN)
         await on_progress("GM 回复已完成，正在写入回合。")
         with SessionLocal() as db:
+            job = current_turn_job(db, job_id)
+            if job is None or job.status != "running":
+                return
             turn = service.persist_runtime_turn(
                 db,
                 game_id=context.game.id,
                 player_input=context.player_input,
                 runtime_output=runtime_output,
                 model_used=model_used,
+                commit=False,
             )
+            _complete_turn_job(db, job, turn, stream_state, context.telemetry)
     except TimeoutError:
         _mark_job_failed(
             job_id,
@@ -255,41 +286,6 @@ async def run_turn_job(job_id: UUID) -> None:
         _mark_job_failed(job_id, f"{type(exc).__name__}: {exc}", stream_state)
         return
 
-    with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
-            return
-        now = datetime.now(UTC)
-        job.status = "completed"
-        job.turn_id = turn.id
-        job.model_used = turn.model_used
-        job.reasoning_content = stream_state["reasoning"]
-        job.content_buffer = stream_state["content"]
-        job.narrative_buffer = turn.gm_output
-        job.progress_message = "剧情已生成，状态维护正在后台进行。"
-        job.maintenance_status = "pending"
-        job.maintenance_stage = "state_extract"
-        job.maintenance_message = "等待后台状态维护任务。"
-        job.maintenance_error = None
-        job.maintenance_started_at = None
-        job.maintenance_completed_at = None
-        # 写入 telemetry，并把 director/drift 结果留给 maintenance 阶段的 StateExtractor。
-        job.director_used_fallback = context.telemetry.director_used_fallback
-        job.drift_severity = context.telemetry.drift_severity
-        job.rewrite_triggered = context.telemetry.rewrite_triggered
-        job.extractor_failed = False
-        job.turn_runtime_inputs = context.telemetry.to_runtime_inputs() or None
-        _set_job_stage(job, STAGE_COMPLETED, now)
-        stream_state["stage"] = STAGE_COMPLETED
-        stream_state["stage_started_at"] = job.stage_started_at
-        job.last_event_at = now
-        job.completed_at = now
-        db.add(job)
-        db.commit()
-        db.refresh(job)
-        persisted_turn = db.get(Turn, turn.id)
-        _publish_turn_snapshot(job, persisted_turn, event_type="completed", terminal=True)
-
     try:
         _enqueue_turn_maintenance_job(job_id)
     except Exception as exc:
@@ -301,12 +297,42 @@ async def run_turn_job(job_id: UUID) -> None:
         )
 
 
+def _complete_turn_job(db, job: TurnJob, turn: Turn, stream_state: StreamState, telemetry) -> None:
+    """Persist narrative and its job result under the same timeline lock/transaction."""
+    now = datetime.now(UTC)
+    job.status = "completed"
+    _save_stream_metadata(job, _next_stream_event(stream_state))
+    job.turn_id = turn.id
+    job.model_used = turn.model_used
+    job.reasoning_content = stream_state["reasoning"]
+    job.content_buffer = stream_state["content"]
+    job.narrative_buffer = turn.gm_output
+    job.progress_message = "剧情已生成，状态维护正在后台进行。"
+    job.maintenance_status = "pending"
+    job.maintenance_stage = "state_extract"
+    job.maintenance_message = "等待后台状态维护任务。"
+    job.maintenance_error = None
+    job.maintenance_started_at = job.maintenance_completed_at = None
+    job.director_used_fallback = telemetry.director_used_fallback
+    job.drift_severity = telemetry.drift_severity
+    job.rewrite_triggered = telemetry.rewrite_triggered
+    job.extractor_failed = False
+    job.turn_runtime_inputs = telemetry.to_runtime_inputs() or None
+    _set_job_stage(job, STAGE_COMPLETED, now)
+    stream_state["stage"] = STAGE_COMPLETED
+    stream_state["stage_started_at"] = job.stage_started_at
+    job.last_event_at = job.completed_at = now
+    db.add(job)
+    db.commit()
+    _publish_turn_snapshot(job, turn, event_type="completed", terminal=True)
+
 
 def _mark_job_failed(job_id: UUID, message: str, stream_state: StreamState) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
+        job = current_turn_job(db, job_id)
+        if job is None or job.status not in {"pending", "running"}:
             return
+        _save_stream_metadata(job, _next_stream_event(stream_state))
         now = datetime.now(UTC)
         job.status = "failed"
         job.error_message = message[:4000]
@@ -337,7 +363,7 @@ def _enqueue_turn_maintenance_job(job_id: UUID) -> None:
 
 def _mark_maintenance_failed(job_id: UUID, message: str, *, stage: str) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return
         now = datetime.now(UTC)
@@ -365,11 +391,13 @@ def _update_stream_progress(
     stage: str,
     stage_started_at: datetime | None,
     reset_buffers: bool,
+    **metadata: int,
 ) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
+        job = current_turn_job(db, job_id)
+        if job is None or job.status not in {"pending", "running"}:
             return
+        _save_stream_metadata(job, metadata)
         job.reasoning_content = reasoning
         job.content_buffer = content
         job.narrative_buffer = narrative
@@ -392,21 +420,20 @@ def _update_progress_message(
     narrative: str,
     stage: str,
     stage_started_at: datetime | None,
+    **metadata: int,
 ) -> None:
-    with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
-            return
-        job.reasoning_content = reasoning
-        job.content_buffer = content
-        job.narrative_buffer = narrative
-        job.progress_message = message
-        _set_job_stage(job, stage, stage_started_at or datetime.now(UTC))
-        if model:
-            job.model_used = model
-        job.last_event_at = datetime.now(UTC)
-        db.add(job)
-        db.commit()
+    _update_stream_progress(
+        job_id,
+        reasoning=reasoning,
+        content=content,
+        narrative=narrative,
+        model=model,
+        message=message,
+        stage=stage,
+        stage_started_at=stage_started_at,
+        reset_buffers=False,
+        **metadata,
+    )
 
 
 def _publish_turn_delta(
@@ -423,11 +450,13 @@ def _publish_turn_delta(
     stage: str,
     stage_started_at: datetime | None,
     reset_buffers: bool,
+    **metadata: int,
 ) -> None:
     turn_stream_event_broker.publish(
         job_id,
         {
             "type": "delta",
+            **metadata,
             "status": status,
             "model_used": model,
             "progress_message": message,
@@ -455,11 +484,13 @@ def _publish_turn_progress(
     narrative: str,
     stage: str,
     stage_started_at: datetime | None,
+    **metadata: int,
 ) -> None:
     turn_stream_event_broker.publish(
         job_id,
         {
             "type": "progress",
+            **metadata,
             "status": status,
             "model_used": model,
             "progress_message": message,
@@ -480,36 +511,7 @@ def _publish_turn_snapshot(
     event_type: str,
     terminal: bool,
 ) -> None:
-    payload = TurnJobRead(
-        id=job.id,
-        game_id=job.game_id,
-        status=job.status,
-        turn=turn,
-        turn_id=job.turn_id,
-        model_used=job.model_used,
-        error_message=job.error_message,
-        reasoning_content=job.reasoning_content,
-        content_buffer=job.content_buffer,
-        narrative_buffer=job.narrative_buffer,
-        progress_message=job.progress_message,
-        stage=job.stage,
-        stage_label=job.stage_label,
-        stage_index=job.stage_index,
-        stage_total=job.stage_total,
-        stage_started_at=job.stage_started_at,
-        maintenance_status=job.maintenance_status,
-        maintenance_stage=job.maintenance_stage,
-        maintenance_message=job.maintenance_message,
-        maintenance_error=job.maintenance_error,
-        maintenance_started_at=job.maintenance_started_at,
-        maintenance_completed_at=job.maintenance_completed_at,
-        director_used_fallback=job.director_used_fallback,
-        drift_severity=job.drift_severity,
-        rewrite_triggered=job.rewrite_triggered,
-        extractor_failed=job.extractor_failed,
-        stream_started_at=job.stream_started_at,
-        last_event_at=job.last_event_at,
-    )
+    payload = TurnJobRead.from_job(job, turn)
     turn_stream_event_broker.publish(
         job.id,
         {
@@ -527,9 +529,11 @@ def publish_turn_job_snapshot(
     terminal: bool = False,
 ) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return
+        job.event_seq = (job.event_seq or 0) + 1
+        db.commit()
         turn = db.get(Turn, job.turn_id) if job.turn_id else None
         _publish_turn_snapshot(job, turn, event_type=event_type, terminal=terminal)
 
@@ -633,3 +637,21 @@ def _decode_json_string_escape(content: str, backslash_index: int) -> tuple[str,
         return chr(int(content[hex_start:hex_end], 16)), 6
     except ValueError:
         return "", 0
+
+
+def _stream_metadata(state: StreamState) -> dict[str, int]:
+    return {
+        key: int(state.get(key, 0))
+        for key in ("timeline_generation", "game_revision", "stream_revision", "event_seq")
+    }
+
+
+def _next_stream_event(state: StreamState) -> dict[str, int]:
+    state["event_seq"] = state.get("event_seq", 0) + 1
+    return _stream_metadata(state)
+
+
+def _save_stream_metadata(job: TurnJob, metadata: dict[str, int]) -> None:
+    for key in ("stream_revision", "event_seq"):
+        if key in metadata:
+            setattr(job, key, metadata[key])

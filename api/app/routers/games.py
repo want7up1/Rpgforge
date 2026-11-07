@@ -45,6 +45,7 @@ from app.services.story_settings import (
     game_profile,
     validate_story_settings,
 )
+from app.services.timeline import lock_game_timeline, touch_game_revision
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 DB_DEPENDENCY = Depends(get_db)
@@ -85,6 +86,8 @@ def game_detail_response(game: Game) -> GameDetail:
         genre=game.genre,
         description=game.description,
         status=game.status,
+        revision=game.revision,
+        timeline_generation=game.timeline_generation,
         created_at=game.created_at,
         updated_at=game.updated_at,
         config=game.config,
@@ -173,6 +176,7 @@ def import_game_settings(
     game = _get_game_for_settings_transfer(db, game_id)
     _assert_settings_editable(db, game_id)
     _apply_settings_import(db, game, payload)
+    touch_game_revision(db, game)
     touch_game(db, game_id)
     db.add(game)
     db.flush()
@@ -234,6 +238,7 @@ def update_game_config(
     story_settings = _validated_story_settings(settings_payload)
     game.config.story_settings = story_settings
     _sync_game_profile_from_story_settings(game, story_settings)
+    touch_game_revision(db, game)
 
     touch_game(db, game_id)
     db.add(game)
@@ -288,6 +293,7 @@ def restore_game_setting_version(
         )
     _ensure_baseline_version(db, game, "config", None, _config_snapshot(game))
     _restore_config_snapshot(game, version.snapshot_json)
+    touch_game_revision(db, game)
     db.add(game)
     db.flush()
     _save_setting_version(db, game_id, "config", None, "restored", _config_snapshot(game))
@@ -456,10 +462,13 @@ def _characters_from_story_settings(game: Game, story_settings: dict[str, Any]) 
 
 
 def _assert_settings_editable(db: Session, game_id: UUID) -> None:
+    lock_game_timeline(db, game_id)
     active_turn_job = db.scalars(
         select(TurnJob)
+        .join(Game, Game.id == TurnJob.game_id)
         .where(
             TurnJob.game_id == game_id,
+            TurnJob.timeline_generation == Game.timeline_generation,
             (
                 TurnJob.status.in_(("pending", "running"))
                 | (

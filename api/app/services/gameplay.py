@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -18,9 +19,11 @@ from app.services.json_utils import parse_json_object
 from app.services.model_router import ModelRouter
 from app.services.output_observer import observe_gm_output
 from app.services.prompt_builder import PromptBuilder
+from app.services.settlement_receipts import build_settlement_receipt
 from app.services.state_delta_auto_apply import apply_pending_state_deltas
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
+from app.services.state_settlement import record_failed_turn_state_delta
 from app.services.state_v2 import state_v2_view
 from app.services.story_director import StoryDirector, StoryDirectorDecision
 from app.services.story_settings import (
@@ -29,6 +32,8 @@ from app.services.story_settings import (
     retrieve_story_materials,
     select_action_style,
 )
+from app.services.timeline import TimelineConflict, assert_timeline_current
+from app.services.turn_job_access import current_turn_job
 
 logger = logging.getLogger(__name__)
 GameplayStreamUpdateCallback = Callable[[str, str, str | None], Awaitable[None]]
@@ -111,17 +116,56 @@ class GameplayService:
         self.context_compressor = context_compressor or ContextCompressor(router=self.router)
         self.story_director = story_director or StoryDirector(router=self.router)
 
-    async def run_turn(self, db: Session, game: Game, payload: TurnCreate) -> Turn:
+    async def run_turn(
+        self, db: Session, game: Game, payload: TurnCreate, *, job_id: UUID | None = None
+    ) -> Turn:
+        generation = game.timeline_generation or 0
         context = await self.load_turn_runtime_context(db, game, payload)
         runtime_output, model_used = await self.generate_turn_runtime_output(context)
+        assert_timeline_current(db, game.id, generation)
+        job = current_turn_job(db, job_id) if job_id is not None else None
+        if job_id is not None and (job is None or job.status != "running"):
+            raise TimelineConflict("回合任务已结束，旧回复未写入当前进度。")
         turn = self.persist_runtime_turn(
             db,
             game_id=game.id,
             player_input=context.player_input,
             runtime_output=runtime_output,
             model_used=model_used,
+            commit=job is None,
         )
-        await self._create_state_delta(db, game, turn, telemetry=context.telemetry)
+        if job is not None:
+            job.turn_id = turn.id
+            job.status = "completed"
+            job.model_used = model_used
+            job.narrative_buffer = turn.gm_output
+            job.progress_message = "正文已生成，正在结算状态。"
+            job.maintenance_status = "running"
+            job.maintenance_stage = "state_extract"
+            job.maintenance_started_at = datetime.now(UTC)
+            job.event_seq = (job.event_seq or 0) + 1
+            db.add(job)
+            db.commit()
+        applied = await self._create_state_delta(
+            db,
+            game,
+            turn,
+            telemetry=context.telemetry,
+            expected_generation=generation,
+            expected_job_id=job_id,
+        )
+        if job_id is not None:
+            current = current_turn_job(db, job_id)
+            if current is not None and current.maintenance_status == "running":
+                current.maintenance_status = "completed" if applied else "failed"
+                current.maintenance_stage = "completed" if applied else "state_extract"
+                current.maintenance_message = (
+                    "状态已更新。" if applied else "状态提取失败，下次继续前重试。"
+                )
+                current.maintenance_completed_at = current.completed_at = datetime.now(UTC)
+                current.event_seq = (current.event_seq or 0) + 1
+                db.add(current)
+                db.commit()
         return turn
 
     async def run_turn_stream(
@@ -133,6 +177,7 @@ class GameplayService:
         on_progress: GameplayProgressCallback | None = None,
         extract_state: bool = True,
     ) -> Turn:
+        generation = game.timeline_generation or 0
         context = await self.load_turn_runtime_context(db, game, payload, on_progress=on_progress)
         runtime_output, model_used = await self.generate_turn_runtime_output(
             context,
@@ -142,6 +187,7 @@ class GameplayService:
         if on_progress:
             await on_progress("GM 回复已完成，正在写入回合。")
 
+        assert_timeline_current(db, game.id, generation)
         turn = self.persist_runtime_turn(
             db,
             game_id=game.id,
@@ -153,7 +199,9 @@ class GameplayService:
         if extract_state:
             if on_progress:
                 await on_progress("正在调用 DeepSeek Flash 提取状态变更。")
-            await self._create_state_delta(db, game, turn, telemetry=context.telemetry)
+            await self._create_state_delta(
+                db, game, turn, telemetry=context.telemetry, expected_generation=generation
+            )
         return turn
 
     async def load_turn_runtime_context(
@@ -309,6 +357,7 @@ class GameplayService:
         player_input: str,
         runtime_output: GMRuntimeOutput,
         model_used: str,
+        commit: bool = True,
     ) -> Turn:
         next_turn_number = self._next_turn_number(db, game_id)
         turn = Turn(
@@ -319,13 +368,19 @@ class GameplayService:
             visible_summary="\n".join(runtime_output.visible_clues),
             hidden_summary=None,
             state_delta_json={},
+            settlement_receipt=build_settlement_receipt(
+                {}, {}, {}, turn_number=next_turn_number, status="pending"
+            ),
             action_options_json=[option.model_dump() for option in runtime_output.action_options],
             model_used=model_used,
         )
         db.add(turn)
         touch_game(db, game_id)
-        db.commit()
-        db.refresh(turn)
+        if commit:
+            db.commit()
+            db.refresh(turn)
+        else:
+            db.flush()
         return turn
 
     async def _create_state_delta(
@@ -334,7 +389,12 @@ class GameplayService:
         game: Game,
         turn: Turn,
         telemetry: TurnTelemetry | None = None,
+        expected_generation: int | None = None,
+        expected_job_id: UUID | None = None,
     ) -> bool:
+        generation = (
+            game.timeline_generation or 0 if expected_generation is None else expected_generation
+        )
         director_decision = telemetry.director_decision if telemetry else None
         drift_findings = telemetry.drift_validation if telemetry else None
         try:
@@ -345,12 +405,17 @@ class GameplayService:
                 drift_findings=drift_findings,
             )
         except (DeepSeekError, StateExtractorValidationError) as exc:
+            _assert_turn_state_writer(db, game.id, generation, expected_job_id)
             logger.warning("State delta extraction failed for turn %s: %s", turn.id, exc)
             if telemetry is not None:
                 telemetry.extractor_failed = True
+            record_failed_turn_state_delta(db, game=game, turn=turn, error=str(exc))
+            rebuild_game_state(db, game)
+            db.commit()
             await self._update_context_after_turn(db, game, turn, {})
             return False
 
+        _assert_turn_state_writer(db, game.id, generation, expected_job_id)
         turn.state_delta_json = delta_json
         if game.state is not None:
             approve_turn_state_delta(
@@ -454,9 +519,7 @@ class GameplayService:
         allowed_items = [str(item).strip() for item in allowed if str(item or "").strip()]
         allowed_set = set(allowed_items)
         decision.allowed_reveals = [
-            item
-            for item in decision.allowed_reveals
-            if item.strip() in allowed_set
+            item for item in decision.allowed_reveals if item.strip() in allowed_set
         ]
 
     @staticmethod
@@ -570,9 +633,7 @@ class GameplayService:
                     timeout=GM_RUNTIME_TIMEOUT_SECONDS,
                 )
         except (DeepSeekError, GameplayValidationError, TimeoutError) as exc:
-            logger.warning(
-                "剧透兜底重写失败（game %s），保留原稿：%s", context.game.id, exc
-            )
+            logger.warning("剧透兜底重写失败（game %s），保留原稿：%s", context.game.id, exc)
             return runtime_output, model_used
         # 重写后重新观测；若仍命中禁止揭露说明定向修订没清干净——告警供看板监控，但仍返回重写稿
         # （不再二次重写以免叠加延迟；"重写后仍命中率"本身就是该监控的信号）。
@@ -669,3 +730,22 @@ def gameplay_game_query(game_id):
         )
         .where(Game.id == game_id)
     )
+
+
+def _assert_turn_state_writer(
+    db: Session,
+    game_id: UUID,
+    generation: int,
+    job_id: UUID | None,
+) -> None:
+    if job_id is None:
+        assert_timeline_current(db, game_id, generation)
+        return
+    job = current_turn_job(db, job_id)
+    if (
+        job is None
+        or job.timeline_generation != generation
+        or job.maintenance_status != "running"
+        or job.maintenance_stage != "state_extract"
+    ):
+        raise TimelineConflict("状态任务已结束，旧结算结果未写入当前进度。")

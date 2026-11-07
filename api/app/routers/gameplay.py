@@ -29,6 +29,14 @@ from app.services.state_settlement import (
     StateSettlementService,
     record_failed_turn_state_delta,
 )
+from app.services.timeline import (
+    TimelineConflict,
+    admit_turn_request,
+    assert_expected_revision,
+    assert_timeline_current,
+    lock_game_timeline,
+    replay_turn_request,
+)
 from app.services.turn_rewind import rewind_game_to_turn
 from app.services.turn_stream_events import format_sse_event, turn_stream_event_broker
 
@@ -65,6 +73,9 @@ def read_turn_job_or_404(db: Session, game_id: UUID, job_id: UUID) -> TurnJobRea
     ).first()
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turn job not found.")
+    game = db.get(Game, game_id)
+    if game is None or job.timeline_generation != (game.timeline_generation or 0):
+        raise HTTPException(status_code=409, detail="此任务属于已失效的旧进度。")
     if reconcile_turn_job_liveness(db, job):
         db.commit()
         db.refresh(job)
@@ -74,36 +85,7 @@ def read_turn_job_or_404(db: Session, game_id: UUID, job_id: UUID) -> TurnJobRea
         if job.turn_id
         else None
     )
-    return TurnJobRead(
-        id=job.id,
-        game_id=job.game_id,
-        status=job.status,
-        turn=turn,
-        turn_id=job.turn_id,
-        model_used=job.model_used,
-        error_message=job.error_message,
-        reasoning_content=job.reasoning_content,
-        content_buffer=job.content_buffer,
-        narrative_buffer=job.narrative_buffer,
-        progress_message=job.progress_message,
-        stage=job.stage,
-        stage_label=job.stage_label,
-        stage_index=job.stage_index,
-        stage_total=job.stage_total,
-        stage_started_at=job.stage_started_at,
-        maintenance_status=job.maintenance_status,
-        maintenance_stage=job.maintenance_stage,
-        maintenance_message=job.maintenance_message,
-        maintenance_error=job.maintenance_error,
-        maintenance_started_at=job.maintenance_started_at,
-        maintenance_completed_at=job.maintenance_completed_at,
-        director_used_fallback=job.director_used_fallback,
-        drift_severity=job.drift_severity,
-        rewrite_triggered=job.rewrite_triggered,
-        extractor_failed=job.extractor_failed,
-        stream_started_at=job.stream_started_at,
-        last_event_at=job.last_event_at,
-    )
+    return TurnJobRead.from_job(job, turn)
 
 
 @router.get("", response_model=list[TurnRead])
@@ -129,7 +111,10 @@ def rewind_turns(
             status_code=status.HTTP_409_CONFLICT,
             detail="本回合任务进行中，请等待完成后再回退。",
         )
-    rewind_game_to_turn(db, game, payload.to_turn)
+    try:
+        rewind_game_to_turn(db, game, payload.to_turn)
+    except TimelineConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return list(
         db.scalars(
             select(Turn).where(Turn.game_id == game_id).order_by(Turn.turn_number.asc())
@@ -217,6 +202,14 @@ async def create_turn(
     service: GameplayService = GAMEPLAY_SERVICE_DEPENDENCY,
 ) -> Turn:
     game = get_game_or_404_for_gameplay(db, game_id)
+    previous = _replay_request_or_409(db, game, payload)
+    if previous is not None:
+        if previous.status == "completed" and previous.turn_id is not None:
+            turn = db.get(Turn, previous.turn_id)
+            if turn is not None:
+                return turn
+        raise HTTPException(status_code=409, detail="此请求已经受理，请查询原回合任务。")
+    _validate_revision_or_409(game, payload)
     if (
         _active_turn_job(db, game_id) is not None
         or _active_turn_maintenance_job(db, game_id) is not None
@@ -227,7 +220,52 @@ async def create_turn(
         )
     try:
         await _ensure_state_settled_or_409(db, game)
-        return await service.run_turn(db, game, payload)
+        job, replayed = _admit_request_or_409(db, game_id, payload)
+        if replayed:
+            if job.status == "completed" and job.turn_id is not None:
+                turn = db.get(Turn, job.turn_id)
+                if turn is not None:
+                    return turn
+            raise HTTPException(status_code=409, detail="此请求已经受理，请查询原回合任务。")
+        job.status = "running"
+        job.event_seq = (job.event_seq or 0) + 1
+        job.maintenance_status = "completed"
+        job.request_json = {**job.request_json, "_execution_mode": "inline"}
+        inline_job_id = job.id
+        inline_generation = job.timeline_generation
+        db.commit()
+        try:
+            # Service persists the turn and its job link atomically, then
+            # settles outside the short persistence transaction.
+            return await service.run_turn(db, game, payload, job_id=inline_job_id)
+        except Exception as exc:
+            db.rollback()
+            assert_timeline_current(db, game_id, inline_generation)
+            job = db.get(TurnJob, inline_job_id, populate_existing=True)
+            if job is not None and job.status in {"pending", "running"}:
+                job.status = "failed"
+                job.error_message = str(exc)
+                job.completed_at = datetime.now(UTC)
+                job.event_seq = (job.event_seq or 0) + 1
+                db.add(job)
+                db.commit()
+            elif job is not None and job.turn_id is not None and job.maintenance_status in {
+                "pending", "running"
+            }:
+                # A persisted response remains replayable if only settlement
+                # failed. Never revive an invalidated/terminal old task.
+                job.maintenance_status = "failed"
+                job.maintenance_error = str(exc)
+                job.maintenance_completed_at = datetime.now(UTC)
+                job.event_seq = (job.event_seq or 0) + 1
+                turn = db.get(Turn, job.turn_id)
+                if turn is not None and (turn.settlement_receipt or {}).get("status") == "pending":
+                    record_failed_turn_state_delta(db, game=game, turn=turn, error=str(exc))
+                db.add(job)
+                db.commit()
+            raise
+    except TimelineConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DeepSeekConfigurationError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -253,6 +291,10 @@ async def create_turn_job(
     db: Session = DB_DEPENDENCY,
 ) -> TurnJobCreateResponse:
     game = get_game_or_404_for_gameplay(db, game_id)
+    previous = _replay_request_or_409(db, game, payload)
+    if previous is not None:
+        return _created_job_response(previous)
+    _validate_revision_or_409(game, payload)
     blocking_job = _active_turn_job(db, game_id)
     if blocking_job is not None:
         raise HTTPException(
@@ -266,15 +308,9 @@ async def create_turn_job(
             detail="上一回合状态维护仍在进行，请等待状态提取完成后再继续。",
         )
     await _ensure_state_settled_or_409(db, game)
-    job = TurnJob(
-        game_id=game_id,
-        status="pending",
-        request_json=payload.model_dump(mode="json"),
-        maintenance_status="pending",
-        maintenance_stage="state_extract",
-        maintenance_message="等待回合生成完成后执行状态维护。",
-    )
-    db.add(job)
+    job, replayed = _admit_request_or_409(db, game_id, payload)
+    if replayed:
+        return _created_job_response(job)
     db.commit()
     db.refresh(job)
     try:
@@ -286,13 +322,71 @@ async def create_turn_job(
         job.progress_message = "任务队列不可用，请检查 Redis/RQ worker。"
         job.completed_at = now
         job.last_event_at = now
+        job.event_seq = (job.event_seq or 0) + 1
         db.add(job)
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="任务队列不可用，请检查 Redis/RQ worker。",
         ) from exc
-    return TurnJobCreateResponse(id=job.id, status=job.status)
+    return _created_job_response(job)
+
+
+def _created_job_response(job: TurnJob) -> TurnJobCreateResponse:
+    return TurnJobCreateResponse(
+        id=job.id,
+        status=job.status,
+        game_revision=job.game_revision,
+        timeline_generation=job.timeline_generation,
+    )
+
+
+def _replay_request_or_409(db: Session, game: Game, payload: TurnCreate) -> TurnJob | None:
+    try:
+        return replay_turn_request(db, game, payload)
+    except TimelineConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _validate_revision_or_409(game: Game, payload: TurnCreate) -> None:
+    try:
+        assert_expected_revision(game, payload.expected_revision)
+    except TimelineConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _admit_request_or_409(
+    db: Session, game_id: UUID, payload: TurnCreate
+) -> tuple[TurnJob, bool]:
+    # All model/queue/liveness work happens before this short transaction.
+    game = lock_game_timeline(db, game_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found.")
+    previous = _replay_request_or_409(db, game, payload)
+    if previous is not None:
+        return previous, True
+    blocking = db.scalars(
+        select(TurnJob).where(
+            TurnJob.game_id == game_id,
+            TurnJob.timeline_generation == game.timeline_generation,
+            (
+                TurnJob.status.in_(ACTIVE_JOB_STATUSES)
+                | (
+                    (TurnJob.status == "completed")
+                    & TurnJob.maintenance_status.in_(ACTIVE_MAINTENANCE_STATUSES)
+                    & (TurnJob.maintenance_stage == "state_extract")
+                )
+            ),
+        ).limit(1)
+    ).first()
+    if blocking is not None:
+        raise HTTPException(status_code=409, detail="已有回合或状态提取任务正在运行。")
+    try:
+        job = admit_turn_request(db, game, payload)
+        db.expire(game, ["config", "state"])
+        return job, False
+    except TimelineConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/jobs/active", response_model=TurnJobRead | None)
@@ -307,7 +401,12 @@ def get_active_turn_job(game_id: UUID, db: Session = DB_DEPENDENCY) -> TurnJobRe
 def _active_turn_job(db: Session, game_id: UUID) -> TurnJob | None:
     job = db.scalars(
         select(TurnJob)
-        .where(TurnJob.game_id == game_id, TurnJob.status.in_(ACTIVE_JOB_STATUSES))
+        .join(Game, Game.id == TurnJob.game_id)
+        .where(
+            TurnJob.game_id == game_id,
+            TurnJob.status.in_(ACTIVE_JOB_STATUSES),
+            TurnJob.timeline_generation == Game.timeline_generation,
+        )
         .order_by(TurnJob.created_at.desc())
         .limit(1)
     ).first()
@@ -333,8 +432,10 @@ async def _ensure_state_settled_or_409(db: Session, game: Game) -> None:
 def _active_turn_maintenance_job(db: Session, game_id: UUID) -> TurnJob | None:
     job = db.scalars(
         select(TurnJob)
+        .join(Game, Game.id == TurnJob.game_id)
         .where(
             TurnJob.game_id == game_id,
+            TurnJob.timeline_generation == Game.timeline_generation,
             TurnJob.status == "completed",
             TurnJob.maintenance_status.in_(ACTIVE_MAINTENANCE_STATUSES),
             TurnJob.maintenance_stage == "state_extract",
@@ -356,6 +457,11 @@ def _is_state_extract_stale(job: TurnJob) -> bool:
 
 
 def _mark_state_extract_stale(db: Session, job: TurnJob) -> None:
+    try:
+        assert_timeline_current(db, job.game_id, job.timeline_generation)
+    except TimelineConflict:
+        db.rollback()
+        return
     now = datetime.now(UTC)
     message = "状态提取超过 3 分钟，已自动解除阻塞；本回合结算可能稍后重试。"
     job.maintenance_status = "failed"
@@ -363,6 +469,7 @@ def _mark_state_extract_stale(db: Session, job: TurnJob) -> None:
     job.maintenance_error = message
     job.maintenance_completed_at = now
     job.last_event_at = now
+    job.event_seq = (job.event_seq or 0) + 1
     db.add(job)
     if job.turn_id is not None:
         game = db.scalars(gameplay_game_query(job.game_id)).first()
@@ -478,6 +585,9 @@ def _load_turn_job_snapshot(game_id: UUID, job_id: UUID) -> TurnJobRead | None:
 
 def _turn_job_signature(job: object) -> tuple[object, ...]:
     return (
+        getattr(job, "timeline_generation", None),
+        getattr(job, "stream_revision", None),
+        getattr(job, "event_seq", None),
         getattr(job, "status", None),
         getattr(job, "turn_id", None),
         getattr(job, "model_used", None),

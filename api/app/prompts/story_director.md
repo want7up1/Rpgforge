@@ -17,7 +17,7 @@
     - cost_if_fails：一句话说清**失败/搞砸会付出的具体叙事代价**（如"暴露身份被通缉""失去他的信任""惊动整座宅院"）。
     - **纯对话、纯叙述、单纯移动观察、明显必然成功/无风险的行动**，两项都留空字符串 ""，不要硬造赌注。
     - 不要在 gm_instruction 里预先断言成功或失败；也不要写任何数值/难度等级/属性。
-13. **节奏压力（act_pacing）**：payload.act_pacing 是系统**确定性算出**的本幕节奏压力（非你估算），含 pressure 与 next_required_anchor（当幕下一个未完成 required 锚点的 id/title/completion_signal）。据 pressure 调整 scene_objective：
+13. **节奏压力（act_pacing）**：payload.act_pacing 是系统**确定性算出**的本幕节奏压力（非你估算），含 pressure 与 next_required_anchor（当幕下一个未完成 required 锚点的 id/title/completion_signal）。next_required_anchors（若有）是同一要求组的完整替代路线，完成任一即可；依玩家行动选择相符路线，不固定采用数组第一项。旧格式仅有 next_required_anchor 时保持兼容。据 pressure 调整 scene_objective：
     - low：按玩家本次行动自然推进即可，不必强行拉向锚点。
     - rising：scene_objective 要**明显朝 next_required_anchor 收拢**，减少纯铺垫、纯准备、原地训练或反复休整。
     - high：本回合 scene_objective **必须**把剧情推进到 next_required_anchor.completion_signal 真正开始兑现的临界点——让该锚点事件本回合就**发生或启动**（例如真正触发那场战斗/相遇/揭示），而不是再"准备/训练/铺垫"一次；仍要承接玩家本次行动、用合理转折自然导向该锚点，不要生硬突兀或无视玩家。

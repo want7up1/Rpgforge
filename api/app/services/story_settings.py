@@ -7,6 +7,12 @@ from typing import Any
 from app.models.game import GameConfig
 from app.models.turn import Turn
 from app.services.generation_parameters import normalize_generation_parameters
+from app.services.progress_rules import (
+    ProgressRules,
+    alternative_group,
+    budget_completion_anchors,
+    open_completion_anchors,
+)
 from app.services.text_vectorizer import extract_terms
 
 logger = logging.getLogger(__name__)
@@ -154,12 +160,20 @@ def normalize_story_settings(settings: Any) -> dict[str, Any]:
 
 
 def story_settings_from_config(config: GameConfig | None) -> dict[str, Any]:
+    if isinstance(config, ProgressRules):
+        return config.story_settings
     if config is None:
         return default_story_settings("未命名游戏")
     try:
         return normalize_story_settings(config.story_settings or {})
     except ValueError:
         return default_story_settings("未命名游戏")
+
+
+def progress_rules_from_config(config: GameConfig | ProgressRules | None) -> ProgressRules:
+    return config if isinstance(config, ProgressRules) else ProgressRules(
+        story_settings_from_config(config)
+    )
 
 
 def game_profile(settings: dict[str, Any]) -> dict[str, str]:
@@ -193,7 +207,9 @@ def build_runtime_story(
     next_act = _next_act(story, current_act)
 
     runtime_current_act = dict(current_act)
-    runtime_current_act["completion_anchors"] = open_anchors[:ANCHOR_LIMIT]
+    runtime_current_act["completion_anchors"] = budget_completion_anchors(
+        open_anchors, ANCHOR_LIMIT
+    )
 
     return _drop_empty(
         {
@@ -546,32 +562,14 @@ def _open_completion_anchors(
     current_act: dict[str, Any],
     completed_anchors: set[str],
 ) -> list[dict[str, Any]]:
-    anchors = _records(current_act.get("completion_anchors"))
-    satisfied_required_groups = {
-        _anchor_alternative_group(anchor)
-        for anchor in anchors
-        if _bool(anchor.get("required"), True)
-        and _anchor_alternative_group(anchor)
-        and _text(anchor.get("id")) in completed_anchors
-    }
-
-    open_anchors: list[dict[str, Any]] = []
-    for anchor in anchors:
-        anchor_id = _text(anchor.get("id"))
-        if anchor_id in completed_anchors:
-            continue
-        alternative_group = _anchor_alternative_group(anchor)
-        if (
-            _bool(anchor.get("required"), True)
-            and alternative_group
-            and alternative_group in satisfied_required_groups
-        ):
-            continue
-        open_anchors.append(anchor)
-    return open_anchors
+    return open_completion_anchors(
+        _records(current_act.get("completion_anchors")), completed_anchors
+    )
 
 
 def transition_target_for_act(config: GameConfig | None, act_id: str) -> str:
+    if isinstance(config, ProgressRules):
+        return config.transition_target(act_id)
     story = story_settings_from_config(config)
     act = _current_act(story, act_id)
     transition = _record(act.get("transition_to_next_act"))
@@ -762,19 +760,11 @@ def _anchor(item: dict[str, Any], act_id: str, index: int) -> dict[str, Any]:
             "id": _text(item.get("id")) or f"{act_id}_anchor_{index + 1}",
             "title": _text(item.get("title") or item.get("name")) or "未命名锚点",
             "required": _bool(item.get("required"), True),
-            "alternative_group": _anchor_alternative_group(item),
+            "alternative_group": alternative_group(item),
             "description": _text(item.get("description") or item.get("goal")),
             "completion_signal": _text(item.get("completion_signal") or item.get("signal")),
         },
         item,
-    )
-
-
-def _anchor_alternative_group(anchor: dict[str, Any]) -> str:
-    return _text(
-        anchor.get("alternative_group")
-        or anchor.get("alt_group")
-        or anchor.get("alternativeGroup")
     )
 
 

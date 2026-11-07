@@ -14,10 +14,14 @@ from app.models.turn import Turn
 from app.services.deepseek_client import DeepSeekError
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import (
+    apply_approved_turn_delta,
     approve_turn_state_delta,
+    load_turn_state_history,
     rebuild_game_state,
     sync_turn_state_delta,
+    update_turn_settlement_receipt,
 )
+from app.services.story_settings import progress_rules_from_config
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +56,24 @@ class StateSettlementService:
         if game.state is None:
             return False
 
-        changed = rebuild_game_state(db, game) is not None
-        for turn in _game_turns(db, game.id):
-            delta = _state_delta_for_turn(db, turn.id)
+        history = load_turn_state_history(db, game.id)
+        rules = progress_rules_from_config(game.config)
+        before_state = game.state.state_json
+        before_seed = game.state.initial_state_json
+        before_turn = game.state.current_turn
+        before_receipts = [getattr(turn, "settlement_receipt", None) for turn, _ in history]
+        rebuild_game_state(db, game, history=history, rules=rules)
+        changed = (
+            before_state != game.state.state_json
+            or before_seed != game.state.initial_state_json
+            or before_turn != game.state.current_turn
+            or before_receipts != [turn.settlement_receipt for turn, _ in history]
+        )
+        for index, (turn, delta) in enumerate(history):
             if delta is not None and delta.status in SETTLED_STATUSES:
-                if delta.status == "rejected":
+                if delta.status == "rejected" and turn.state_delta_json:
                     sync_turn_state_delta(delta, active=False)
+                    changed = True
                 continue
 
             if delta is not None and delta.status in AUTO_APPROVE_STATUSES:
@@ -67,64 +83,56 @@ class StateSettlementService:
                 sync_turn_state_delta(delta, active=True)
                 db.add(delta)
                 db.add(turn)
-                rebuild_game_state(db, game)
-                changed = True
-                continue
-
-            # 走到这里的只有两种正常情况：无 delta（尚未提取）或 delta 属于待重试的失败态。
-            # 失败态会重新提取并累加 attempt_count，超限后自动降级（见下方）。
-            # 出现未知状态时仅告警、不崩溃（按失败态处理，避免破坏结算循环的防卡死目标）。
-            if delta is not None and delta.status not in FAILED_SETTLEMENT_STATUSES:
-                logger.warning(
-                    "Unsettled delta for turn %s has unexpected status %r; treating as failed.",
-                    turn.id,
-                    delta.status,
-                )
-            # 已累计的尝试次数（含本回合历史失败），用于跨续玩累加判断是否超限。
-            prior_attempts = int(getattr(delta, "attempt_count", 0) or 0) if delta else 0
-            delta_json, used_attempts = await self._extract_with_retries(game, turn)
-            total_attempts = prior_attempts + used_attempts
-            if delta_json is None:
-                if total_attempts >= self.max_attempts:
-                    # 累计尝试达上限：自动降级为空 approved delta（跳过本回合状态变更），
-                    # 记错误说明并告警，避免无限重试烧 LLM 卡死存档。
-                    logger.error(
-                        "State settlement for turn %s exhausted %s attempts (>= %s); "
-                        "auto-skipping this turn with an empty approved delta. Last error: %s",
-                        turn.id,
-                        total_attempts,
-                        self.max_attempts,
-                        self._last_error,
+            else:
+                if delta is not None and delta.status not in FAILED_SETTLEMENT_STATUSES:
+                    logger.warning(
+                        "Unsettled delta for turn %s has unexpected status %r; treating as failed.",
+                        turn.id, delta.status,
                     )
-                    skip_message = (
+                prior_attempts = int(getattr(delta, "attempt_count", 0) or 0) if delta else 0
+                delta_json, used_attempts = await self._extract_with_retries(game, turn)
+                total_attempts = prior_attempts + used_attempts
+                if delta_json is None:
+                    if total_attempts < self.max_attempts:
+                        message = (
+                            f"第 {turn.turn_number} 回合状态自动结算失败。系统会在下次继续前重试。"
+                        )
+                        _record_failed_delta(
+                            db, game, turn, self._last_error or message,
+                            attempt_count=total_attempts,
+                            existing_delta=delta, lookup_existing=False,
+                        )
+                        raise StateSettlementError(message)
+                    logger.error(
+                        "State settlement for turn %s exhausted %s attempts; auto-skipping: %s",
+                        turn.id, total_attempts, self._last_error,
+                    )
+                    message = (
                         f"第 {turn.turn_number} 回合状态自动结算连续失败 {total_attempts} 次，"
                         f"已跳过该回合状态变更以保证游戏继续。最后错误：{self._last_error}"
                     )
-                    self._auto_skip_failed_delta(db, game, turn, skip_message[:4000])
-                    rebuild_game_state(db, game)
-                    changed = True
-                    continue
-                message = f"第 {turn.turn_number} 回合状态自动结算失败。系统会在下次继续前重试。"
-                _record_failed_delta(
-                    db, game, turn, self._last_error or message, attempt_count=total_attempts
-                )
-                rebuild_game_state(db, game)
-                raise StateSettlementError(message)
+                    delta = self._auto_skip_failed_delta(
+                        db, game, turn, message[:4000], existing_delta=delta,
+                        lookup_existing=False,
+                    )
+                else:
+                    delta = approve_turn_state_delta(
+                        db, game=game, turn=turn, delta_json=delta_json,
+                        existing_delta=delta, lookup_existing=False,
+                    )
+                    delta.attempt_count = total_attempts
+                    db.add(delta)
 
-            approved = approve_turn_state_delta(
-                db,
-                game=game,
-                turn=turn,
-                delta_json=delta_json,
-                approved_at=datetime.now(UTC),
-            )
-            # 记录累计尝试次数供观测（含本回合此前失败数）。delta 转 approved 后已属已结算态，
-            # 不会再被重新提取，该计数仅作诊断留痕。
-            approved.attempt_count = total_attempts
-            db.add(approved)
-            rebuild_game_state(db, game)
+            history[index] = (turn, delta)
+            # Tail recovery can append once. An insertion before already-approved
+            # history must still replay in order under the current story settings.
+            if turn.turn_number >= game.state.current_turn:
+                apply_approved_turn_delta(db, game, turn, delta, rules=rules)
+            else:
+                rebuild_game_state(db, game, history=history, rules=rules)
             changed = True
 
+        db.flush()
         return changed
 
     async def _extract_with_retries(
@@ -146,18 +154,19 @@ class StateSettlementService:
                 )
         return None, self.retry_attempts
 
-    def _auto_skip_failed_delta(self, db: Session, game: Game, turn: Turn, message: str) -> None:
-        """累计尝试超限：把该回合 delta 落为空 approved（跳过状态变更，游戏可继续）。"""
-        delta = _state_delta_for_turn(db, turn.id)
+    def _auto_skip_failed_delta(
+        self, db: Session, game: Game, turn: Turn, message: str, *,
+        existing_delta: StateDelta | None = None, lookup_existing: bool = True,
+    ) -> StateDelta:
+        """Keep a distinct skipped receipt while permitting the game to continue."""
+        delta = existing_delta
+        if delta is None and lookup_existing:
+            delta = _state_delta_for_turn(db, turn.id)
         turn.state_delta_json = {}
         if delta is None:
             delta = StateDelta(
-                game_id=game.id,
-                turn_id=turn.id,
-                delta_json={},
-                status="approved",
-                error_message=message,
-                approved_at=datetime.now(UTC),
+                game_id=game.id, turn_id=turn.id, delta_json={}, status="approved",
+                error_message=message, approved_at=datetime.now(UTC),
                 attempt_count=self.max_attempts,
             )
         else:
@@ -169,15 +178,10 @@ class StateSettlementService:
             delta.attempt_count = max(int(delta.attempt_count or 0), self.max_attempts)
         db.add(turn)
         db.add(delta)
+        state = game.state.state_json if game.state is not None else {}
+        update_turn_settlement_receipt(db, turn, delta, state, state)
         db.flush()
-
-
-def _game_turns(db: Session, game_id) -> list[Turn]:
-    return list(
-        db.scalars(
-            select(Turn).where(Turn.game_id == game_id).order_by(Turn.turn_number.asc())
-        ).all()
-    )
+        return delta
 
 
 def _state_delta_for_turn(db: Session, turn_id) -> StateDelta | None:
@@ -195,8 +199,12 @@ def _record_failed_delta(
     error: str,
     *,
     attempt_count: int | None = None,
+    existing_delta: StateDelta | None = None,
+    lookup_existing: bool = True,
 ) -> StateDelta:
-    delta = _state_delta_for_turn(db, turn.id)
+    delta = existing_delta
+    if delta is None and lookup_existing:
+        delta = _state_delta_for_turn(db, turn.id)
     if delta is None:
         delta = StateDelta(
             game_id=game.id,
@@ -219,6 +227,8 @@ def _record_failed_delta(
     turn.state_delta_json = {}
     db.add(turn)
     db.add(delta)
+    state = game.state.state_json if game.state is not None else {}
+    update_turn_settlement_receipt(db, turn, delta, state, state)
     db.flush()
     return delta
 

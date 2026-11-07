@@ -4,12 +4,12 @@ import {
   parseTurnJobStreamEvent
 } from "@/lib/api";
 import type { TurnJobRead, TurnJobStreamEvent } from "@/lib/types";
+import { abortError, formatLastEvent, sleep, StreamCursor, waitForJobStream, type StreamResult } from "@/lib/jobStream";
+export { formatLastEvent } from "@/lib/jobStream";
 
 const turnPollIntervalMs = 1500;
 const turnMaxPolls = 560;
 const turnMaintenanceMaxPolls = 120;
-const turnStreamConnectTimeoutMs = 6000;
-const turnStreamErrorFallbackMs = 4000;
 
 export type StoryProcessJob = Pick<
   TurnJobRead,
@@ -73,200 +73,85 @@ export async function waitForTurnJobWithStream(
   jobId: string,
   onProgress: (message: string) => void,
   onSnapshot: (job: TurnJobRead) => void,
-  initialJob?: TurnJobRead
-) {
-  if (typeof window === "undefined" || typeof EventSource === "undefined") {
-    return waitForTurnJob(gameId, jobId, onProgress, onSnapshot);
+  initialJob?: TurnJobRead,
+  signal?: AbortSignal
+): Promise<TurnJobRead> {
+  let latest = initialJob ?? createInitialTurnProcess(gameId, jobId, "pending");
+  const cursor = new StreamCursor();
+  let reasoningLength = Array.from(latest.reasoning_content).length;
+  let contentLength = Array.from(latest.content_buffer).length;
+  const applySnapshot = (incoming: TurnJobRead, authoritative = false): StreamResult<TurnJobRead> => {
+    if (incoming.id !== jobId || incoming.game_id !== gameId || signal?.aborted) return;
+    const terminal = incoming.status === "completed" || incoming.status === "failed";
+    // 进程可能在帧已发出、seq节流落盘前崩溃。只有直接GET的权威终态可以结束
+    // 这个不可复用的job；迟到的SSE快照仍严格按游标拒绝，旧时间线也不能穿过。
+    const terminalRecovery = authoritative && terminal
+      && (incoming.timeline_generation ?? latest.timeline_generation ?? 0) >= (latest.timeline_generation ?? 0);
+    if (!cursor.accept(incoming) && !terminalRecovery) return;
+    latest = mergeTurnJobSnapshot(latest, incoming);
+    reasoningLength = Array.from(latest.reasoning_content).length;
+    contentLength = Array.from(latest.content_buffer).length;
+    onSnapshot(latest);
+    if (latest.progress_message) onProgress(latest.progress_message);
+    if (latest.status === "completed") return { done: latest };
+    if (latest.status === "failed") return { error: new Error(latest.error_message || "回合生成失败。") };
+  };
+  const initial = initialJob && applySnapshot(initialJob);
+  if (initial) {
+    if ("error" in initial) throw initial.error;
+    return initial.done;
   }
-
-  return new Promise<TurnJobRead>((resolve, reject) => {
-    let latestJob = initialJob ?? createInitialTurnProcess(gameId, jobId, "pending");
-    let eventSource: EventSource | null = null;
-    let connectTimer: number | null = null;
-    let errorTimer: number | null = null;
-    let settled = false;
-    let fallbackStarted = false;
-    let hasReceivedEvent = false;
-
-    const cleanup = () => {
-      settled = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
+  return waitForJobStream({
+    connect: () => createTurnJobEventSource(gameId, jobId),
+    eventNames: ["snapshot", "delta", "progress", "completed", "failed", "heartbeat"],
+    apply: (message) => {
+      const event = parseTurnJobStreamEvent(message);
+      if (event.job_id && event.job_id !== jobId) return;
+      if (event.job) return applySnapshot({ ...event.job, ...streamMetadata(event) });
+      if (event.type !== "delta" && event.type !== "progress") return;
+      if (!cursor.accept(event)) return;
+      const reset = event.reset_buffers || (event.stream_revision ?? 0) > (latest.stream_revision ?? 0)
+        || (event.timeline_generation ?? 0) > (latest.timeline_generation ?? 0);
+      const nextReasoningLength = (reset ? 0 : reasoningLength) + Array.from(event.reasoning_delta ?? "").length;
+      const nextContentLength = (reset ? 0 : contentLength) + Array.from(event.content_delta ?? "").length;
+      if ((event.reasoning_length !== undefined && event.reasoning_length !== nextReasoningLength)
+        || (event.content_length !== undefined && event.content_length !== nextContentLength)) {
+        throw new Error("流分片缺失，需要完整快照。");
       }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-      }
-      if (eventSource) {
-        eventSource.close();
-      }
-    };
-
-    const resolveOnce = (job: TurnJobRead) => {
-      if (settled) {
-        return;
-      }
-      cleanup();
-      resolve(job);
-    };
-
-    const rejectOnce = (error: unknown) => {
-      if (settled) {
-        return;
-      }
-      cleanup();
-      reject(error);
-    };
-
-    const startPollingFallback = (message: string) => {
-      if (settled || fallbackStarted) {
-        return;
-      }
-      fallbackStarted = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-      }
-      if (eventSource) {
-        eventSource.close();
-      }
-      onProgress(message);
-      waitForTurnJob(gameId, jobId, onProgress, (job) => {
-        latestJob = mergeTurnJobSnapshot(latestJob, job);
-        onSnapshot(latestJob);
-      })
-        .then(resolveOnce)
-        .catch(rejectOnce);
-    };
-
-    const applySnapshot = (job: TurnJobRead) => {
-      latestJob = mergeTurnJobSnapshot(latestJob, job);
-      onSnapshot(latestJob);
-      if (latestJob.progress_message) {
-        onProgress(latestJob.progress_message);
-      }
-      if (latestJob.status === "completed") {
-        resolveOnce(latestJob);
-      }
-      if (latestJob.status === "failed") {
-        rejectOnce(new Error(latestJob.error_message || "回合生成失败。"));
-      }
-    };
-
-    const applyDelta = (streamEvent: TurnJobStreamEvent) => {
-      const reasoningContent = streamEvent.reset_buffers
-        ? streamEvent.reasoning_delta ?? ""
-        : latestJob.reasoning_content + (streamEvent.reasoning_delta ?? "");
-      const contentBuffer = streamEvent.reset_buffers
-        ? streamEvent.content_delta ?? ""
-        : latestJob.content_buffer + (streamEvent.content_delta ?? "");
-      latestJob = {
-        ...latestJob,
-        status: streamEvent.status ?? latestJob.status,
-        model_used: streamEvent.model_used ?? latestJob.model_used,
-        reasoning_content: reasoningContent,
-        content_buffer: contentBuffer,
-        narrative_buffer: streamEvent.narrative_buffer ?? latestJob.narrative_buffer,
-        progress_message: streamEvent.progress_message ?? latestJob.progress_message,
-        stage: streamEvent.stage ?? latestJob.stage,
-        stage_label: streamEvent.stage_label ?? latestJob.stage_label,
-        stage_index: streamEvent.stage_index ?? latestJob.stage_index,
-        stage_total: streamEvent.stage_total ?? latestJob.stage_total,
-        stage_started_at: streamEvent.stage_started_at ?? latestJob.stage_started_at,
-        last_event_at:
-          streamEvent.last_event_at ?? streamEvent.sent_at ?? latestJob.last_event_at
+      reasoningLength = nextReasoningLength;
+      contentLength = nextContentLength;
+      latest = {
+        ...latest,
+        ...streamMetadata(event),
+        status: event.status ?? latest.status,
+        model_used: event.model_used ?? latest.model_used,
+        reasoning_content: (reset ? "" : latest.reasoning_content) + (event.reasoning_delta ?? ""),
+        content_buffer: (reset ? "" : latest.content_buffer) + (event.content_delta ?? ""),
+        narrative_buffer: event.narrative_buffer ?? (reset ? "" : latest.narrative_buffer),
+        progress_message: event.progress_message ?? latest.progress_message,
+        stage: event.stage ?? latest.stage,
+        stage_label: event.stage_label ?? latest.stage_label,
+        stage_index: event.stage_index ?? latest.stage_index,
+        stage_total: event.stage_total ?? latest.stage_total,
+        stage_started_at: event.stage_started_at ?? latest.stage_started_at,
+        last_event_at: event.last_event_at ?? event.sent_at ?? latest.last_event_at
       };
-      onSnapshot(latestJob);
-      if (streamEvent.progress_message) {
-        onProgress(streamEvent.progress_message);
-      }
-    };
-
-    const handleStreamEvent = (message: MessageEvent) => {
-      if (settled || fallbackStarted) {
-        return;
-      }
-      hasReceivedEvent = true;
-      if (connectTimer !== null) {
-        window.clearTimeout(connectTimer);
-        connectTimer = null;
-      }
-      if (errorTimer !== null) {
-        window.clearTimeout(errorTimer);
-        errorTimer = null;
-      }
-
-      let streamEvent: TurnJobStreamEvent;
-      try {
-        streamEvent = parseTurnJobStreamEvent(message);
-      } catch {
-        startPollingFallback("实时剧情事件解析失败，已切换为轮询确认任务状态。");
-        return;
-      }
-
-      if (streamEvent.job) {
-        applySnapshot(streamEvent.job);
-        return;
-      }
-      if (streamEvent.type === "delta" || streamEvent.type === "progress") {
-        applyDelta(streamEvent);
-      }
-    };
-
-    const streamEventNames: TurnJobStreamEvent["type"][] = [
-      "snapshot",
-      "delta",
-      "progress",
-      "completed",
-      "failed",
-      "heartbeat"
-    ];
-
-    try {
-      eventSource = createTurnJobEventSource(gameId, jobId);
-      for (const eventName of streamEventNames) {
-        eventSource.addEventListener(eventName, handleStreamEvent as EventListener);
-      }
-      eventSource.onerror = () => {
-        if (settled || fallbackStarted || errorTimer !== null) {
-          return;
-        }
-        const delay = hasReceivedEvent ? turnStreamErrorFallbackMs : 1500;
-        errorTimer = window.setTimeout(() => {
-          startPollingFallback("实时剧情连接中断，已切换为轮询确认任务状态。");
-        }, delay);
-      };
-      connectTimer = window.setTimeout(() => {
-        startPollingFallback("实时剧情连接超时，已切换为轮询确认任务状态。");
-      }, turnStreamConnectTimeoutMs);
-    } catch (caught) {
-      startPollingFallback(
-        caught instanceof Error
-          ? `实时剧情连接失败，已切换为轮询：${caught.message}`
-          : "实时剧情连接失败，已切换为轮询确认任务状态。"
-      );
-    }
+      onSnapshot(latest);
+      if (event.progress_message) onProgress(event.progress_message);
+    },
+    refresh: async () => applySnapshot(await getTurnJob(gameId, jobId, signal), true),
+    poll: () => waitForTurnJob(gameId, jobId, onProgress, job => applySnapshot(job, true), signal),
+    onFallback: onProgress,
+    label: "实时剧情",
+    signal
   });
 }
 
-export function formatLastEvent(value: string | null): string {
-  if (!value) {
-    return "暂无";
-  }
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) {
-    return "未知";
-  }
-  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 2) {
-    return "刚刚";
-  }
-  if (seconds < 60) {
-    return `${seconds} 秒前`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes} 分钟前`;
+function streamMetadata(event: TurnJobStreamEvent) {
+  return Object.fromEntries(Object.entries({
+    stream_revision: event.stream_revision, event_seq: event.event_seq,
+    timeline_generation: event.timeline_generation, game_revision: event.game_revision
+  }).filter(([, value]) => value !== undefined));
 }
 
 export function isTurnMaintenanceActive(job: StoryProcessJob | TurnJobRead | null): boolean {
@@ -291,11 +176,12 @@ export async function waitForTurnMaintenance(
   gameId: string,
   jobId: string,
   onProgress: (message: string) => void,
-  onSnapshot: (job: TurnJobRead) => void
+  onSnapshot: (job: TurnJobRead) => void,
+  signal?: AbortSignal
 ) {
   for (let attempt = 0; attempt < turnMaintenanceMaxPolls; attempt += 1) {
-    await sleep(turnPollIntervalMs);
-    const job = await getTurnJob(gameId, jobId);
+    await sleep(turnPollIntervalMs, signal);
+    const job = await getTurnJob(gameId, jobId, signal);
     onSnapshot(job);
     if (!isTurnMaintenanceActive(job)) {
       return job;
@@ -311,29 +197,27 @@ async function waitForTurnJob(
   gameId: string,
   jobId: string,
   onProgress: (message: string) => void,
-  onSnapshot: (job: TurnJobRead) => void
+  apply: (job: TurnJobRead) => StreamResult<TurnJobRead>,
+  signal?: AbortSignal
 ) {
   for (let attempt = 0; attempt < turnMaxPolls; attempt += 1) {
-    await sleep(turnPollIntervalMs);
-    const job = await getTurnJob(gameId, jobId);
-    onSnapshot(job);
-    if (job.status === "completed") {
-      return job;
+    await sleep(turnPollIntervalMs, signal);
+    const job = await getTurnJob(gameId, jobId, signal);
+    if (signal?.aborted) throw abortError();
+    const result = apply(job);
+    if (result) {
+      if ("error" in result) throw result.error;
+      return result.done;
     }
-    if (job.status === "failed") {
-      throw new Error(job.error_message || "回合生成失败。");
-    }
-    onProgress(
-      buildJobProgressMessage(job, "回合任务", (attempt + 1) * turnPollIntervalMs)
-    );
+    onProgress(buildJobProgressMessage(job, "回合任务", (attempt + 1) * turnPollIntervalMs));
   }
-  throw new Error(
-    `回合生成已等待 14 分钟，任务仍未完成。任务 ID：${jobId}。请稍后刷新或联系我查看任务状态。`
-  );
+  throw new Error(`回合生成已等待 14 分钟，任务仍未完成。任务 ID：${jobId}。请稍后刷新确认任务状态。`);
 }
 
-function mergeTurnJobSnapshot(current: TurnJobRead, incoming: TurnJobRead): TurnJobRead {
-  if (incoming.status === "completed" || incoming.status === "failed") {
+export function mergeTurnJobSnapshot(current: TurnJobRead, incoming: TurnJobRead): TurnJobRead {
+  if ((incoming.stream_revision ?? 0) > (current.stream_revision ?? 0)
+    || (incoming.timeline_generation ?? 0) > (current.timeline_generation ?? 0)
+    || incoming.status === "completed" || incoming.status === "failed") {
     return incoming;
   }
 
@@ -387,8 +271,4 @@ export function formatMaintenanceStage(stage: string | null): string {
     return "维护完成";
   }
   return "状态维护";
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

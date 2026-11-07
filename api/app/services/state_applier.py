@@ -4,9 +4,11 @@ from typing import Any
 
 from app.models.state import GameState
 from app.models.turn import Turn
+from app.services.progress_rules import ProgressRules
 from app.services.quantified_state import apply_quantified_state_events
 from app.services.state_v2 import normalize_state_v2
 from app.services.story_settings import (
+    progress_rules_from_config,
     story_settings_from_config,
     transition_target_for_act,
 )
@@ -68,12 +70,18 @@ def apply_state_delta(
     current_state: GameState,
     turn: Turn,
     delta: dict[str, Any],
+    *,
+    rules: ProgressRules | None = None,
 ) -> dict[str, Any]:
-    state = deepcopy(current_state.state_json or {})
+    # v2 is a derived projection, rebuilt below; copying the previous projection
+    # duplicates NPC/quest/relationship data and cannot affect any domain update.
+    state = deepcopy({
+        key: value for key, value in (current_state.state_json or {}).items() if key != "v2"
+    })
     state["current_turn"] = max(int(state.get("current_turn") or 0), turn.turn_number)
 
     game = getattr(current_state, "game", None)
-    config = getattr(game, "config", None)
+    config = rules or progress_rules_from_config(getattr(game, "config", None))
 
     _apply_time(state, delta)
     _apply_location(state, delta)
@@ -715,6 +723,7 @@ def _numeric(value: Any) -> float | None:
 def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config: Any) -> None:
     if not isinstance(update, dict):
         return
+    config = progress_rules_from_config(config)
 
     next_act = _text(
         update.get("current_act")
@@ -787,6 +796,8 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
             for anchor_id in completed_anchors
             if _identity(anchor_id) in legal_anchor_ids
         ]
+    rules = progress_rules_from_config(config)
+    previous_required_done = rules.progress(previous_act, anchor_target)["done"]
     new_anchor_ids: list[str] = []
     for anchor_id in completed_anchors:
         if anchor_id and anchor_id not in anchor_target:
@@ -794,7 +805,8 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
             new_anchor_ids.append(anchor_id)
 
     if new_anchor_ids:
-        progress["last_anchor_update_turn"] = turn.turn_number
+        if rules.progress(previous_act, anchor_target)["done"] > previous_required_done:
+            progress["last_anchor_update_turn"] = turn.turn_number
         anchor_history = progress.setdefault("anchor_history", [])
         if not isinstance(anchor_history, list):
             anchor_history = []
@@ -853,6 +865,7 @@ def _apply_story_progress(state: dict[str, Any], turn: Turn, update: Any, config
 
 
 def _sync_story_progress_and_quests(state: dict[str, Any], turn: Turn, config: Any) -> None:
+    config = progress_rules_from_config(config)
     settings = story_settings_from_config(config)
     acts = _script_acts(config)
     if not acts:
@@ -980,18 +993,11 @@ def _advance_story_progress(
 
 def _anchor_ids_for_acts(config: Any, act_ids: set[str]) -> set[str]:
     """收集给定幕集合（当前幕 + 已完成幕）下所有 completion_anchors 的 id，作为合法白名单。"""
-    ids: set[str] = set()
-    if not act_ids:
-        return ids
-    for act in _script_acts(config):
-        if not set(_act_identifiers(act)) & act_ids:
-            continue
-        for anchor in act.get("completion_anchors") or []:
-            if isinstance(anchor, dict):
-                anchor_id = _text(anchor.get("id"))
-                if anchor_id:
-                    ids.add(anchor_id)
-    return ids
+    rules = progress_rules_from_config(config)
+    return {
+        _identity(anchor) for act_id in act_ids for anchor in rules.anchors(act_id)
+        if _identity(anchor)
+    }
 
 
 def _sync_current_act_from_completed_anchors(
@@ -999,20 +1005,15 @@ def _sync_current_act_from_completed_anchors(
     config: Any,
     completed_anchors: list[Any],
 ) -> str:
-    acts = _script_acts(config)
+    rules = progress_rules_from_config(config)
+    acts = rules.acts
     act_ids = [_act_identity(act) for act in acts]
     act_ids = [act_id for act_id in act_ids if act_id]
     if not act_ids:
         return _text(progress.get("current_act") or progress.get("act"))
 
-    act_index_by_identifier: dict[str, int] = {}
-    anchor_act_index: dict[str, int] = {}
-    for index, act in enumerate(acts):
-        for identifier in _act_identifiers(act):
-            act_index_by_identifier.setdefault(identifier, index)
-        for anchor in act.get("completion_anchors") or []:
-            for identifier in _anchor_identifiers(anchor):
-                anchor_act_index.setdefault(identifier, index)
+    act_index_by_identifier = rules.act_index
+    anchor_act_index = rules.anchor_act_index
 
     current_act = _text(progress.get("current_act") or progress.get("act")) or act_ids[0]
     current_index = act_index_by_identifier.get(current_act)
@@ -1049,49 +1050,14 @@ def _completion_anchor_records_for_act(
     *,
     required_only: bool,
 ) -> list[dict[str, Any]]:
-    for act in _script_acts(config):
-        if act_id not in _act_identifiers(act):
-            continue
-        anchors = []
-        for anchor in act.get("completion_anchors") or []:
-            if not isinstance(anchor, dict):
-                continue
-            if required_only and not _bool(anchor.get("required"), True):
-                continue
-            anchors.append(anchor)
-        return anchors
-    return []
+    return progress_rules_from_config(config).anchors(act_id, required_only=required_only)
 
 
 def _required_anchor_requirements_for_act(
     config: Any,
     act_id: str,
 ) -> list[list[str]]:
-    requirements: list[list[str]] = []
-    grouped: dict[str, list[str]] = {}
-    for anchor in _completion_anchor_records_for_act(config, act_id, required_only=True):
-        anchor_id = _identity(anchor)
-        if not anchor_id:
-            continue
-        alternative_group = _anchor_alternative_group(anchor)
-        if alternative_group:
-            group = grouped.get(alternative_group)
-            if group is None:
-                group = []
-                grouped[alternative_group] = group
-                requirements.append(group)
-            group.append(anchor_id)
-            continue
-        requirements.append([anchor_id])
-    return [requirement for requirement in requirements if requirement]
-
-
-def _anchor_alternative_group(anchor: dict[str, Any]) -> str:
-    return _text(
-        anchor.get("alternative_group")
-        or anchor.get("alt_group")
-        or anchor.get("alternativeGroup")
-    )
+    return progress_rules_from_config(config).requirements(act_id)
 
 
 def _anchor_requirement_progress(
@@ -1099,16 +1065,7 @@ def _anchor_requirement_progress(
     current_act: str,
     completed_anchors: list[Any],
 ) -> dict[str, int]:
-    requirements = _required_anchor_requirements_for_act(config, current_act)
-    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    return {
-        "done": sum(
-            1
-            for requirement in requirements
-            if any(anchor_id in completed for anchor_id in requirement)
-        ),
-        "total": len(requirements),
-    }
+    return progress_rules_from_config(config).progress(current_act, completed_anchors)
 
 
 def _first_unsatisfied_required_anchor_for_act(
@@ -2002,14 +1959,7 @@ def _computed_ready_for_next_act(
     current_act: str,
     completed_anchors: list[Any],
 ) -> bool | None:
-    requirements = _required_anchor_requirements_for_act(config, current_act)
-    if not requirements:
-        return None
-    completed = {_identity(anchor_id) for anchor_id in completed_anchors if _identity(anchor_id)}
-    return all(
-        any(anchor_id in completed for anchor_id in requirement)
-        for requirement in requirements
-    )
+    return progress_rules_from_config(config).ready(current_act, completed_anchors)
 
 
 def _can_advance_to_act(
@@ -2051,6 +2001,8 @@ def _allowed_transition_targets(config: Any, current_act: str) -> set[str]:
 
 
 def _adjacent_next_act(config: Any, current_act: str) -> str:
+    if isinstance(config, ProgressRules):
+        return config.adjacent(current_act)
     acts = _script_acts(config)
     for index, act in enumerate(acts):
         if current_act not in _act_identifiers(act):
@@ -2064,10 +2016,14 @@ def _adjacent_next_act(config: Any, current_act: str) -> str:
 
 
 def _act_exists(config: Any, act_id: str) -> bool:
+    if isinstance(config, ProgressRules):
+        return act_id in config.act_by_identifier
     return any(act_id in _act_identifiers(act) for act in _script_acts(config))
 
 
 def _script_acts(config: Any) -> list[dict[str, Any]]:
+    if isinstance(config, ProgressRules):
+        return config.acts
     settings = getattr(config, "story_settings", None)
     if not isinstance(settings, dict):
         return []
@@ -2088,6 +2044,8 @@ def _act_identity(act: dict[str, Any]) -> str:
 
 
 def _act_record_for(config: Any, act_id: str) -> dict[str, Any]:
+    if isinstance(config, ProgressRules):
+        return config.act_by_identifier.get(act_id, {})
     if not act_id:
         return {}
     for act in _script_acts(config):
@@ -2102,19 +2060,6 @@ def _act_identifiers(act: dict[str, Any]) -> list[str]:
         _text(act.get("key")),
         _text(act.get("name")),
         _text(act.get("title")),
-    ]
-    return [identifier for identifier in identifiers if identifier]
-
-
-def _anchor_identifiers(anchor: Any) -> list[str]:
-    if not isinstance(anchor, dict):
-        identifier = _identity(anchor)
-        return [identifier] if identifier else []
-    identifiers = [
-        _text(anchor.get("id")),
-        _text(anchor.get("key")),
-        _text(anchor.get("name")),
-        _text(anchor.get("title")),
     ]
     return [identifier for identifier in identifiers if identifier]
 

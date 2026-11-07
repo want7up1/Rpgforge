@@ -199,4 +199,13 @@ turn_stream_event_broker = TurnStreamEventBroker(namespace="turn")
 
 def format_sse_event(event_type: str, payload: TurnStreamEvent) -> str:
     encoded = json.dumps(jsonable_encoder(payload), ensure_ascii=False)
-    return f"event: {event_type}\ndata: {encoded}\n\n"
+    job = payload.get("job")
+    metadata = job if isinstance(job, dict) else vars(job) if job is not None else payload
+    sequence = metadata.get("event_seq")
+    event_id = ""
+    if sequence is not None:
+        event_id = (
+            f"id: {metadata.get('timeline_generation', 0)}:"
+            f"{metadata.get('stream_revision', 0)}:{sequence}\n"
+        )
+    return f"{event_id}event: {event_type}\ndata: {encoded}\n\n"

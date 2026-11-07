@@ -74,6 +74,8 @@ class GameListItem(BaseModel):
     genre: str | None
     description: str | None
     status: str
+    revision: int = 0
+    timeline_generation: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -125,6 +127,8 @@ class GameProgressSaveRead(BaseModel):
     game_id: UUID
     name: str
     note: str | None
+    snapshot_version: int = 1
+    config_hash: str | None = None
     state_current_turn: int
     turn_count: int
     summary_count: int

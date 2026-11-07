@@ -1,5 +1,6 @@
 "use client";
 
+import { NarrativeInventory } from "@/components/NarrativeState";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -104,6 +105,10 @@ function StatusView({ game, stateV2 }: { game: GameDetail; stateV2: StateV2 }) {
       </section>
 
       <ConditionsPanel conditions={stateV2.conditions} />
+      <section className="px-panel px-panel-pad">
+        <h2 className="px-heading text-base">随身物品</h2>
+        <NarrativeInventory items={stateV2.inventory} />
+      </section>
       <RelationshipsPanel relationships={stateV2.relationship_tracks} />
       <QuestThreadPanel stateV2={stateV2} />
       <NpcPanel stateV2={stateV2} />
@@ -138,6 +143,7 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <CompactField label="当前幕" value={formatStoryProgress(storyProgress)} />
         <CompactField label="幕完成锚点" value={formatAnchorProgress(storyProgress)} />
+        <CompactField label="当前目标" value={storyProgress.current_act_objective || "暂无"} />
         <CompactField label="地点" value={scene.location || "未记录"} />
         <CompactField label="时间" value={scene.time || "未记录"} />
         <CompactField label="压力" value={scene.pressure || "暂无"} />
@@ -157,7 +163,7 @@ function ScenePanel({ stateV2 }: { stateV2: StateV2 }) {
 }
 
 function formatStoryProgress(progress: StateV2["story_progress"]): string {
-  const currentAct = progress.current_act || "未记录";
+  const currentAct = progress.current_act_title || progress.current_act || "未记录";
   const advanceNote =
     progress.last_advance_turn !== null ? `第 ${progress.last_advance_turn} 回合推进` : "";
   return [currentAct, advanceNote].filter(Boolean).join(" · ");
@@ -329,6 +335,7 @@ function QuestThreadPanel({ stateV2 }: { stateV2: StateV2 }) {
 }
 
 function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
+  const currentRelationships = new Map(stateV2.relationship_tracks.map(track => [track.npc, track.status]));
   return (
     <section className="px-panel px-panel-pad">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -343,7 +350,7 @@ function NpcPanel({ stateV2 }: { stateV2: StateV2 }) {
             <article className="px-card" key={npc.id || npc.name}>
               <h3 className="font-bold text-[color:var(--phosphor)]">{npc.name}</h3>
               <p className="px-wrap mt-2 text-sm leading-6 text-[color:var(--muted)]">
-                {[npc.identity, npc.status, npc.location, npc.relationship || npc.attitude]
+                {[npc.identity, npc.status, npc.location, currentRelationships.get(npc.name) || npc.relationship || npc.attitude]
                   .filter(Boolean)
                   .join(" · ") || "暂无更多记录。"}
               </p>

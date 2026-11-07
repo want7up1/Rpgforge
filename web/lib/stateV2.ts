@@ -1,4 +1,5 @@
 import type { GameDetail } from "@/lib/types";
+import { isPrivateVisibility } from "@/lib/privateVisibility";
 
 // 纯叙事改造：主角档案只剩姓名/身份/处境文字，删除等级/经验/属性/技能/能力。
 export type ProtagonistSheet = {
@@ -32,12 +33,14 @@ export type NpcRegistryItem = {
   location: string;
   relationship: string;
   attitude: string;
+  visibility: string;
 };
 
 export type QuestItem = {
   name: string;
   status: string;
   objective: string;
+  visibility: string;
 };
 
 export type QuestLog = {
@@ -51,6 +54,7 @@ export type ThreadItem = {
   title: string;
   status: string;
   source: string;
+  visibility: string;
 };
 
 export type ThreadLog = {
@@ -95,11 +99,14 @@ export type RelationshipTrack = {
   visibility: string;
 };
 
+export type InventoryItem = { name: string; description: string; quantity?: number; unit?: string; visibility: string };
+
 export type StateV2 = {
   version: number;
   active_scene: ActiveSceneState;
   protagonist_sheet: ProtagonistSheet;
   conditions: ConditionState[];
+  inventory: InventoryItem[];
   party: string[];
   npc_registry: NpcRegistryItem[];
   quest_log: QuestLog;
@@ -117,20 +124,30 @@ export function getStateV2(stateJson: Record<string, unknown> | null | undefined
   const rawV2 = asRecord(root.v2);
   const conditions = normalizeConditions(rawV2.conditions ?? root.conditions);
   const protagonist = normalizeProtagonist(rawV2.protagonist_sheet, root.protagonist, conditions);
+  const rawNpcs = rawV2.npc_registry ?? root.npcs;
+  // 先从完整登记册收集私有人名，再投影；过滤后再收集会失去判断依据。
+  const hiddenNames = new Set([...asRecordList(rawNpcs), ...asRecordList(root.npcs)].filter(item => isPrivateVisibility(item.visibility))
+    .flatMap(item => [identity(item), ...asStringList(item.aliases)]).map(name => name.trim().toLowerCase()));
+  const visibleName = (name: string) => !hiddenNames.has(name.trim().toLowerCase());
+  const scene = normalizeActiveScene(rawV2.active_scene, root);
+  const storyProgress = normalizeStoryProgress(firstRecord([rawV2.story_progress, root.story_progress]));
+  // The old ending writer updated only root.epilogue; preserve other legacy v2 precedence.
+  const rootEpilogue = asRecord(root.story_progress).epilogue;
+  if (typeof rootEpilogue === "string") storyProgress.epilogue = rootEpilogue;
 
   return {
     version: asNumber(rawV2.version, 1),
-    active_scene: normalizeActiveScene(rawV2.active_scene, root),
+    active_scene: { ...scene, present_npcs: scene.present_npcs.filter(visibleName) },
     protagonist_sheet: protagonist,
     conditions,
-    party: asStringList(rawV2.party ?? root.party),
-    npc_registry: normalizeNpcRegistry(rawV2.npc_registry ?? root.npcs),
+    inventory: normalizeInventory(rawV2.inventory ?? root.inventory),
+    party: asStringList(rawV2.party ?? root.party).filter(visibleName),
+    npc_registry: normalizeNpcRegistry(rawNpcs),
     quest_log: normalizeQuestLog(rawV2.quest_log, root.quests),
     open_threads: normalizeThreadLog(rawV2.open_threads, root.open_threads),
-    story_progress: normalizeStoryProgress(
-      firstRecord([rawV2.story_progress, root.story_progress])
-    ),
+    story_progress: storyProgress,
     relationship_tracks: normalizeRelationships(rawV2.relationship_tracks ?? root.relationships)
+      .filter(track => visibleName(track.npc))
   };
 }
 
@@ -174,7 +191,25 @@ function normalizeConditions(value: unknown): ConditionState[] {
       source: asString(item.source),
       visibility: asString(item.visibility) || "known"
     }))
-    .filter((condition) => condition.name);
+    .filter((condition) => condition.name && !isPrivateVisibility(condition.visibility));
+}
+
+function normalizeInventory(value: unknown): InventoryItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(item => {
+    const record = typeof item === "string" ? { name: item } : asRecord(item);
+    const quantity = inventoryQuantity(record.quantity ?? record.qty);
+    return {
+      name: asString(record.name) || asString(record.item) || identity(record), description: asString(record.description) || asString(record.note),
+      visibility: asString(record.visibility) || "known", unit: asString(record.unit), ...(quantity === undefined ? {} : { quantity })
+    };
+  }).filter(item => item.name && !isPrivateVisibility(item.visibility) && item.quantity !== 0);
+}
+
+function inventoryQuantity(value: unknown): number | undefined {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return undefined;
+  const quantity = Number(value);
+  return Number.isFinite(quantity) && quantity >= 0 ? quantity : undefined;
 }
 
 function normalizeNpcRegistry(value: unknown): NpcRegistryItem[] {
@@ -188,10 +223,11 @@ function normalizeNpcRegistry(value: unknown): NpcRegistryItem[] {
         status: asString(item.status) || asString(item.state),
         location: asString(item.location) || asString(item.current_location),
         relationship: asString(item.relationship),
-        attitude: asString(item.attitude)
+        attitude: asString(item.attitude),
+        visibility: asString(item.visibility) || "known"
       };
     })
-    .filter((npc) => npc.name);
+    .filter((npc) => npc.name && !isPrivateVisibility(npc.visibility));
 }
 
 function normalizeQuestLog(rawLog: unknown, rawQuests: unknown): QuestLog {
@@ -201,7 +237,7 @@ function normalizeQuestLog(rawLog: unknown, rawQuests: unknown): QuestLog {
       active: normalizeQuestItems(log.active),
       completed: normalizeQuestItems(log.completed),
       failed: normalizeQuestItems(log.failed),
-      hidden: normalizeQuestItems(log.hidden)
+      hidden: []
     };
   }
   return {
@@ -217,9 +253,10 @@ function normalizeQuestItems(value: unknown): QuestItem[] {
     .map((item) => ({
       name: identity(item),
       status: asString(item.status) || asString(item.state) || "active",
-      objective: asString(item.objective) || asString(item.current) || asString(item.description)
+      objective: asString(item.objective) || asString(item.current) || asString(item.description),
+      visibility: asString(item.visibility) || "known"
     }))
-    .filter((quest) => quest.name);
+    .filter((quest) => quest.name && !isPrivateVisibility(quest.visibility));
 }
 
 function normalizeThreadLog(rawLog: unknown, rawThreads: unknown): ThreadLog {
@@ -241,16 +278,17 @@ function normalizeThreadItems(value: unknown): ThreadItem[] {
     return value
       .map((item) => {
         if (typeof item === "string") {
-          return { title: item, status: "active", source: "" };
+          return { title: item, status: "active", source: "", visibility: "known" };
         }
         const record = asRecord(item);
         return {
           title: asString(record.title) || asString(record.name) || asString(record.description),
           status: asString(record.status) || asString(record.state) || "active",
-          source: asString(record.source)
+          source: asString(record.source),
+          visibility: asString(record.visibility) || "known"
         };
       })
-      .filter((thread) => thread.title);
+      .filter((thread) => thread.title && !isPrivateVisibility(thread.visibility));
   }
   return [];
 }
@@ -314,7 +352,7 @@ function normalizeRelationships(value: unknown): RelationshipTrack[] {
       note: asString(item.note) || asString(item.recent_interaction),
       visibility: asString(item.visibility) || "known"
     }))
-    .filter((track) => track.npc);
+    .filter((track) => track.npc && !isPrivateVisibility(track.visibility));
 }
 
 // 线索 status 的中文映射。后端可能写入英文枚举（active/resolved…），直显会泄露原始值。

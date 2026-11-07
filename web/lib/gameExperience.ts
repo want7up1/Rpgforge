@@ -1,7 +1,5 @@
+import { isPrivateVisibility } from "@/lib/privateVisibility";
 import type {
-  ConfirmedRequirements,
-  GameDetail,
-  GeneratedGameConfig,
   SummaryRead,
   TurnRead
 } from "@/lib/types";
@@ -16,17 +14,8 @@ export type TurnSettlementView = {
   hasChanges: boolean;
   summary: string[];
   sections: TurnSettlementSection[];
-};
-
-export type ContractSectionView = {
-  key: string;
-  label: string;
-  items: string[];
-};
-
-export type ContractView = {
-  hasContent: boolean;
-  sections: ContractSectionView[];
+  status: "confirmed" | "pending" | "skipped" | "failed" | "rejected" | "legacy";
+  message: string;
 };
 
 export type ChapterView = {
@@ -40,143 +29,27 @@ export type ChapterView = {
   turns: TurnRead[];
 };
 
-export type StoryBlueprintView = {
-  title: string;
-  description: string;
-  centralQuestion: string;
-  openingStage: string;
-  currentAct: string;
-  currentActGoal: string;
-  mustPreserve: string[];
-  mustNotBecome: string[];
-  pressureClock: string[];
-};
-
-export function normalizeConfirmedRequirements(
-  value: unknown,
-  rawUserInput = ""
-): ConfirmedRequirements {
-  const record = asRecord(value);
-  const storyBackground =
-    pickString(record, ["story_background", "background", "setting"]) ||
-    compactList([
-      pickString(record, ["genre"]),
-      pickString(record, ["world_style"])
-    ]).join("；");
-  const corePremise =
-    pickString(record, ["core_premise", "premise"]) ||
-    compactList([
-      pickString(record, ["player_fantasy"]),
-      pickString(record, ["protagonist_identity"]),
-      pickString(record, ["core_gameplay"])
-    ]).join("；");
-
-  return {
-    story_background: storyBackground,
-    core_premise: corePremise,
-    must_include: unique([
-      ...pickList(record, ["must_include"]),
-      ...pickList(record, ["must_hit_beats"]),
-      ...pickList(record, ["relationship_focus"])
-    ]),
-    forbidden_content: unique([
-      ...pickList(record, ["forbidden_content"]),
-      ...pickList(record, ["forbidden_elements"]),
-      ...pickList(record, ["forbidden_drift"])
-    ]),
-    playstyle_preferences: unique([
-      ...pickList(record, ["playstyle_preferences"]),
-      ...pickList(record, ["rule_complexity"]),
-      ...pickList(record, ["failure_cost"]),
-      ...pickList(record, ["core_gameplay"])
-    ]),
-    tone_preferences: unique([
-      ...pickList(record, ["tone_preferences"]),
-      ...pickList(record, ["world_style"]),
-      ...pickList(record, ["pacing_preference"])
-    ]),
-    raw_user_input: pickString(record, ["raw_user_input"]) || rawUserInput
-  };
-}
-
-export function buildGeneratedConfigBlueprint(config: GeneratedGameConfig): StoryBlueprintView {
-  const storySettings = asRecord(config.story_settings);
-  return buildBlueprintFromParts({
-    title: config.title,
-    description: config.description ?? "",
-    storySettings,
-    loreCount: asList(storySettings.story_material_library).length,
-    modeCount: asList(storySettings.action_style_rules).length
-  });
-}
-
-export function buildGameBlueprint(game: GameDetail): StoryBlueprintView {
-  const storySettings = asRecord(game.config?.story_settings);
-  return buildBlueprintFromParts({
-    title: game.title,
-    description: game.description ?? "",
-    storySettings,
-    stateJson: game.state?.state_json,
-    loreCount: asList(storySettings.story_material_library).length,
-    modeCount: asList(storySettings.action_style_rules).length
-  });
-}
-
-function buildBlueprintFromParts({
-  title,
-  description,
-  storySettings,
-  stateJson
-}: {
-  title: string;
-  description: string;
-  storySettings: Record<string, unknown>;
-  stateJson?: Record<string, unknown>;
-  loreCount: number;
-  modeCount: number;
-}): StoryBlueprintView {
-  const worldview = asRecord(storySettings.worldview);
-  const core = asRecord(storySettings.story_core);
-  const acts = asList(storySettings.act_plan);
-  const stateRoot = asRecord(stateJson);
-  const runtimeProgress = firstRecord([
-    stateRoot.story_progress,
-    asRecord(stateRoot.v2).story_progress
-  ]);
-  const currentActId =
-    pickString(runtimeProgress, ["current_act", "act"]) ||
-    pickString(core, ["current_act", "act", "stage", "phase"]);
-  const currentAct = findAct(acts, currentActId);
-  const firstAct = asRecord(acts[0]);
-
-  return {
-    title,
-    description,
-    centralQuestion:
-      pickString(core, ["central_mystery", "central_question"]) ||
-      pickString(currentAct, ["dramatic_question"]),
-    openingStage: pickString(worldview, ["setting", "opening_stage", "summary"]),
-    currentAct: compactList([
-      currentActId,
-      pickString(currentAct, ["name", "title"])
-    ]).join(" · "),
-    currentActGoal:
-      pickString(currentAct, ["objective", "goal"]) ||
-      pickString(firstAct, ["objective", "goal"]) ||
-      pickString(core, ["main_goal", "premise"]),
-    mustPreserve: unique([
-      ...pickList(core, ["must_preserve"])
-    ]),
-    mustNotBecome: unique([
-      ...pickList(core, ["must_not_become"]),
-      ...pickList(core, ["forbidden_drift"])
-    ]),
-    pressureClock: readableLines(storySettings.main_quest_path).slice(0, 4)
-  };
-}
-
 // 纯叙事结算条：只汇总文字增量（关系/状态/线索/局面），无数字、无经验/技能、无行动判定后果。
 export function buildTurnSettlement(turn: TurnRead): TurnSettlementView {
+  const receipt = turn.settlement_receipt;
+  if (receipt?.version === 1 && Array.isArray(receipt.sections)
+    && ["confirmed", "pending", "skipped", "failed", "rejected"].includes(receipt.status)) {
+    const sections = receipt.sections.filter(section => section && Array.isArray(section.changes)).map(section => ({
+      key: pickString(asRecord(section), ["key"]), label: pickString(asRecord(section), ["label"]),
+      items: section.changes.map(change => {
+        const record = asRecord(change);
+        const before = pickString(record, ["before"]), after = pickString(record, ["after"]);
+        const transition = before && after ? `${before} → ${after}` : after || before;
+        const reason = pickString(record, ["reason"]);
+        return compactList([pickString(record, ["subject"]), transition, reason && !transition.includes(reason) ? reason : ""]).join(" · ");
+      }).filter(Boolean)
+    })).filter(section => section.items.length);
+    return {
+      hasChanges: sections.length > 0, sections, status: receipt.status,
+      summary: sections.flatMap(section => section.items.slice(0, 2).map(item => `${section.label}：${item}`)).slice(0, 4),
+      message: pickString(asRecord(receipt), ["message"]) || ({ confirmed: "已核验本回合实际变化", pending: "剧情已生成，状态正在整理。", skipped: "本回合状态未能确认，已跳过状态更新并保留剧情。", failed: "本回合状态整理失败，请稍后恢复。", rejected: "本回合状态变化未被采用。" }[receipt.status])
+    };
+  }
   const delta = asRecord(turn.state_delta_json);
   const sections: TurnSettlementSection[] = [];
 
@@ -208,121 +81,9 @@ export function buildTurnSettlement(turn: TurnRead): TurnSettlementView {
   return {
     hasChanges: sections.length > 0,
     summary: summary.slice(0, 4),
-    sections
-  };
-}
-
-export function buildContractView(game: GameDetail): ContractView {
-  const storySettings = asRecord(game.config?.story_settings);
-  const profile = asRecord(storySettings.game_profile);
-  const worldview = asRecord(storySettings.worldview);
-  const storyCore = asRecord(storySettings.story_core);
-  const hardRules = asRecord(storySettings.hard_rules);
-  const acts = asList(storySettings.act_plan);
-  const stateRoot = asRecord(game.state?.state_json);
-  const runtimeProgress = firstRecord([
-    stateRoot.story_progress,
-    asRecord(stateRoot.v2).story_progress
-  ]);
-  const currentActId =
-    pickString(runtimeProgress, ["current_act", "act"]) ||
-    pickString(storyCore, ["current_act", "act", "stage", "phase"]);
-  const currentAct = findAct(acts, currentActId);
-  const firstAct = asRecord(acts[0]);
-
-  const sections: ContractSectionView[] = [
-    {
-      key: "brief",
-      label: "故事种子",
-      items: compactList([
-        pickString(storyCore, ["premise"]),
-        pickString(storyCore, ["core_fantasy"]),
-        pickString(profile, ["genre"]),
-        pickString(profile, ["description"]) || game.description
-      ])
-    },
-    {
-      key: "question",
-      label: "核心悬念",
-      items: compactList([
-        pickString(storyCore, ["central_mystery", "central_question"]),
-        pickString(currentAct, ["dramatic_question"]),
-      ])
-    },
-    {
-      key: "goal",
-      label: "主线目标",
-      items: compactList([
-        pickString(storyCore, ["main_goal", "core_goal", "objective", "goal", "campaign_goal"]),
-        pickString(currentAct, ["objective", "goal"]),
-        pickString(firstAct, ["objective", "goal"]),
-        pickString(storyCore, ["premise"])
-      ])
-    },
-    {
-      key: "act",
-      label: "当前幕",
-      items: compactList([
-        currentActId,
-        pickString(currentAct, ["name", "title"]),
-        pickString(currentAct, ["objective", "goal"])
-      ])
-    },
-    {
-      key: "must",
-      label: "必须保留",
-      items: compactList([
-        ...pickList(storyCore, ["must_preserve"]),
-        ...pickList(hardRules, ["must_follow"]),
-        ...pickList(currentAct, ["must_hit_beats"])
-      ])
-    },
-    {
-      key: "guardrails",
-      label: "禁止变成",
-      items: compactList([
-        ...pickList(storyCore, ["must_not_become"]),
-        ...pickList(storyCore, [
-          "forbidden_drift",
-          "forbidden_deviations",
-          "forbidden_points",
-          "avoid",
-          "must_not"
-        ]),
-        ...pickList(hardRules, ["must_not"])
-      ])
-    },
-    {
-      key: "style",
-      label: "叙事风格",
-      items: compactList([
-        pickString(worldview, ["tone", "mood"]),
-        pickString(profile, ["tone"]),
-        pickString(storyCore, ["narrative_style", "style", "voice", "pacing"]),
-        ...pickList(storyCore, ["tone_do"]),
-        ...pickList(storyCore, ["tone_dont"]),
-        ...pickList(storyCore, ["pacing_rules"])
-      ])
-    },
-    {
-      key: "conflict",
-      label: "关键 NPC / 关键冲突",
-      items: compactList([
-        ...pickList(storyCore, ["key_npcs", "important_npcs"]),
-        ...namesFromRelationshipArcs(pickList(storyCore, ["relationship_arcs"])),
-        ...pickList(storyCore, ["key_conflicts", "main_conflict"]),
-        ...pickList(worldview, ["key_npcs", "factions", "conflicts", "core_conflicts", "main_conflict"])
-      ])
-    }
-  ];
-  const normalizedSections = sections.map((section) => ({
-    ...section,
-    items: unique(compactList(section.items))
-  }));
-
-  return {
-    hasContent: normalizedSections.some((section) => section.items.length > 0),
-    sections: normalizedSections
+    sections,
+    status: "legacy",
+    message: "旧记录：以下为历史提取结果，尚未核验实际落账。"
   };
 }
 
@@ -397,6 +158,7 @@ function formatEventList(value: unknown, prefix = ""): string[] {
     return [`${prefix ? `${prefix}：` : ""}${String(value)}`];
   }
   const record = asRecord(value);
+  if (isPrivateVisibility(record.visibility)) return [];
   if (Object.keys(record).length === 0) {
     return [];
   }
@@ -435,86 +197,11 @@ function pickString(record: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-function pickList(record: Record<string, unknown>, keys: string[]): string[] {
-  for (const key of keys) {
-    const value = record[key];
-    const list = valueToList(value);
-    if (list.length > 0) {
-      return list;
-    }
-  }
-  return [];
-}
-
-function asList(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function findAct(acts: unknown[], currentActId: string): Record<string, unknown> {
-  if (!currentActId) {
-    return asRecord(acts[0]);
-  }
-  return asRecord(
-    acts.find((item) => {
-      const act = asRecord(item);
-      return ["id", "key", "name", "title"].some((key) => pickString(act, [key]) === currentActId);
-    })
-  );
-}
-
-function namesFromRelationshipArcs(arcs: string[]): string[] {
-  return arcs
-    .map((arc) => arc.split(/[：:]/)[0]?.trim() ?? "")
-    .filter(Boolean);
-}
-
 function valueToList(value: unknown): string[] {
-  if (value === null || value === undefined) {
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap(valueToList);
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return [String(value).trim()].filter(Boolean);
-  }
-  const record = asRecord(value);
-  return Object.values(record)
-    .flatMap(valueToList)
-    .filter(Boolean);
-}
-
-function firstRecord(values: unknown[]): Record<string, unknown> {
-  for (const value of values) {
-    const record = asRecord(value);
-    if (Object.keys(record).length > 0) {
-      return record;
-    }
-  }
-  return {};
-}
-
-function readableLines(value: unknown): string[] {
-  if (value === null || value === undefined) {
-    return [];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap(readableLines);
-  }
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return [String(value).trim()].filter(Boolean);
-  }
-  const record = asRecord(value);
-  if (Object.keys(record).length === 0) {
-    return [];
-  }
-  const title = pickString(record, ["name", "title", "stage", "truth", "clue"]);
-  const detail = compactList([
-    pickString(record, ["tick_condition", "condition"]),
-    pickString(record, ["consequence", "points_to", "reveal_condition", "do_not_reveal"]),
-    pickString(record, ["visibility"])
-  ]).join(" · ");
-  return [compactList([title, detail]).join("：") || compactRecord(record)];
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value.flatMap(valueToList);
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return [String(value).trim()].filter(Boolean);
+  return Object.values(asRecord(value)).flatMap(valueToList).filter(Boolean);
 }
 
 function factsToList(value: Record<string, unknown>): string[] {

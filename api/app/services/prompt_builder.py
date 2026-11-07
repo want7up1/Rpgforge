@@ -5,6 +5,7 @@ from app.models.game import Game
 from app.models.turn import Turn
 from app.schemas.turn import GMRuntimeOutput
 from app.services.act_pacing import compute_act_pacing
+from app.services.context_continuity import recent_continuity_facts, recent_narrative_excerpt
 from app.services.prompt_loader import load_prompt_template
 from app.services.state_v2 import project_state_for_scene, state_v2_view
 from app.services.story_settings import (
@@ -103,6 +104,7 @@ class PromptBuilder:
                 self._retrieval_payload(result) for result in (related_materials or [])
             ],
             "memory_summaries": summaries or {},
+            "recent_continuity_facts": recent_continuity_facts(recent_turns),
             "story_director": _gm_facing_director(story_director),
             "drift_rewrite_instruction": drift_rewrite_instruction or "",
             "previous_gm_output": (
@@ -202,7 +204,7 @@ class PromptBuilder:
         if full:
             # 最近 _RECENT_FULL_TURNS 回合给完整正文供 GM 承接上一回合结尾；不再附
             # gm_output_excerpt（它是完整正文的前缀子串，纯冗余浪费 token）。
-            payload["gm_output"] = _trim_text(turn.gm_output, _RECENT_FULL_CHARS)
+            payload["gm_output"] = recent_narrative_excerpt(turn.gm_output, _RECENT_FULL_CHARS)
         else:
             payload["gm_output_excerpt"] = _trim_text(turn.gm_output, excerpt_chars)
         return payload

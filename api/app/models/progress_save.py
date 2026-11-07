@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,6 +27,13 @@ class GameProgressSave(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
+    # Legacy snapshots have no replay seed; NULL keeps that distinction explicit.
+    snapshot_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2, server_default="1"
+    )
+    initial_state_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    game_status: Mapped[str | None] = mapped_column(String(32))
+    config_hash: Mapped[str | None] = mapped_column(String(64))
     state_current_turn: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     state_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     state_summary: Mapped[str | None] = mapped_column(Text)

@@ -6,9 +6,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.game import Game
 from app.models.state_delta import StateDelta
-from app.models.turn import Turn
 from app.services.game_activity import touch_game
-from app.services.state_rebuilder import rebuild_game_state, sync_turn_state_delta
+from app.services.state_rebuilder import (
+    load_turn_state_history,
+    rebuild_game_state,
+    sync_turn_state_delta,
+)
 
 AUTO_APPLY_STATUSES = {"pending", "edited"}
 
@@ -20,18 +23,16 @@ def apply_pending_state_deltas(db: Session, game: Game) -> bool:
     deltas = list(
         db.scalars(
             select(StateDelta)
-            .options(selectinload(StateDelta.turn))
-            .join(Turn, StateDelta.turn_id == Turn.id)
             .where(
                 StateDelta.game_id == game.id,
                 StateDelta.status.in_(AUTO_APPLY_STATUSES),
             )
-            .order_by(Turn.turn_number.asc(), StateDelta.created_at.asc())
         ).all()
     )
     if not deltas:
         return False
 
+    history = load_turn_state_history(db, game.id)
     approved_at = datetime.now(UTC)
     for delta in deltas:
         delta.status = "approved"
@@ -41,7 +42,7 @@ def apply_pending_state_deltas(db: Session, game: Game) -> bool:
             db.add(delta.turn)
         db.add(delta)
 
-    rebuild_game_state(db, game)
+    rebuild_game_state(db, game, history=history)
     db.add(game.state)
     touch_game(db, game.id)
     db.commit()

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.progress_rules import required_anchor_groups
+
 # 距上次锚点进展达到此回合数 → rising（导演明显朝锚点收拢、减少纯铺垫）。
 ANCHOR_PACING_RISING_TURNS = 4
 # 距上次锚点进展达到此回合数 → high（导演必须把戏推到锚点 completion_signal 兑现的临界点）。
@@ -45,9 +47,9 @@ def compute_act_pacing(
     last_advance_turn = _opt_int(progress.get("last_advance_turn"))
     # 距上次锚点进展的回合数。优先 last_anchor_update_turn；从未推进过锚点时回退到进入本幕的
     # 回合（last_advance_turn），再回退 0（开局幕 act_1 从第 0 回合起算）。
-    baseline = _opt_int(progress.get("last_anchor_update_turn"))
-    if baseline is None:
-        baseline = last_advance_turn
+    baseline = max(
+        _opt_int(progress.get("last_anchor_update_turn")) or 0, last_advance_turn or 0
+    )
     turns_since_anchor = max(0, current_turn - (baseline or 0))
     turns_in_act = max(0, current_turn - (last_advance_turn or 0))
 
@@ -56,16 +58,17 @@ def compute_act_pacing(
         current_act = {}
     # build_runtime_story 已把 completion_anchors 过滤为「未完成」锚点。
     open_anchors = current_act.get("completion_anchors") or []
-    open_required = [
+    open_anchors = [
         anchor
         for anchor in open_anchors
-        if isinstance(anchor, dict) and _required(anchor)
+        if isinstance(anchor, dict)
     ]
-    open_requirements = _open_required_anchor_requirements(open_required)
+    open_requirements = required_anchor_groups(open_anchors)
 
     if not open_requirements:
         pressure = "ready"
         next_required_anchor = None
+        next_required_anchors = []
     else:
         if turns_since_anchor >= ANCHOR_PACING_HIGH_TURNS:
             pressure = "high"
@@ -73,14 +76,18 @@ def compute_act_pacing(
             pressure = "rising"
         else:
             pressure = "low"
-        first = open_requirements[0][0]
-        next_required_anchor = {
-            "id": _text(first.get("id")),
-            "title": _text(first.get("title")),
-            "completion_signal": _text(
-                first.get("completion_signal") or first.get("description")
-            ),
-        }
+        next_required_anchors = [
+            {
+                "id": _text(anchor.get("id")),
+                "title": _text(anchor.get("title")),
+                "completion_signal": _text(
+                    anchor.get("completion_signal") or anchor.get("description")
+                ),
+            }
+            for anchor in open_requirements[0]
+        ]
+        # Keep the old singular hint for callers; new clients can offer every route.
+        next_required_anchor = next_required_anchors[0]
 
     return {
         "turns_in_act": turns_in_act,
@@ -88,6 +95,7 @@ def compute_act_pacing(
         "open_required_count": len(open_requirements),
         "pressure": pressure,
         "next_required_anchor": next_required_anchor,
+        "next_required_anchors": next_required_anchors,
     }
 
 
@@ -123,45 +131,6 @@ def observe_act_pacing_stall(
         "turns_since_high": turns_since_high,
         "flag": flag,
     }
-
-
-def _required(anchor: dict[str, Any]) -> bool:
-    # 与 story_settings/state_applier 一致：未写 required 字段时默认 required=True。
-    value = anchor.get("required")
-    if value is None:
-        return True
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() not in {"false", "0", "no", ""}
-    return bool(value)
-
-
-def _open_required_anchor_requirements(
-    anchors: list[dict[str, Any]],
-) -> list[list[dict[str, Any]]]:
-    requirements: list[list[dict[str, Any]]] = []
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for anchor in anchors:
-        alternative_group = _alternative_group(anchor)
-        if alternative_group:
-            group = grouped.get(alternative_group)
-            if group is None:
-                group = []
-                grouped[alternative_group] = group
-                requirements.append(group)
-            group.append(anchor)
-            continue
-        requirements.append([anchor])
-    return [requirement for requirement in requirements if requirement]
-
-
-def _alternative_group(anchor: dict[str, Any]) -> str:
-    return _text(
-        anchor.get("alternative_group")
-        or anchor.get("alt_group")
-        or anchor.get("alternativeGroup")
-    )
 
 
 def _int(value: Any) -> int:

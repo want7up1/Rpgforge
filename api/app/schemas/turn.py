@@ -13,9 +13,13 @@ class ActionOption(BaseModel):
 class TurnCreate(BaseModel):
     player_input: str | None = Field(default=None, max_length=8000)
     selected_option: ActionOption | None = None
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
+    expected_revision: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_action_source(self) -> "TurnCreate":
+        if self.request_id is not None and not self.request_id.strip():
+            raise ValueError("request_id cannot be blank.")
         if self.selected_option is None and not (self.player_input or "").strip():
             raise ValueError("player_input or selected_option is required.")
         return self
@@ -61,6 +65,22 @@ class TurnRead(BaseModel):
     action_options_json: list[ActionOption]
     model_used: str | None
     created_at: datetime
+    settlement_receipt: dict[str, Any] | None = None
+
+    @field_validator("settlement_receipt", mode="before")
+    @classmethod
+    def normalize_legacy_receipt(cls, value: Any) -> dict[str, Any] | None:
+        # Existing turns predate receipts; migrations default them to {}.
+        # Treat unsupported/incomplete projections as absent, never as UI data.
+        if not isinstance(value, dict) or value.get("version") != 1:
+            return None
+        sections = value.get("sections")
+        if not isinstance(sections, list) or any(
+            not isinstance(section, dict) or not isinstance(section.get("changes"), list)
+            for section in sections
+        ):
+            return None
+        return value
 
 
 class TurnAgentCost(BaseModel):
@@ -95,12 +115,18 @@ TurnJobMaintenanceStatus = Literal["pending", "running", "completed", "failed", 
 class TurnJobCreateResponse(BaseModel):
     id: UUID
     status: TurnJobStatus
+    game_revision: int = 0
+    timeline_generation: int = 0
 
 
 class TurnJobRead(BaseModel):
     id: UUID
     game_id: UUID
     status: TurnJobStatus
+    game_revision: int = 0
+    timeline_generation: int = 0
+    stream_revision: int = 0
+    event_seq: int = 0
     turn: TurnRead | None = None
     turn_id: UUID | None = None
     model_used: str | None = None
@@ -126,3 +152,24 @@ class TurnJobRead(BaseModel):
     extractor_failed: bool = False
     stream_started_at: datetime | None = None
     last_event_at: datetime | None = None
+
+    @classmethod
+    def from_job(cls, job: object, turn: object | None = None) -> "TurnJobRead":
+        """Project declared scalar fields once; the caller explicitly loads the turn.
+
+        Defaults also cover transient ORM rows whose Python/DB defaults have
+        not run yet, and older snapshots missing newly introduced metadata.
+        Never read a job relationship implicitly during serialization.
+        """
+        missing = object()
+        values: dict[str, Any] = {"turn": turn}
+        for name, field in cls.model_fields.items():
+            if name == "turn":
+                continue
+            value = getattr(job, name, missing)
+            if value is missing:
+                continue
+            if value is None and not field.is_required():
+                value = field.get_default(call_default_factory=True)
+            values[name] = value
+        return cls.model_validate(values)

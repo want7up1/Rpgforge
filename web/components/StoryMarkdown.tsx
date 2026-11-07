@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 
 import {
   buildCharacterMatchers,
@@ -25,15 +25,17 @@ type TextBlock =
   | { type: "plain"; text: string }
   | { type: "paragraph"; text: string };
 
-export function StoryMarkdown({
-  characters = [],
+const EMPTY_CHARACTERS: CharacterRead[] = [];
+
+export const StoryMarkdown = memo(function StoryMarkdown({
+  characters = EMPTY_CHARACTERS,
   className = "",
   content,
   onCharacterClick,
   showCaret = false
 }: StoryMarkdownProps) {
-  const blocks = parseBlocks(content);
-  const matchers = buildCharacterMatchers(characters);
+  const blocks = useMemo(() => parseBlocks(content), [content]);
+  const matchers = useMemo(() => buildCharacterMatchers(characters), [characters]);
 
   return (
     <div className={`story-markdown ${className}`}>
@@ -41,7 +43,7 @@ export function StoryMarkdown({
       {showCaret ? <span className="story-caret">▋</span> : null}
     </div>
   );
-}
+});
 
 function parseBlocks(content: string): TextBlock[] {
   const normalized = isolateHeadingBlocks(content.replace(/\r\n/g, "\n").trim());

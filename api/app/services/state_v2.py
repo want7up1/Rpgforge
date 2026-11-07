@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from copy import deepcopy
+from math import isfinite
 from typing import Any
 
 STATE_V2_VERSION = 1
@@ -43,6 +44,7 @@ def normalize_state_v2(
         },
         "protagonist_sheet": _protagonist_sheet(state, conditions),
         "conditions": conditions,
+        "inventory": _inventory_view(state.get("inventory")),
         "party": _party_names(state, npcs, present_npcs),
         "npc_registry": _npc_registry(npcs),
         "quest_log": _quest_log(quests),
@@ -57,6 +59,120 @@ def state_v2_view(state_json: dict[str, Any] | None) -> dict[str, Any]:
     state = normalize_state_v2(state_json)
     v2 = state.get("v2")
     return v2 if isinstance(v2, dict) else {}
+
+
+def player_state_view(state_v2: dict[str, Any]) -> dict[str, Any]:
+    """Project known state for receipts/UI without trimming the GM or save state."""
+    projected = dict(state_v2)
+    npcs = _list(state_v2.get("npc_registry"))
+    hidden_names = hidden_npc_references(npcs)
+    projected["npc_registry"] = [item for item in npcs if _player_visible(item)]
+    projected["party"] = [
+        name
+        for name in _list(state_v2.get("party"))
+        if _first_text(name).casefold() not in hidden_names
+    ]
+    scene = dict(_mapping(state_v2.get("active_scene")))
+    scene["present_npcs"] = [
+        name
+        for name in _list(scene.get("present_npcs"))
+        if _first_text(name).casefold() not in hidden_names
+    ]
+    projected["active_scene"] = scene
+    for key in ("conditions", "inventory"):
+        projected[key] = [item for item in _list(state_v2.get(key)) if _player_visible(item)]
+    projected["relationship_tracks"] = [
+        item for item in inherit_npc_visibility(state_v2.get("relationship_tracks"), hidden_names)
+        if _player_visible(item)
+    ]
+    sheet = dict(_mapping(state_v2.get("protagonist_sheet")))
+    sheet["conditions"] = projected["conditions"]
+    projected["protagonist_sheet"] = sheet
+    quests = _mapping(state_v2.get("quest_log"))
+    projected["quest_log"] = {
+        key: [item for item in _list(quests.get(key)) if _player_visible(item)]
+        for key in ("active", "completed", "failed")
+    }
+    threads = _mapping(state_v2.get("open_threads"))
+    projected["open_threads"] = {
+        key: [item for item in _list(threads.get(key)) if _player_visible(item)]
+        for key in ("active", "resolved")
+    }
+    return projected
+
+
+def _player_visible(item: Any) -> bool:
+    visibility = _first_text(_mapping(item).get("visibility")).lower()
+    return visibility not in {
+        "hidden",
+        "secret",
+        "unknown",
+        "gm",
+        "gm_only",
+        "director",
+        "director_only",
+        "internal",
+        "private",
+        "隐藏",
+        "秘密",
+        "未知",
+        "幕后",
+        "主持人",
+    }
+
+
+def hidden_npc_references(npcs: Any) -> set[str]:
+    """Names, IDs and aliases share the NPC's visibility, regardless of spelling case."""
+    return {
+        _first_text(name).casefold()
+        for npc in _list(npcs)
+        if isinstance(npc, dict) and not _player_visible(npc)
+        for name in [npc.get("id"), npc.get("name"), npc.get("title"), *_list(npc.get("aliases"))]
+        if _first_text(name)
+    }
+
+
+def inherit_npc_visibility(tracks: Any, hidden_references: set[str]) -> list[dict[str, Any]]:
+    """Annotate, never discard, GM relationship data before player-facing filtering/diffing.
+
+    A default-known relationship must not reveal a hidden NPC. Keeping the item
+    and marking it hidden also prevents a visibility change looking like a loss.
+    """
+    return [
+        {**track, "visibility": "hidden"}
+        if _first_text(track.get("npc"), track.get("name")).casefold() in hidden_references
+        and _player_visible(track)
+        else track
+        for track in _list(tracks)
+        if isinstance(track, dict)
+    ]
+
+
+def _inventory_view(value: Any) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for raw in _list(value):
+        record = raw if isinstance(raw, dict) else {"name": raw}
+        name = _first_text(record.get("item"), record.get("name"), record.get("title"))
+        if not name:
+            continue
+        item = {
+            "name": name,
+            "description": _first_text(record.get("description"), record.get("note")),
+            "source": _first_text(record.get("source")),
+            "visibility": _first_text(record.get("visibility")) or "known",
+        }
+        quantity = record.get("quantity")
+        if isinstance(quantity, (int, float, str)) and not isinstance(quantity, bool):
+            try:
+                numeric = float(quantity)
+                if isfinite(numeric):
+                    item["quantity"] = int(numeric) if numeric.is_integer() else numeric
+            except ValueError:
+                pass
+        if record.get("unit"):
+            item["unit"] = _first_text(record.get("unit"))
+        items.append(item)
+    return items
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -111,15 +227,12 @@ def _npc_is_present(npc: dict[str, Any], current_location: str) -> bool:
     if _locations_overlap(current_location, npc_location):
         return True
 
-    location_text = "\n".join(
-        _first_text(npc.get(key)) for key in ("location", "current_location")
-    )
+    location_text = "\n".join(_first_text(npc.get(key)) for key in ("location", "current_location"))
     if current_location and current_location in location_text:
         return True
 
     context_text = "\n".join(
-        _first_text(npc.get(key))
-        for key in ("status", "state", "relationship", "attitude")
+        _first_text(npc.get(key)) for key in ("status", "state", "relationship", "attitude")
     )
     return any(
         marker in context_text
@@ -190,9 +303,11 @@ def _npc_registry(npcs: list[Any]) -> list[dict[str, Any]]:
                 "location": "",
                 "relationship": "",
                 "attitude": "",
+                "visibility": _first_text(npc.get("visibility")) or "known",
+                "aliases": _unique_texts(npc.get("aliases")),
             },
         )
-        for key in ("identity", "status", "location", "relationship", "attitude"):
+        for key in ("identity", "status", "location", "relationship", "attitude", "visibility"):
             value = _first_text(npc.get(key))
             if value:
                 existing[key] = value
@@ -225,9 +340,12 @@ def _quest_log(quests: list[Any]) -> dict[str, list[dict[str, Any]]]:
                     quest.get("description"),
                 ),
                 "act_id": _first_text(quest.get("act_id"), quest.get("act")),
+                "visibility": _first_text(quest.get("visibility")) or "known",
             }
 
         bucket = _quest_bucket(item["status"])
+        if bucket == "hidden":
+            item["visibility"] = "hidden"
         marker = (bucket, item.get("id") or item["name"])
         if marker in seen:
             continue
@@ -247,10 +365,13 @@ def _quest_bucket(status: str) -> str:
     return "active"
 
 
-def _thread_log(open_threads: Any) -> dict[str, list[dict[str, Any]]]:
+def _thread_log(
+    open_threads: Any, *, limit: int | None = ACTIVE_THREAD_LIMIT
+) -> dict[str, list[dict[str, Any]]]:
     log = {"active": [], "resolved": []}
     seen: set[tuple[str, str]] = set()
-    for thread in _list(open_threads)[-ACTIVE_THREAD_LIMIT:]:
+    values = _list(open_threads)
+    for thread in values if limit is None else values[-limit:]:
         item = _thread_item(thread)
         if not item["title"]:
             continue
@@ -271,9 +392,11 @@ def _thread_item(thread: Any) -> dict[str, Any]:
         if not status and _thread_action_resolves(_first_text(thread.get("action")).lower()):
             status = "resolved"
         return {
+            "id": _first_text(data.get("id"), data.get("key"), title),
             "title": title,
             "status": status or "active",
             "source": _first_text(data.get("source")),
+            "visibility": _first_text(data.get("visibility")) or "known",
         }
     return {"title": _first_text(thread), "status": "active", "source": ""}
 
@@ -466,10 +589,10 @@ def _relationship_tracks(relationships: Any, npcs: list[Any]) -> list[dict[str, 
                 "npc": name,
                 "status": relationship or attitude,
                 "note": _first_text(npc.get("recent_interaction"), npc.get("status")),
-                "visibility": "known",
+                "visibility": _first_text(npc.get("visibility")) or "known",
             }
         )
-    return tracks
+    return inherit_npc_visibility(tracks, hidden_npc_references(npcs))
 
 
 def _append_unique(values: list[str], value: str) -> None:

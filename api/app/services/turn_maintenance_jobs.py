@@ -24,9 +24,11 @@ from app.services.gameplay import gameplay_game_query
 from app.services.state_extractor import StateExtractor, StateExtractorValidationError
 from app.services.state_rebuilder import approve_turn_state_delta, rebuild_game_state
 from app.services.state_settlement import record_failed_turn_state_delta
-from app.services.state_v2 import state_v2_view
+from app.services.state_v2 import normalize_state_v2, state_v2_view
 from app.services.story_director import StoryDirectorDecision
 from app.services.story_settings import build_runtime_story
+from app.services.timeline import TimelineConflict, assert_timeline_current
+from app.services.turn_job_access import current_turn_job
 from app.services.turn_jobs import publish_turn_job_snapshot
 
 logger = logging.getLogger(__name__)
@@ -86,7 +88,8 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
     # 失败只记日志、不影响维护。回填 drift_severity 供 admin 看板监控"去同步控制后跑偏趋势"。
     await _audit_drift(job_id)
 
-    _apply_delta(job_id, delta_json)
+    if not _apply_delta(job_id, delta_json, require_active=True):
+        return
 
     # B1 结局闭环：末幕打通后生成尾声并置 game.status=completed（幂等、独立 fallback）。
     await _finalize_campaign_if_complete(job_id)
@@ -130,7 +133,7 @@ async def run_turn_maintenance_job(job_id: UUID) -> None:
 
 async def _extract_delta(job_id: UUID) -> dict[str, Any]:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
             raise ValueError("Turn job not found or turn has not been persisted.")
         game = db.scalars(gameplay_game_query(job.game_id)).first()
@@ -139,12 +142,12 @@ async def _extract_delta(job_id: UUID) -> dict[str, Any]:
             raise ValueError("Game or turn not found.")
         runtime_inputs = job.turn_runtime_inputs or {}
 
-    director_decision = runtime_inputs.get("director_decision") if isinstance(
-        runtime_inputs, dict
-    ) else None
-    drift_findings = runtime_inputs.get("drift_validation") if isinstance(
-        runtime_inputs, dict
-    ) else None
+    director_decision = (
+        runtime_inputs.get("director_decision") if isinstance(runtime_inputs, dict) else None
+    )
+    drift_findings = (
+        runtime_inputs.get("drift_validation") if isinstance(runtime_inputs, dict) else None
+    )
     return await StateExtractor().extract(
         game,
         turn,
@@ -153,15 +156,19 @@ async def _extract_delta(job_id: UUID) -> dict[str, Any]:
     )
 
 
-def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
+def _apply_delta(job_id: UUID, delta_json: dict[str, Any], *, require_active: bool = False) -> bool:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
-            return
+            return False
+        if require_active and (
+            job.maintenance_status != "running" or job.maintenance_stage != "state_extract"
+        ):
+            return False
         game = db.scalars(gameplay_game_query(job.game_id)).first()
         turn = db.get(Turn, job.turn_id)
         if game is None or turn is None:
-            return
+            return False
 
         turn.state_delta_json = delta_json
         job.extractor_failed = False
@@ -181,6 +188,7 @@ def _apply_delta(job_id: UUID, delta_json: dict[str, Any]) -> None:
         db.add(turn)
         touch_game(db, game.id)
         db.commit()
+        return True
 
 
 def _record_act_pacing_stall_observation(
@@ -229,13 +237,18 @@ async def _finalize_campaign_if_complete(job_id: UUID) -> None:
     except Exception:
         logger.exception("Ending generation crashed for job %s", job_id)
         epilogue = ""
-    _persist_campaign_ending(context["game_id"], epilogue, context["status"])
+    _persist_campaign_ending(
+        context["game_id"],
+        epilogue,
+        context["status"],
+        expected_generation=context["timeline_generation"],
+    )
     publish_turn_job_snapshot(job_id)
 
 
 def _load_campaign_ending_context(job_id: UUID) -> dict[str, Any] | None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
             return None
         game = db.scalars(gameplay_game_query(job.game_id)).first()
@@ -256,10 +269,7 @@ def _load_campaign_ending_context(job_id: UUID) -> dict[str, Any] | None:
         runtime_story = build_runtime_story(game.config, state_json)
         view = state_v2_view(state_json)
         recent = db.scalars(
-            select(Turn)
-            .where(Turn.game_id == game.id)
-            .order_by(Turn.turn_number.desc())
-            .limit(8)
+            select(Turn).where(Turn.game_id == game.id).order_by(Turn.turn_number.desc()).limit(8)
         ).all()
         payload = {
             "ending_type": ending_type,
@@ -287,39 +297,44 @@ def _load_campaign_ending_context(job_id: UUID) -> dict[str, Any] | None:
         }
         return {
             "game_id": game.id,
+            "timeline_generation": job.timeline_generation or 0,
             "payload": payload,
             "status": _ENDING_STATUS[ending_type],
         }
 
 
-def _persist_campaign_ending(game_id: Any, epilogue: str, status: str) -> None:
+def _persist_campaign_ending(
+    game_id: Any, epilogue: str, status: str, *, expected_generation: int | None = None
+) -> None:
     with SessionLocal() as db:
+        if expected_generation is not None:
+            try:
+                assert_timeline_current(db, game_id, expected_generation)
+            except TimelineConflict:
+                return
         game = db.scalars(gameplay_game_query(game_id)).first()
         if game is None or game.state is None or game.status in _ENDED_STATUSES:
             return
         game.status = status
         if epilogue:
-            # 写入 live state（即时展示）+ initial_state（rebuild 重放时保留，
-            # 结局不随 delta 重算）。JSONB 需整体重新赋值，SQLAlchemy 才能侦测到嵌套变更。
-            game.state.state_json = _with_epilogue(game.state.state_json, epilogue)
-            game.state.initial_state_json = _with_epilogue(
-                game.state.initial_state_json, epilogue
-            )
+            # The ending belongs to this timeline; the opening seed stays immutable.
+            game.state.state_json = _with_epilogue(game.state.state_json, epilogue, status=status)
         db.add(game)
         db.add(game.state)
         touch_game(db, game.id)
         db.commit()
 
 
-def _with_epilogue(state_json: Any, epilogue: str) -> dict[str, Any]:
+def _with_epilogue(state_json: Any, epilogue: str, *, status: str = "completed") -> dict[str, Any]:
     base = deepcopy(state_json) if isinstance(state_json, dict) else {}
     progress = base.setdefault("story_progress", {})
     if not isinstance(progress, dict):
         progress = {}
         base["story_progress"] = progress
     progress["epilogue"] = epilogue
-    progress["campaign_complete"] = True
-    return base
+    progress["campaign_complete"] = status == "completed"
+    progress["defeat"] = status == "defeated"
+    return normalize_state_v2(base)
 
 
 async def _audit_drift(job_id: UUID) -> None:
@@ -346,7 +361,7 @@ async def _audit_drift(job_id: UUID) -> None:
 
 def _load_drift_audit_context(job_id: UUID) -> dict[str, Any] | None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
             return None
         turn = db.get(Turn, job.turn_id)
@@ -400,7 +415,7 @@ def _load_drift_audit_context(job_id: UUID) -> dict[str, Any] | None:
 
 def _persist_drift_audit(job_id: UUID, severity: str, validation: dict[str, Any]) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return
         job.drift_severity = severity
@@ -416,7 +431,7 @@ def _persist_drift_audit(job_id: UUID, severity: str, validation: dict[str, Any]
 
 def _mark_extractor_failed(job_id: UUID) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return
         job.extractor_failed = True
@@ -426,7 +441,7 @@ def _mark_extractor_failed(job_id: UUID) -> None:
 
 def _record_failed_delta(job_id: UUID, error: str) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
             return
         game = db.scalars(gameplay_game_query(job.game_id)).first()
@@ -441,7 +456,7 @@ def _record_failed_delta(job_id: UUID, error: str) -> None:
 
 def _should_update_memory(job_id: UUID) -> bool:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
             return False
         turn_number = db.scalar(select(Turn.turn_number).where(Turn.id == job.turn_id))
@@ -450,7 +465,7 @@ def _should_update_memory(job_id: UUID) -> bool:
 
 def _is_current_maintenance_stage(job_id: UUID, stage: str) -> bool:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return False
         return job.maintenance_status == "running" and job.maintenance_stage == stage
@@ -458,13 +473,14 @@ def _is_current_maintenance_stage(job_id: UUID, stage: str) -> bool:
 
 async def _update_memory_summary(job_id: UUID, delta_json: dict[str, Any]) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None or job.turn_id is None:
             return
         game = db.scalars(gameplay_game_query(job.game_id)).first()
         turn = db.get(Turn, job.turn_id)
         if game is None or turn is None:
             return
+        db.commit()  # Compression rechecks generation after the model returns.
         await asyncio.wait_for(
             ContextCompressor().update_after_turn(db, game, turn, delta_json),
             timeout=TURN_MAINTENANCE_TIMEOUT_SECONDS,
@@ -473,8 +489,8 @@ async def _update_memory_summary(job_id: UUID, delta_json: dict[str, Any]) -> No
 
 def _mark_maintenance_running(job_id: UUID, *, stage: str, message: str) -> bool:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
-        if job is None:
+        job = current_turn_job(db, job_id)
+        if job is None or job.status != "completed" or job.maintenance_status != "pending":
             return False
         now = datetime.now(UTC)
         job.maintenance_status = "running"
@@ -492,7 +508,7 @@ def _mark_maintenance_running(job_id: UUID, *, stage: str, message: str) -> bool
 
 def _update_maintenance_progress(job_id: UUID, *, stage: str, message: str) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return
         now = datetime.now(UTC)
@@ -513,7 +529,7 @@ def _mark_maintenance_terminal(
     error: str | None,
 ) -> None:
     with SessionLocal() as db:
-        job = db.get(TurnJob, job_id)
+        job = current_turn_job(db, job_id)
         if job is None:
             return
         now = datetime.now(UTC)

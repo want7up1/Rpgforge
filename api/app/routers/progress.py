@@ -24,6 +24,7 @@ from app.services.progress_saves import (
     progress_save_or_none,
     restart_game_progress,
 )
+from app.services.timeline import lock_game_timeline
 
 router = APIRouter(tags=["progress"])
 DB_DEPENDENCY = Depends(get_db)
@@ -181,8 +182,10 @@ def _get_progress_save_or_404(
 def _assert_progress_editable(db: Session, game_id: UUID) -> None:
     active_job = db.scalars(
         select(TurnJob)
+        .join(Game, Game.id == TurnJob.game_id)
         .where(
             TurnJob.game_id == game_id,
+            TurnJob.timeline_generation == Game.timeline_generation,
             TurnJob.status.in_(("pending", "running")),
         )
         .order_by(TurnJob.created_at.desc())
@@ -199,8 +202,10 @@ def _assert_progress_editable(db: Session, game_id: UUID) -> None:
 
     active_maintenance = db.scalars(
         select(TurnJob)
+        .join(Game, Game.id == TurnJob.game_id)
         .where(
             TurnJob.game_id == game_id,
+            TurnJob.timeline_generation == Game.timeline_generation,
             TurnJob.status == "completed",
             TurnJob.maintenance_status.in_(("pending", "running")),
             TurnJob.maintenance_stage == "state_extract",
@@ -213,6 +218,25 @@ def _assert_progress_editable(db: Session, game_id: UUID) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="当前游戏仍有状态提取任务运行中，请完成后再操作进度存档。",
         )
+    # Serialize the final check with turn admission; preflight above may have
+    # released its transaction while reconciling a stale queue entry.
+    lock_game_timeline(db, game_id)
+    blocker = db.scalars(
+        select(TurnJob).join(Game, Game.id == TurnJob.game_id).where(
+            TurnJob.game_id == game_id,
+            TurnJob.timeline_generation == Game.timeline_generation,
+            (
+                TurnJob.status.in_(("pending", "running"))
+                | (
+                    (TurnJob.status == "completed")
+                    & TurnJob.maintenance_status.in_(("pending", "running"))
+                    & (TurnJob.maintenance_stage == "state_extract")
+                )
+            ),
+        ).limit(1)
+    ).first()
+    if blocker is not None:
+        raise HTTPException(status_code=409, detail="当前游戏仍有回合或状态提取任务运行中。")
 
 
 def _game_detail_response(game: Game) -> GameDetail:
@@ -222,6 +246,8 @@ def _game_detail_response(game: Game) -> GameDetail:
         genre=game.genre,
         description=game.description,
         status=game.status,
+        revision=game.revision,
+        timeline_generation=game.timeline_generation,
         created_at=game.created_at,
         updated_at=game.updated_at,
         config=game.config,

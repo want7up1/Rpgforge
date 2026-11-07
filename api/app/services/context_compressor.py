@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.game import Game
@@ -22,6 +22,7 @@ from app.services.story_settings import (
     build_runtime_story,
     project_runtime_story_for_state_ops,
 )
+from app.services.timeline import TimelineConflict, assert_timeline_current, config_digest
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +43,23 @@ class ContextCompressor:
     def __init__(self, router: ModelRouter | None = None) -> None:
         self.router = router or ModelRouter()
 
-    def load_prompt_summaries(self, db: Session, game_id: UUID) -> dict[str, Any]:
-        long_term = self._latest_summary(db, game_id, "long_term")
-        chapter = self._latest_summary(db, game_id, "chapter")
-        narrative = self._latest_summary(db, game_id, "narrative")
+    def load_prompt_summaries(
+        self, db: Session, game_id: UUID, *, before_turn: int | None = None
+    ) -> dict[str, Any]:
+        ceiling = self._history_ceiling(db, game_id)
+        if before_turn is not None:
+            ceiling = min(ceiling, max(0, before_turn - 1))
+        long_term = self._latest_summary(db, game_id, "long_term", max_turn=ceiling)
+        chapter = self._latest_summary(db, game_id, "chapter", max_turn=ceiling)
+        narrative = self._latest_summary(db, game_id, "narrative", max_turn=ceiling)
         recent_turns = list(
             db.scalars(
                 select(Summary)
-                .where(Summary.game_id == game_id, Summary.type == "turn")
+                .where(
+                    Summary.game_id == game_id,
+                    Summary.type == "turn",
+                    Summary.range_end_turn <= ceiling,
+                )
                 .order_by(Summary.range_end_turn.desc())
                 .limit(5)
             ).all()
@@ -213,13 +223,28 @@ class ContextCompressor:
         turn: Turn,
         state_delta_json: dict[str, Any],
     ) -> None:
-        existing_summaries = self.load_prompt_summaries(db, game.id)
+        generation = game.timeline_generation or 0
+        settings_hash = config_digest(game)
+        game_id, turn_id = game.id, turn.id
+        existing_summaries = self.load_prompt_summaries(
+            db, game_id, before_turn=turn.turn_number
+        )
+        # The caller may have just guarded the game row. Release that short
+        # transaction before the model call, then recheck before any write.
+        db.commit()
         output = await self._compress_with_fallback(
             game=game,
             turn=turn,
             state_delta_json=state_delta_json,
             existing_summaries=existing_summaries,
         )
+
+        assert_timeline_current(db, game_id, generation)
+        db.refresh(game, ["config"])
+        if config_digest(game) != settings_hash:
+            raise TimelineConflict("摘要生成期间剧本设定已经改变，此摘要已失效。")
+        if db.scalar(select(Turn.id).where(Turn.id == turn_id, Turn.game_id == game_id)) is None:
+            raise TimelineConflict("摘要所对应的回合已不在当前时间线中。")
 
         if output.turn_visible_summary:
             turn.visible_summary = output.turn_visible_summary
@@ -254,7 +279,7 @@ class ContextCompressor:
                 important_facts=output.important_facts,
             )
         if output.long_term_summary:
-            self._upsert_summary(
+            saved_long_term = self._upsert_summary(
                 db,
                 game_id=game.id,
                 summary_type="long_term",
@@ -263,7 +288,7 @@ class ContextCompressor:
                 content=output.long_term_summary,
                 important_facts=output.important_facts,
             )
-            if game.state is not None:
+            if game.state is not None and saved_long_term.range_end_turn == turn.turn_number:
                 game.state.summary = output.long_term_summary
                 db.add(game.state)
         # 叙事连续性轨：单行 narrative 摘要，随回合滚动更新；空则不动旧值（永不空白）。
@@ -469,6 +494,10 @@ class ContextCompressor:
                 important_facts=important_facts,
             )
         else:
+            if (summary.range_end_turn or 0) > range_end_turn:
+                # A later turn's compression finished first. An older task
+                # may fill its own turn summary but cannot roll memory back.
+                return summary
             summary.range_end_turn = range_end_turn
             summary.content = content
             summary.important_facts = important_facts
@@ -476,13 +505,26 @@ class ContextCompressor:
         return summary
 
     @staticmethod
-    def _latest_summary(db: Session, game_id: UUID, summary_type: str) -> Summary | None:
+    def _latest_summary(
+        db: Session, game_id: UUID, summary_type: str, *, max_turn: int | None = None
+    ) -> Summary | None:
+        if max_turn is None:
+            max_turn = ContextCompressor._history_ceiling(db, game_id)
         return db.scalars(
             select(Summary)
-            .where(Summary.game_id == game_id, Summary.type == summary_type)
+            .where(
+                Summary.game_id == game_id,
+                Summary.type == summary_type,
+                Summary.range_end_turn <= max_turn,
+            )
             .order_by(Summary.range_end_turn.desc().nullslast(), Summary.created_at.desc())
             .limit(1)
         ).first()
+
+    @staticmethod
+    def _history_ceiling(db: Session, game_id: UUID) -> int:
+        latest = db.scalar(select(func.max(Turn.turn_number)).where(Turn.game_id == game_id))
+        return int(latest or 0)
 
     @staticmethod
     def _summary_payload(summary: Summary | None) -> dict[str, Any] | None:

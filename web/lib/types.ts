@@ -6,6 +6,8 @@ export type GameListItem = {
   status: string;
   created_at: string;
   updated_at: string;
+  revision?: number;
+  timeline_generation?: number;
 };
 
 export type GameConfigRead = {
@@ -152,6 +154,14 @@ export type ActionOption = {
   label: string;
 };
 
+export type SettlementReceipt = {
+  version: 1;
+  status: "confirmed" | "pending" | "skipped" | "failed" | "rejected";
+  turn_number: number;
+  sections: { key: string; label: string; changes: { subject: string; before: string; after: string; reason: string }[] }[];
+  message?: string;
+};
+
 export type TurnRead = {
   id: string;
   game_id: string;
@@ -161,6 +171,7 @@ export type TurnRead = {
   visible_summary: string | null;
   hidden_summary: string | null;
   state_delta_json: Record<string, unknown>;
+  settlement_receipt?: SettlementReceipt | null;
   action_options_json: ActionOption[];
   model_used: string | null;
   created_at: string;
@@ -177,9 +188,15 @@ export type TurnJobMaintenanceStatus =
 export type TurnJobCreateResponse = {
   id: string;
   status: TurnJobStatus;
+  game_revision?: number;
+  timeline_generation?: number;
 };
 
 export type TurnJobRead = {
+  stream_revision?: number;
+  event_seq?: number;
+  timeline_generation?: number;
+  game_revision?: number;
   id: string;
   game_id: string;
   status: TurnJobStatus;
@@ -207,6 +224,10 @@ export type TurnJobRead = {
 };
 
 export type TurnJobStreamEvent = {
+  stream_revision?: number;
+  event_seq?: number;
+  timeline_generation?: number;
+  game_revision?: number;
   type: "snapshot" | "delta" | "progress" | "completed" | "failed" | "heartbeat";
   job_id?: string;
   sent_at?: string;
@@ -313,6 +334,10 @@ export type GeneratorChatJobCreateResponse = {
 };
 
 export type GeneratorChatJobRead = {
+  stream_revision?: number;
+  event_seq?: number;
+  timeline_generation?: number;
+  game_revision?: number;
   id: string;
   status: GeneratorChatJobStatus;
   response: GeneratorChatResponse | null;
@@ -333,6 +358,10 @@ export type GeneratorFinalizeJobCreateResponse = {
 };
 
 export type GeneratorFinalizeJobRead = {
+  stream_revision?: number;
+  event_seq?: number;
+  timeline_generation?: number;
+  game_revision?: number;
   id: string;
   status: GeneratorFinalizeJobStatus;
   config: GeneratedGameConfig | null;
@@ -353,6 +382,10 @@ export type GeneratorFinalizeResponse = {
 };
 
 export type GeneratorJobStreamEvent = {
+  stream_revision?: number;
+  event_seq?: number;
+  timeline_generation?: number;
+  game_revision?: number;
   type: "snapshot" | "progress" | "completed" | "failed" | "heartbeat";
   job_id?: string;
   sent_at?: string;

@@ -190,6 +190,10 @@ def reconcile_turn_job_liveness(
         db.add(job)
         return True
 
+    # Inline API calls have the same timeout budget but do not have an RQ job.
+    if (job.request_json or {}).get("_execution_mode") == "inline":
+        return False
+
     if (
         job.status == "pending"
         and _age_seconds(job.created_at, checked_at) <= PENDING_MISSING_GRACE_SECONDS
@@ -264,6 +268,7 @@ def _mark_stale_failed(job, message: str, now: datetime) -> None:
     job.error_message = message
     job.progress_message = message
     if isinstance(job, TurnJob):
+        job.event_seq = (job.event_seq or 0) + 1
         job.maintenance_status = "failed"
         job.maintenance_message = message
         job.maintenance_error = message
@@ -273,6 +278,7 @@ def _mark_stale_failed(job, message: str, now: datetime) -> None:
 
 
 def _mark_stale_maintenance_failed(job: TurnJob, message: str, now: datetime) -> None:
+    job.event_seq = (job.event_seq or 0) + 1
     job.maintenance_status = "failed"
     job.maintenance_message = message
     job.maintenance_error = message

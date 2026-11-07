@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -70,6 +70,9 @@ class GeneratorFinalizeJob(Base):
 
 class TurnJob(Base):
     __tablename__ = "turn_jobs"
+    __table_args__ = (
+        UniqueConstraint("game_id", "request_id", name="uq_turn_jobs_game_request"),
+    )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     game_id: Mapped[UUID] = mapped_column(
@@ -80,6 +83,18 @@ class TurnJob(Base):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     request_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    request_id: Mapped[str | None] = mapped_column(String(128))
+    request_hash: Mapped[str | None] = mapped_column(String(64))
+    game_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    timeline_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    stream_revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    event_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     turn_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     model_used: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)

@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.game import Game
 from app.models.progress_save import GameProgressSave
@@ -17,6 +17,12 @@ from app.models.turn import Turn
 from app.services.game_creator import build_default_initial_state
 from app.services.state_v2 import normalize_state_v2
 from app.services.story_settings import story_settings_from_config
+from app.services.timeline import (
+    advance_timeline,
+    clean_replay_seed,
+    config_digest,
+    lock_game_timeline,
+)
 
 
 def create_progress_save(
@@ -26,6 +32,7 @@ def create_progress_save(
     name: str,
     note: str | None = None,
 ) -> GameProgressSave:
+    lock_game_timeline(db, game.id)
     state = game.state
     turns = _game_turns(db, game.id)
     summaries = _game_summaries(db, game.id)
@@ -34,6 +41,10 @@ def create_progress_save(
         game_id=game.id,
         name=name,
         note=note,
+        snapshot_version=2,
+        initial_state_json=_replay_seed(game),
+        game_status=game.status,
+        config_hash=config_digest(game),
         state_current_turn=state.current_turn if state else 0,
         state_json=deepcopy(state.state_json if state else {}),
         state_summary=state.summary if state else None,
@@ -49,6 +60,13 @@ def create_progress_save(
 
 
 def load_progress_save(db: Session, game: Game, progress_save: GameProgressSave) -> None:
+    lock_game_timeline(db, game.id)
+    seed = (
+        clean_replay_seed(progress_save.initial_state_json)
+        if isinstance(progress_save.initial_state_json, dict) and progress_save.initial_state_json
+        else _replay_seed(game)
+    )
+    advance_timeline(db, game)
     _clear_runtime_progress(db, game.id)
     _restore_state(
         db,
@@ -56,17 +74,41 @@ def load_progress_save(db: Session, game: Game, progress_save: GameProgressSave)
         progress_save.state_json,
         progress_save.state_current_turn,
         progress_save.state_summary,
+        initial_state_json=seed,
     )
     _restore_turns(db, game.id, progress_save.turns_json)
-    _restore_summaries(db, game.id, progress_save.summaries_json)
+    db.flush()
+    _restore_summaries(
+        db, game.id, progress_save.summaries_json,
+        max_turn=max([
+            progress_save.state_current_turn,
+            *(int(item.get("turn_number") or 0) for item in progress_save.turns_json),
+        ]),
+    )
     _restore_state_deltas(db, game.id, progress_save.state_deltas_json)
+    if progress_save.game_status:
+        game.status = progress_save.game_status
+    elif game.status in {"completed", "defeated"}:
+        # Old saves did not snapshot status. Infer only the explicit ending
+        # flags of the saved live state; never keep the discarded future status.
+        progress = progress_save.state_json.get("story_progress") or {}
+        game.status = (
+            "completed" if progress.get("campaign_complete")
+            else "defeated" if progress.get("defeat") else "active"
+        )
+    db.add(game)
     db.flush()
 
 
 def restart_game_progress(db: Session, game: Game) -> None:
+    lock_game_timeline(db, game.id)
+    advance_timeline(db, game)
     _clear_runtime_progress(db, game.id)
     initial_state = _initial_state_for_restart(game)
     _restore_state(db, game, initial_state, int(initial_state.get("current_turn") or 0), "")
+    if game.status in {"completed", "defeated"}:
+        game.status = "active"
+        db.add(game)
     db.flush()
 
 
@@ -84,7 +126,10 @@ def _clear_runtime_progress(db: Session, game_id: UUID) -> None:
         db.delete(delta)
     for summary in _game_summaries(db, game_id):
         db.delete(summary)
-    for turn in _game_turns(db, game_id):
+    turns = db.scalars(
+        select(Turn).where(Turn.game_id == game_id).options(selectinload(Turn.state_deltas))
+    ).all()
+    for turn in turns:
         db.delete(turn)
     db.flush()
 
@@ -95,13 +140,15 @@ def _restore_state(
     state_json: dict[str, Any],
     current_turn: int,
     summary: str | None,
+    *,
+    initial_state_json: dict[str, Any] | None = None,
 ) -> None:
     normalized_state = normalize_state_v2(deepcopy(state_json), current_turn)
     if game.state is None:
         game.state = GameState(
             current_turn=current_turn,
             state_json=normalized_state,
-            initial_state_json=deepcopy(normalized_state),
+            initial_state_json=initial_state_json or _replay_seed(game),
             summary=summary,
         )
         db.add(game.state)
@@ -109,6 +156,8 @@ def _restore_state(
         game.state.current_turn = current_turn
         game.state.state_json = normalized_state
         game.state.summary = summary
+        if initial_state_json is not None:
+            game.state.initial_state_json = deepcopy(initial_state_json)
         db.add(game.state)
 
 
@@ -127,19 +176,29 @@ def _restore_turns(db: Session, game_id: UUID, turns_json: list[dict[str, Any]])
                 action_options_json=_list(item.get("action_options_json")),
                 model_used=_optional_text(item.get("model_used")),
                 created_at=_datetime(item.get("created_at")),
+                settlement_receipt=_record(item.get("settlement_receipt")) or None,
             )
         )
 
 
-def _restore_summaries(db: Session, game_id: UUID, summaries_json: list[dict[str, Any]]) -> None:
+def _restore_summaries(
+    db: Session,
+    game_id: UUID,
+    summaries_json: list[dict[str, Any]],
+    *,
+    max_turn: int,
+) -> None:
     for item in summaries_json:
+        end = _optional_int(item.get("range_end_turn"))
+        if end is not None and end > max_turn:
+            continue
         db.add(
             Summary(
                 id=UUID(str(item["id"])),
                 game_id=game_id,
                 type=str(item.get("type") or "turn"),
                 range_start_turn=_optional_int(item.get("range_start_turn")),
-                range_end_turn=_optional_int(item.get("range_end_turn")),
+                range_end_turn=end if end is not None else max_turn,
                 content=str(item.get("content") or ""),
                 important_facts=_record(item.get("important_facts")),
                 created_at=_datetime(item.get("created_at")),
@@ -153,6 +212,10 @@ def _restore_state_deltas(
     game_id: UUID,
     state_deltas_json: list[dict[str, Any]],
 ) -> None:
+    turns = {
+        turn.id: turn
+        for turn in db.scalars(select(Turn).where(Turn.game_id == game_id)).all()
+    }
     for item in state_deltas_json:
         turn_id = UUID(str(item["turn_id"]))
         delta_json = _record(item.get("delta_json"))
@@ -164,13 +227,14 @@ def _restore_state_deltas(
                 turn_id=turn_id,
                 delta_json=delta_json,
                 status=status,
+                attempt_count=max(0, int(item.get("attempt_count") or 0)),
                 error_message=_optional_text(item.get("error_message")),
                 approved_at=_optional_datetime(item.get("approved_at")),
                 created_at=_datetime(item.get("created_at")),
                 updated_at=_datetime(item.get("updated_at")),
             )
         )
-        turn = db.get(Turn, turn_id)
+        turn = turns.get(turn_id)
         if turn is not None:
             turn.state_delta_json = (
                 deepcopy(delta_json)
@@ -186,11 +250,20 @@ def _initial_state_for_restart(game: Game) -> dict[str, Any]:
         and isinstance(game.state.initial_state_json, dict)
         and game.state.initial_state_json
     ):
-        initial_state = deepcopy(game.state.initial_state_json)
+        initial_state = clean_replay_seed(game.state.initial_state_json)
     else:
         initial_state = _fallback_initial_state(game)
     initial_state["current_turn"] = 0
     return normalize_state_v2(initial_state, 0)
+
+
+def _replay_seed(game: Game) -> dict[str, Any]:
+    """A saved progress state is never an opening seed, including old saves."""
+    raw = game.state.initial_state_json if game.state is not None else None
+    seed = (
+        clean_replay_seed(raw) if isinstance(raw, dict) and raw else _fallback_initial_state(game)
+    )
+    return normalize_state_v2(seed, int(seed.get("current_turn") or 0))
 
 
 def _fallback_initial_state(game: Game) -> dict[str, Any]:
@@ -251,6 +324,7 @@ def _turn_snapshot(turn: Turn) -> dict[str, Any]:
         "action_options_json": deepcopy(turn.action_options_json),
         "model_used": turn.model_used,
         "created_at": _isoformat(turn.created_at),
+        "settlement_receipt": deepcopy(getattr(turn, "settlement_receipt", None)),
     }
 
 
@@ -273,6 +347,7 @@ def _state_delta_snapshot(delta: StateDelta) -> dict[str, Any]:
         "turn_id": str(delta.turn_id),
         "delta_json": deepcopy(delta.delta_json),
         "status": delta.status,
+        "attempt_count": delta.attempt_count,
         "error_message": delta.error_message,
         "approved_at": _isoformat(delta.approved_at),
         "created_at": _isoformat(delta.created_at),

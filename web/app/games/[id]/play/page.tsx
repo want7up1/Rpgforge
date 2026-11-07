@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   FormEvent,
+  memo,
   type SyntheticEvent,
   useCallback,
   useEffect,
@@ -16,6 +17,7 @@ import { AppShell } from "@/components/AppShell";
 import { CharacterModal } from "@/components/CharacterModal";
 import { CharacterPortrait } from "@/components/CharacterPortrait";
 import { StoryMarkdown } from "@/components/StoryMarkdown";
+import { NarrativeInventory, NarrativeStatusStrip } from "@/components/NarrativeState";
 import {
   buildCharacterRuntimeView,
   findCharacterByName,
@@ -25,18 +27,20 @@ import {
 } from "@/lib/characters";
 import { buildTurnSettlement, type TurnSettlementView } from "@/lib/gameExperience";
 import {
+  ApiRequestError,
   createTurnJob,
   fetchTurnInsights,
   getActiveTurnJob,
   getCharacters,
   getGame,
+  getTurnJob,
   getTurns,
   rewindTurns,
   type TurnInsights
 } from "@/lib/api";
 import { getStateV2FromGame, type StateV2 } from "@/lib/stateV2";
+import { clearTurnRequest, prepareTurnRequest, TurnMonitorScope, type TurnRequestAttempt } from "@/lib/turnRequest";
 import {
-  createInitialTurnProcess,
   formatMaintenanceStage,
   formatLastEvent,
   isTurnBackgroundMaintenanceActive,
@@ -84,17 +88,23 @@ export default function PlayPage() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const monitoring = useRef(new TurnMonitorScope());
+  const timelineGeneration = useRef(0);
+  const requestAttempt = useRef<TurnRequestAttempt | null>(null);
 
   // C3 首次引导卡：仅首次进 play 页弹一次，localStorage 记忆后不再打扰。
   useEffect(() => {
     try {
       if (!window.localStorage.getItem(ONBOARDING_KEY)) {
-        setShowOnboarding(true);
+        const frame = window.requestAnimationFrame(() => setShowOnboarding(true));
+        return () => window.cancelAnimationFrame(frame);
       }
     } catch {
       // localStorage 不可用（隐私模式等）时静默跳过，不阻断游戏。
     }
   }, []);
+
+  const openJournal = useCallback(() => setJournalOpen(true), []);
 
   const dismissOnboarding = useCallback(() => {
     setShowOnboarding(false);
@@ -136,22 +146,27 @@ export default function PlayPage() {
       setError(null);
       setPending(true);
       try {
+        monitoring.current.abort();
         await rewindTurns(params.id, toTurn);
         const [refreshedGame, refreshedTurns] = await Promise.all([
           getGame(params.id),
           getTurns(params.id)
         ]);
+        if (!monitoring.current.isGameActive(params.id)) return;
         setState((current) =>
           current.status === "ready"
             ? { ...current, game: refreshedGame, turns: refreshedTurns }
             : current
         );
+        timelineGeneration.current = refreshedGame.timeline_generation ?? timelineGeneration.current;
+        requestAttempt.current = null;
+        clearTurnRequest(params.id);
         setTurnProcess(null);
         setTurnProgress(null);
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "回退失败。");
+        if (monitoring.current.isGameActive(params.id)) setError(caught instanceof Error ? caught.message : "回退失败。");
       } finally {
-        setPending(false);
+        if (monitoring.current.isGameActive(params.id)) setPending(false);
       }
     },
     [params.id, pending, maintenanceActive]
@@ -168,96 +183,97 @@ export default function PlayPage() {
     };
   }, []);
 
-  const refreshAfterTurnJob = useCallback(async (gameId: string, completedJob: TurnJobRead) => {
+  const refreshAfterTurnJob = useCallback(async (gameId: string, completedJob: TurnJobRead, signal?: AbortSignal) => {
     const turn = completedJob.turn;
-    if (!turn) {
-      throw new Error("回合任务已完成，但没有返回回合内容。");
-    }
-
+    if (!turn) throw new Error("回合任务已完成，但没有返回回合内容。");
+    const active = () => !signal?.aborted && monitoring.current.isGameActive(gameId);
     try {
-      const [refreshedGame, refreshedTurns] = await Promise.all([
-        getGame(gameId),
-        getTurns(gameId)
-      ]);
-      setState((current) =>
-        current.status === "ready"
-          ? { ...current, game: refreshedGame, turns: refreshedTurns }
-          : current
-      );
+      const [game, turns] = await Promise.all([getGame(gameId), getTurns(gameId)]);
+      if (!active()) return;
+      if ((game.timeline_generation ?? 0) < timelineGeneration.current) return;
+      timelineGeneration.current = game.timeline_generation ?? timelineGeneration.current;
+      setState(current => current.status === "ready" && current.game.id === gameId
+        ? { ...current, game, turns } : current);
     } catch {
-      setState((current) => {
-        if (current.status !== "ready") {
-          return current;
-        }
-        const exists = current.turns.some((item) => item.id === turn.id);
-        return {
-          ...current,
-          turns: exists ? current.turns : [...current.turns, turn]
-        };
-      });
+      if (!active() || (completedJob.timeline_generation ?? 0) < timelineGeneration.current) return;
+      setState(current => current.status === "ready" && current.game.id === gameId
+        ? { ...current, turns: current.turns.some(item => item.id === turn.id) ? current.turns : [...current.turns, turn] }
+        : current);
     }
   }, []);
 
-  const monitorTurnMaintenance = useCallback(async (job: TurnJobRead) => {
+  const monitorTurnMaintenance = useCallback(async (job: TurnJobRead, signal: AbortSignal) => {
+    const active = () => !signal.aborted && monitoring.current.isGameActive(job.game_id);
+    if (!active()) return;
     setTurnProcess(job);
     setTurnProgress(job.maintenance_message || "上一回合状态维护中，请稍候...");
     try {
-      const settledJob = await waitForTurnMaintenance(
-        params.id,
-        job.id,
-        setTurnProgress,
-        setTurnProcess
-      );
-      await refreshAfterTurnJob(params.id, settledJob);
-      setTurnProgress(settledJob.maintenance_message || "状态维护已完成。");
+      const settledJob = await waitForTurnMaintenance(job.game_id, job.id,
+        message => { if (active()) setTurnProgress(message); },
+        snapshot => { if (active()) setTurnProcess(snapshot); }, signal);
+      await refreshAfterTurnJob(job.game_id, settledJob, signal);
+      if (active()) setTurnProgress(settledJob.maintenance_message || "状态维护已完成。");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "状态维护恢复失败。");
+      if (!active()) return;
+      const message = caught instanceof Error ? caught.message : "状态维护恢复失败。";
+      setError(message);
       setTurnProgress("状态维护恢复失败，请刷新页面确认任务状态。");
-      setTurnProcess((current) =>
-        current?.id === job.id
-          ? {
-              ...current,
-              maintenance_status: "failed",
-              maintenance_message: "状态提取等待超时，已解除操作锁。",
-              maintenance_error: caught instanceof Error ? caught.message : "状态维护恢复失败。"
-            }
-          : current
-      );
+      setTurnProcess(current => current?.id === job.id ? { ...current,
+        maintenance_status: "failed", maintenance_message: "状态提取等待超时，已解除操作锁。", maintenance_error: message
+      } : current);
     }
-  }, [params.id, refreshAfterTurnJob]);
+  }, [refreshAfterTurnJob]);
 
-  const restoreActiveTurnJob = useCallback(async (activeJob: TurnJobRead) => {
+  const monitorTurnJob = useCallback(async (job: TurnJobRead, existingController?: AbortController): Promise<boolean> => {
+    if (!monitoring.current.isGameActive(job.game_id) || (job.timeline_generation ?? 0) < timelineGeneration.current) return false;
+    const controller = existingController ?? monitoring.current.start(job.game_id);
+    if (!controller || !monitoring.current.isCurrent(job.game_id, controller)) return false;
+    const active = () => monitoring.current.isCurrent(job.game_id, controller);
     setError(null);
-    if (isTurnMaintenanceActive(activeJob)) {
-      void monitorTurnMaintenance(activeJob);
-      return;
+    if (isTurnMaintenanceActive(job)) {
+      void monitorTurnMaintenance(job, controller.signal);
+      return true;
     }
     setPending(true);
-    setTurnProcess(activeJob);
-    setTurnProgress(activeJob.progress_message || "检测到未完成回合任务，正在恢复实时连接...");
+    setTurnProcess(job);
+    setTurnProgress(job.progress_message || "正在连接剧情任务...");
     try {
-      const completedJob = await waitForTurnJobWithStream(
-        params.id,
-        activeJob.id,
-        setTurnProgress,
-        setTurnProcess,
-        activeJob
-      );
-      await refreshAfterTurnJob(params.id, completedJob);
-      setTurnProgress(completedJob.progress_message || "剧情生成完成。");
-      if (isTurnMaintenanceActive(completedJob)) {
-        void monitorTurnMaintenance(completedJob);
+      const completed = await waitForTurnJobWithStream(job.game_id, job.id,
+        message => { if (active()) setTurnProgress(message); },
+        snapshot => {
+          if (!active() || (snapshot.timeline_generation ?? 0) < timelineGeneration.current) return;
+          setTurnProcess(snapshot);
+          // 明确失败是已确认的终态；下一次相同行动是新尝试。连接异常仍复用原请求号。
+          if (snapshot.status === "failed") {
+            requestAttempt.current = null;
+            clearTurnRequest(job.game_id);
+          }
+        },
+        job, controller.signal);
+      if (!active()) return false;
+      await refreshAfterTurnJob(job.game_id, completed, controller.signal);
+      if (!active()) return false;
+      if ((completed.timeline_generation ?? 0) < timelineGeneration.current) {
+        setTurnProcess(null);
+        return false;
       }
+      setTurnProgress(completed.progress_message || "剧情生成完成。");
+      if (isTurnMaintenanceActive(completed)) void monitorTurnMaintenance(completed, controller.signal);
+      return true;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "恢复回合任务失败。");
-      setTurnProgress("回合恢复失败，已保留收到的过程信息。");
+      if (active()) {
+        setError(caught instanceof Error ? caught.message : "回合任务连接失败。");
+        setTurnProgress("回合连接中断，已保留收到的过程信息，可重试连接。");
+      }
+      return false;
     } finally {
-      setPending(false);
+      if (active()) setPending(false);
     }
-  }, [monitorTurnMaintenance, params.id, refreshAfterTurnJob]);
+  }, [monitorTurnMaintenance, refreshAfterTurnJob]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const detach = monitoring.current.attach(params.id);
 
     async function load() {
       try {
@@ -268,9 +284,13 @@ export default function PlayPage() {
           getActiveTurnJob(params.id)
         ]);
         if (!controller.signal.aborted) {
+          timelineGeneration.current = game.timeline_generation ?? 0;
+          setPending(false);
+          setTurnProcess(null);
+          setTurnProgress(null);
           setState({ status: "ready", game, turns, characters });
-          if (activeJob) {
-            void restoreActiveTurnJob(activeJob);
+          if (activeJob && (activeJob.timeline_generation ?? 0) >= timelineGeneration.current) {
+            void monitorTurnJob(activeJob);
           }
         }
       } catch (caught) {
@@ -285,14 +305,14 @@ export default function PlayPage() {
 
     load();
 
-    return () => controller.abort();
-  }, [params.id, restoreActiveTurnJob]);
+    return () => { controller.abort(); detach(); };
+  }, [params.id, monitorTurnJob]);
 
   async function submitTurn(
     payload: Parameters<typeof createTurnJob>[1],
     options: { reopenComposerOnError?: boolean } = {}
   ) {
-    if (state.status !== "ready" || pending || maintenanceActive) {
+    if (state.status !== "ready" || pending || maintenanceActive || isEnded) {
       return;
     }
 
@@ -301,29 +321,46 @@ export default function PlayPage() {
     setTurnProgress("已创建回合任务，等待 DeepSeek Pro 开始书写剧情...");
     setTurnProcess(null);
     setPending(true);
+    const gameId = state.game.id;
+    const controller = monitoring.current.start(gameId);
+    if (!controller) { setPending(false); return; }
+    const active = () => monitoring.current.isCurrent(gameId, controller);
+    const action = JSON.stringify(payload);
+    if (!requestAttempt.current || requestAttempt.current.gameId !== gameId || requestAttempt.current.action !== action) {
+      requestAttempt.current = prepareTurnRequest(gameId, action, state.game.revision);
+    }
+    const attempt = requestAttempt.current;
     try {
-      const job = await createTurnJob(state.game.id, payload);
-      setTurnProcess(createInitialTurnProcess(state.game.id, job.id, job.status));
-      const completedJob = await waitForTurnJobWithStream(
-        state.game.id,
-        job.id,
-        setTurnProgress,
-        setTurnProcess
-      );
-      await refreshAfterTurnJob(state.game.id, completedJob);
-      setInput("");
-      setTurnProgress(completedJob.progress_message || "剧情生成完成。");
-      if (isTurnMaintenanceActive(completedJob)) {
-        void monitorTurnMaintenance(completedJob);
-      }
+      const created = await createTurnJob(gameId, { ...payload, request_id: attempt.requestId, expected_revision: attempt.revision }, controller.signal);
+      if (!active()) return;
+      setState(current => current.status === "ready" && current.game.id === gameId
+        ? { ...current, game: { ...current.game, revision: created.game_revision ?? current.game.revision } } : current);
+      const initial = await getTurnJob(gameId, created.id, controller.signal);
+      if (!active()) return;
+      const completed = await monitorTurnJob(initial, controller);
+      if (completed && active()) {
+        requestAttempt.current = null;
+        clearTurnRequest(gameId);
+        setInput("");
+      } else if (active() && options.reopenComposerOnError) setCustomActionOpen(true);
     } catch (caught) {
+      if (!active()) return;
       setError(caught instanceof Error ? caught.message : "提交回合失败。");
-      setTurnProgress("回合生成失败，已保留收到的过程信息。");
-      if (options.reopenComposerOnError) {
-        setCustomActionOpen(true);
-      }
+      if (caught instanceof ApiRequestError && caught.status === 409) {
+        requestAttempt.current = null;
+        clearTurnRequest(gameId);
+        setTurnProgress("当前存档已变化或已有任务运行，请确认最新状态后再行动。");
+        try {
+          const [game, turns] = await Promise.all([getGame(gameId), getTurns(gameId)]);
+          if (active() && (game.timeline_generation ?? 0) >= timelineGeneration.current) {
+            timelineGeneration.current = game.timeline_generation ?? timelineGeneration.current;
+            setState(current => current.status === "ready" && current.game.id === gameId ? { ...current, game, turns } : current);
+          }
+        } catch { /* 保留拒绝原因，等待用户刷新 */ }
+      } else setTurnProgress("请求未确认完成。重试同一行动会复用原请求编号。");
+      if (options.reopenComposerOnError) setCustomActionOpen(true);
     } finally {
-      setPending(false);
+      if (active()) setPending(false);
     }
   }
 
@@ -399,6 +436,7 @@ export default function PlayPage() {
                   </button>
                 </div>
               </div>
+              {stateV2 ? <NarrativeStatusStrip state={stateV2} onOpen={openJournal} /> : null}
               {menuOpen ? (
                 <div className="border-b-2 border-[color:var(--border)] bg-[rgba(5,12,7,0.96)] px-2 py-2">
                   <GameMenuInline gameId={params.id} />
@@ -426,6 +464,7 @@ export default function PlayPage() {
                   />
                 ) : null}
                 <StoryPanel
+                  ended={isEnded}
                   characters={state.characters}
                   latestTurn={latestTurn}
                   onCharacterClick={setSelectedCharacter}
@@ -539,6 +578,10 @@ function JournalDrawer({
       </div>
       <div className="journal-body grid content-start gap-3">
         {stateV2 ? <PlayStateStrip gameId={game.id} stateV2={stateV2} /> : null}
+        {stateV2 && stateV2.inventory.length > 0 ? <section className="px-card">
+          <h3 className="px-label">随身物品</h3>
+          <NarrativeInventory items={stateV2.inventory} />
+        </section> : null}
 
         <section className="px-card">
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -597,7 +640,7 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
   const protagonist = stateV2.protagonist_sheet;
   const scene = stateV2.active_scene;
   const conditionLabel =
-    stateV2.conditions.length > 0 ? `${stateV2.conditions.length} 个状态` : "状态稳定";
+    stateV2.conditions.length > 0 ? stateV2.conditions.slice(0, 2).map(item => [item.name, item.status === "active" ? "" : item.status].filter(Boolean).join("：")).join("；") : "状态稳定";
 
   return (
     <section className="px-card px-card-green">
@@ -613,6 +656,7 @@ function PlayStateStrip({ gameId, stateV2 }: { gameId: string; stateV2: StateV2 
           ) : null}
           <p className="mt-1.5 text-xs text-[color:var(--muted)]">
             {scene.location || "未知地点"} · {conditionLabel}
+            {stateV2.party.length ? ` · 同行：${stateV2.party.join("、")}` : ""}
           </p>
         </div>
         <Link className="px-btn w-full" href={`/games/${gameId}/status`}>
@@ -634,7 +678,11 @@ function CampaignEndingCard({
   stateV2: StateV2;
 }) {
   const epilogue = stateV2.story_progress.epilogue;
-  const completedActs = stateV2.story_progress.completed_acts.length;
+  const completedActs = new Set([
+    ...stateV2.story_progress.completed_acts,
+    ...(outcome === "victory" && stateV2.story_progress.current_act
+      ? [stateV2.story_progress.current_act] : [])
+  ]).size;
   const isDefeat = outcome === "defeat";
   const badge = isDefeat ? "GAME OVER" : "THE END";
   const summary = isDefeat
@@ -751,7 +799,7 @@ function ObjectiveBanner({ stateV2 }: { stateV2: StateV2 }) {
   );
 }
 
-function PresentCharactersStrip({
+const PresentCharactersStrip = memo(function PresentCharactersStrip({
   characters,
   latestTurn,
   onCharacterClick,
@@ -810,7 +858,7 @@ function PresentCharactersStrip({
       </div>
     </section>
   );
-}
+});
 
 function AdventureComposer({
   actionMode,
@@ -950,6 +998,7 @@ function placeholderForMode(mode: ActionMode): string {
 }
 
 function StoryPanel({
+  ended,
   backgroundMaintenanceActive,
   characters,
   latestTurn,
@@ -960,6 +1009,7 @@ function StoryPanel({
   process,
   progress
 }: {
+  ended: boolean;
   backgroundMaintenanceActive: boolean;
   characters: CharacterRead[];
   latestTurn: TurnRead | null;
@@ -975,7 +1025,7 @@ function StoryPanel({
   const displayedNarrative = pending ? liveNarrative : liveNarrative || latestTurn?.gm_output;
   const hasLiveProcess =
     process !== null && (pending || maintenanceActive || process.status === "failed");
-  const actionOptions = pending ? [] : latestTurn?.action_options_json ?? [];
+  const actionOptions = pending || ended ? [] : latestTurn?.action_options_json ?? [];
   const settlement = useMemo(
     () => (latestTurn ? buildTurnSettlement(latestTurn) : null),
     [latestTurn]
@@ -1111,14 +1161,15 @@ function TurnSettlementCard({ settlement }: { settlement: TurnSettlementView }) 
           <h3 className="mt-1 font-black">结算摘要</h3>
         </div>
         <span className="px-badge">
-          {settlement.hasChanges ? `${settlement.sections.length} 类变化` : "暂无结构化结算"}
+          {{ confirmed: "已核验", pending: "整理中", skipped: "已跳过", failed: "整理失败", rejected: "未采用", legacy: "旧记录 · 未核验" }[settlement.status]}
         </span>
       </div>
 
+      <p className="mt-2 text-xs text-[color:var(--muted)]">{settlement.message}</p>
       <ul className="mt-3 grid gap-1.5 pl-4 text-sm leading-6">
         {(settlement.summary.length > 0
           ? settlement.summary
-          : ["本回合暂无可结构化结算。"]).map((item) => (
+          : [settlement.status === "confirmed" ? "本回合没有持续状态变化。" : "状态尚未确认。"]).map((item) => (
           <li className="px-wrap list-disc" key={item}>{item}</li>
         ))}
       </ul>
